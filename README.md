@@ -14,7 +14,11 @@ Automated news alerts delivered to a **Discord** channel via **GitHub Actions**,
 | Evening | 19:30 | 12:30 |
 
 - Reads RSS feeds covering **AI/ML**, **Java/JVM**, **Software Development**, **Finance/Economics**, and **Commodity prices** (oil, gold, rubber, …).
-- OpenAI filters only relevant articles and produces a concise, topic-grouped summary.
+- Token-optimized pipeline:
+  - keeps only the **first 5 recent articles per topic**,
+  - prefilters with a **topic keyword map** before AI,
+  - sends only compact fields (`title`, `url`, `topic`) to OpenAI.
+- OpenAI produces a concise, topic-grouped summary from the prefiltered shortlist.
 - Summary is sent to Discord with source URLs.
 
 ### 2 · Breaking-News Monitor (every 2 hours)
@@ -26,6 +30,11 @@ Checks continuously for high-impact events:
 - Wars, peace deals, geopolitical escalations
 - Large corporate collapses / mergers with global market impact
 - Supply-chain shocks or commodity crises
+
+Token optimization for breaking-news:
+- limit feed intake (top 5 per feed),
+- keyword prefilter before OpenAI,
+- only compact article payload (`title` + `url`) is sent to the model.
 
 **Quiet hours (22:00 – 06:00 VNT):** alerts are stored in **Firebase Firestore** and delivered in a batch immediately after 06:00 VNT.
 
@@ -107,3 +116,15 @@ You can also trigger them manually via **Actions → workflow name → Run workf
 | Discord webhook | Notification delivery |
 | CoinGecko API | Real-time Bitcoin price (free, no key needed) |
 | RSS feeds | News source (AI, Java, Dev, Finance, Commodities) |
+
+---
+
+## Keyword map (daily digest prefilter)
+
+Each topic uses a dedicated keyword list for rule-based filtering before OpenAI.
+
+- **AI/ML**: `gpt`, `gemini`, `claude`, `llama`, `mistral`, `openai`, `anthropic`, `deepmind`, `model`, `ai agent`, `reasoning`, `multimodal`, `fine-tuning`
+- **Java/JVM**: `java`, `jvm`, `spring`, `spring boot`, `kotlin`, `gradle`, `maven`, `quarkus`, `micronaut`, `virtual threads`, `jdk`, `openjdk`
+- **Developer**: `culture`, `performance`, `framework`, `architecture`, `design`, `scalability`, `reliability`, `observability`, `refactoring`, `clean code`, `engineering`, `developer experience`, `testing`, `devops`, `api`, `platform`, `security`
+- **Finance/Economics**: `inflation`, `interest rate`, `federal reserve`, `central bank`, `stocks`, `bonds`, `recession`, `gdp`, `unemployment`, `earnings`, `market`, `tariff`
+- **Commodities**: `oil`, `gold`, `gas`, `rubber`, `copper`, `silver`, `crude`, `opec`, `supply`, `demand`, `commodity`

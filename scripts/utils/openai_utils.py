@@ -35,7 +35,7 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> str:
     articles_text = "\n\n".join(
         f"Title: {a.get('title', '')}\n"
         f"URL: {a.get('link', '')}\n"
-        f"Excerpt: {str(a.get('summary', ''))[:400]}"
+        f"Topic: {a.get('topic', '')}"
         for a in articles
     )
 
@@ -69,7 +69,7 @@ Produce a clean, concise report in English."""
                 },
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=2000,
+            max_tokens=1200,
         ),
         resource_name="OpenAI summarise_articles",
         retry_exceptions=(OpenAIError,),
@@ -93,8 +93,7 @@ def detect_breaking_news(
     """
     articles_text = "\n\n".join(
         f"Title: {a.get('title', '')}\n"
-        f"URL: {a.get('link', '')}\n"
-        f"Excerpt: {str(a.get('summary', ''))[:300]}"
+        f"URL: {a.get('link', '')}"
         for a in articles
     )
 
