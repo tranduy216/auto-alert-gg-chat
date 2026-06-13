@@ -3,6 +3,8 @@
 import json
 import requests
 
+from .retry_utils import call_with_retry
+
 
 def send_message(webhook_url: str, text: str) -> None:
     """Send a plain-text message to a Discord webhook.
@@ -15,10 +17,17 @@ def send_message(webhook_url: str, text: str) -> None:
         requests.HTTPError: If the request fails.
     """
     payload = {"content": text}
-    response = requests.post(
-        webhook_url,
-        headers={"Content-Type": "application/json"},
-        data=json.dumps(payload),
-        timeout=15,
+    def _send() -> None:
+        response = requests.post(
+            webhook_url,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(payload),
+            timeout=15,
+        )
+        response.raise_for_status()
+
+    call_with_retry(
+        _send,
+        resource_name="Discord webhook",
+        retry_exceptions=(requests.RequestException,),
     )
-    response.raise_for_status()
