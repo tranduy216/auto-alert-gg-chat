@@ -40,6 +40,7 @@ from utils.firebase_utils import (
 )
 from utils.discord_webhook import send_message
 from utils.openai_utils import detect_breaking_news
+from utils.retry_utils import call_with_retry
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -87,16 +88,24 @@ def is_flush_run(vnt_time: datetime) -> bool:
 def get_bitcoin_price() -> dict:
     """Fetch Bitcoin's USD price and 24-h percentage change from CoinGecko."""
     try:
-        response = requests.get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={
-                "ids": "bitcoin",
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-            },
-            timeout=10,
+        def _fetch() -> requests.Response:
+            response = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={
+                    "ids": "bitcoin",
+                    "vs_currencies": "usd",
+                    "include_24hr_change": "true",
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response
+
+        response = call_with_retry(
+            _fetch,
+            resource_name="CoinGecko API",
+            retry_exceptions=(requests.RequestException,),
         )
-        response.raise_for_status()
         btc = response.json().get("bitcoin", {})
         return {
             "price": btc.get("usd", 0),
@@ -115,7 +124,11 @@ def fetch_news_articles() -> list:
     articles: list = []
     for feed_url in BREAKING_NEWS_FEEDS:
         try:
-            feed = feedparser.parse(feed_url)
+            feed = call_with_retry(
+                lambda url=feed_url: feedparser.parse(url),
+                resource_name=f"RSS feed {feed_url}",
+                retry_exceptions=(OSError, ValueError),
+            )
             for entry in feed.entries[:MAX_ARTICLES_PER_FEED]:
                 articles.append(
                     {

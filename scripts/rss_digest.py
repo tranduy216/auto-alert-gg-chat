@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.discord_webhook import send_message
 from utils.openai_utils import summarise_articles
+from utils.retry_utils import call_with_retry
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -84,7 +85,11 @@ def fetch_recent_articles(hours: int = 24) -> list:
 
     for feed_info in RSS_FEEDS:
         try:
-            feed = feedparser.parse(feed_info["url"])
+            feed = call_with_retry(
+                lambda url=feed_info["url"]: feedparser.parse(url),
+                resource_name=f"RSS feed {feed_info['url']}",
+                retry_exceptions=(OSError, ValueError),
+            )
             for entry in feed.entries:
                 pub_time = _parse_entry_time(entry)
                 if pub_time is None or pub_time < cutoff:
