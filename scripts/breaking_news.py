@@ -8,7 +8,7 @@ hours.
 Workflow:
 1. Fetch current Bitcoin price (CoinGecko free API).
 2. Fetch recent articles from financial / general news RSS feeds.
-3. Ask OpenAI to detect high-impact events (Bitcoin ±4%, central-bank
+3. Ask Google Gemini to detect high-impact events (Bitcoin ±4%, central-bank
    decisions, conflicts, etc.).
 4. If breaking news is found:
    - Quiet hours (22:00–06:00 VNT): queue alert in Firebase.
@@ -16,7 +16,7 @@ Workflow:
 5. At 06:00 VNT: flush all queued alerts before the regular news check.
 
 Required environment variables:
-  OPENAI_API_KEY                  – OpenAI API key
+  GEMINI_API_KEY                  – Google Gemini API key
   DISCORD_BREAKING_WEBHOOK_URL    – Discord incoming webhook URL for the breaking-news channel
   FIREBASE_SERVICE_ACCOUNT        – Firebase service-account JSON (enables queue)
 """
@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 import feedparser  # type: ignore
 import pytz
 import requests
-from openai import OpenAIError
+from google.api_core import exceptions as google_exceptions  # type: ignore
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -40,7 +40,7 @@ from utils.firebase_utils import (
     was_recently_alerted,
 )
 from utils.discord_webhook import send_message
-from utils.openai_utils import detect_breaking_news
+from utils.gemini_utils import detect_breaking_news
 from utils.retry_utils import call_with_retry
 from utils.article_prefilter import (
     BREAKING_NEWS_KEYWORDS,
@@ -244,12 +244,12 @@ def main() -> None:
         )
 
     # Step 3 – AI analysis
-    print("[breaking_news] Analysing with OpenAI…")
+    print("[breaking_news] Analysing with Gemini…")
     try:
         result = detect_breaking_news(articles, bitcoin_data)
-    except OpenAIError as exc:
+    except google_exceptions.GoogleAPIError as exc:
         print(
-            f"[breaking_news] OpenAI error – skipping analysis: {exc}",
+            f"[breaking_news] Gemini API error – skipping analysis: {exc}",
             file=sys.stderr,
         )
         return

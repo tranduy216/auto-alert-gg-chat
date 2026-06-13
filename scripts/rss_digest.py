@@ -5,11 +5,12 @@ Runs twice a day (7:30 AM VNT and 7:30 PM VNT via GitHub Actions cron).
 
 Workflow:
 1. Fetch RSS articles published in the last 24 hours from curated feeds.
-2. Use OpenAI to filter relevant topics and produce a concise summary.
+2. Use Google Gemini to select the 2 most important articles per topic and
+   produce a concise summary.
 3. Send the digest to a Discord channel via an incoming webhook.
 
 Required environment variables:
-  OPENAI_API_KEY             – OpenAI API key
+  GEMINI_API_KEY             – Google Gemini API key
   DISCORD_DAILY_WEBHOOK_URL  – Discord incoming webhook URL for the daily digest channel
 """
 
@@ -20,13 +21,13 @@ from datetime import datetime, timedelta, timezone
 
 import feedparser  # type: ignore
 import pytz
-from openai import OpenAIError
+from google.api_core import exceptions as google_exceptions  # type: ignore
 
 # Allow running as a top-level script inside the ``scripts/`` directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.discord_webhook import send_message
-from utils.openai_utils import summarise_articles
+from utils.gemini_utils import summarise_articles
 from utils.retry_utils import call_with_retry
 from utils.article_prefilter import (
     TOPIC_KEYWORDS,
@@ -83,7 +84,7 @@ RSS_FEEDS = [
     },
 ]
 
-MAX_ARTICLES_PER_TOPIC = 5
+MAX_ARTICLES_PER_TOPIC = 10
 
 
 def fetch_recent_articles(hours: int = 24) -> list:
@@ -178,11 +179,11 @@ def main() -> None:
         print("[rss_digest] No recent articles – skipping digest.")
         return
 
-    print("[rss_digest] Summarising with OpenAI…")
+    print("[rss_digest] Summarising with Gemini…")
     try:
         summary = summarise_articles(articles)
-    except OpenAIError as exc:
-        print(f"[rss_digest] OpenAI error – skipping digest: {exc}", file=sys.stderr)
+    except google_exceptions.GoogleAPIError as exc:
+        print(f"[rss_digest] Gemini API error – skipping digest: {exc}", file=sys.stderr)
         return
 
     message = format_digest_message(summary, now_vnt)
