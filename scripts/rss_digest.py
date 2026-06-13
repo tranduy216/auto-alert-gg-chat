@@ -15,6 +15,7 @@ Required environment variables:
 
 import os
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import feedparser  # type: ignore
@@ -25,6 +26,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.discord_webhook import send_message
 from utils.openai_utils import summarise_articles
+from utils.article_prefilter import (
+    TOPIC_KEYWORDS,
+    filter_articles_by_topic_keywords,
+)
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -76,6 +81,8 @@ RSS_FEEDS = [
     },
 ]
 
+MAX_ARTICLES_PER_TOPIC = 5
+
 
 def fetch_recent_articles(hours: int = 24) -> list:
     """Return articles published within the last *hours* hours."""
@@ -93,7 +100,6 @@ def fetch_recent_articles(hours: int = 24) -> list:
                     {
                         "title": getattr(entry, "title", ""),
                         "link": getattr(entry, "link", ""),
-                        "summary": getattr(entry, "summary", ""),
                         "published": pub_time.isoformat(),
                         "topic": feed_info["topic"],
                     }
@@ -104,7 +110,20 @@ def fetch_recent_articles(hours: int = 24) -> list:
                 file=sys.stderr,
             )
 
-    return articles
+    topic_groups: dict = defaultdict(list)
+    for article in articles:
+        topic_groups[article.get("topic", "")].append(article)
+
+    limited_articles: list = []
+    for topic in TOPIC_KEYWORDS.keys():
+        ranked = sorted(
+            topic_groups.get(topic, []),
+            key=lambda item: item.get("published", ""),
+            reverse=True,
+        )
+        limited_articles.extend(ranked[:MAX_ARTICLES_PER_TOPIC])
+
+    return limited_articles
 
 
 def _parse_entry_time(entry) -> datetime | None:
@@ -139,8 +158,15 @@ def main() -> None:
     print(f"[rss_digest] Starting at {now_vnt.strftime('%Y-%m-%d %H:%M %Z')}")
 
     print("[rss_digest] Fetching RSS feeds…")
-    articles = fetch_recent_articles(hours=24)
-    print(f"[rss_digest] {len(articles)} recent articles found.")
+    recent_articles = fetch_recent_articles(hours=24)
+    print(f"[rss_digest] {len(recent_articles)} recent articles found.")
+
+    articles = filter_articles_by_topic_keywords(
+        recent_articles,
+        TOPIC_KEYWORDS,
+        max_per_topic=MAX_ARTICLES_PER_TOPIC,
+    )
+    print(f"[rss_digest] {len(articles)} keyword-matched articles selected.")
 
     if not articles:
         print("[rss_digest] No recent articles – skipping digest.")

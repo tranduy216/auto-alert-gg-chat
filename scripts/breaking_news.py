@@ -40,6 +40,10 @@ from utils.firebase_utils import (
 )
 from utils.discord_webhook import send_message
 from utils.openai_utils import detect_breaking_news
+from utils.article_prefilter import (
+    BREAKING_NEWS_KEYWORDS,
+    filter_articles_by_keywords,
+)
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -58,7 +62,8 @@ BREAKING_NEWS_FEEDS = [
 ]
 
 # Maximum articles to pull from each feed (avoid huge prompts)
-MAX_ARTICLES_PER_FEED = 10
+MAX_ARTICLES_PER_FEED = 5
+MAX_ARTICLES_FOR_AI = 12
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +126,6 @@ def fetch_news_articles() -> list:
                     {
                         "title": getattr(entry, "title", ""),
                         "link": getattr(entry, "link", ""),
-                        "summary": str(getattr(entry, "summary", ""))[:500],
                     }
                 )
         except (OSError, ValueError) as exc:
@@ -207,8 +211,15 @@ def main() -> None:
 
     # Step 2 – gather intelligence
     print("[breaking_news] Fetching news articles…")
-    articles = fetch_news_articles()
-    print(f"[breaking_news] {len(articles)} articles fetched.")
+    raw_articles = fetch_news_articles()
+    print(f"[breaking_news] {len(raw_articles)} articles fetched.")
+
+    articles = filter_articles_by_keywords(
+        raw_articles,
+        BREAKING_NEWS_KEYWORDS,
+        max_items=MAX_ARTICLES_FOR_AI,
+    )
+    print(f"[breaking_news] {len(articles)} keyword-matched articles selected.")
 
     print("[breaking_news] Fetching Bitcoin price…")
     bitcoin_data = get_bitcoin_price()
