@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import feedparser  # type: ignore
 import pytz
 import requests
+from openai import OpenAIError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -244,7 +245,14 @@ def main() -> None:
 
     # Step 3 – AI analysis
     print("[breaking_news] Analysing with OpenAI…")
-    result = detect_breaking_news(articles, bitcoin_data)
+    try:
+        result = detect_breaking_news(articles, bitcoin_data)
+    except OpenAIError as exc:
+        print(
+            f"[breaking_news] OpenAI error – skipping analysis: {exc}",
+            file=sys.stderr,
+        )
+        return
 
     if not result.get("has_breaking_news"):
         print("[breaking_news] No breaking news detected.")

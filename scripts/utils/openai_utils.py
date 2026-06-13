@@ -2,13 +2,24 @@
 
 import json
 import os
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from typing import Optional
-
-from openai import OpenAI, OpenAIError  # type: ignore
+from openai import OpenAI, OpenAIError, RateLimitError  # type: ignore
 
 from .retry_utils import call_with_retry
+
+
+def _is_quota_exceeded(exc: Exception) -> bool:
+    """Return True when *exc* is a permanent quota-exhaustion error.
+
+    A ``RateLimitError`` with ``code == 'insufficient_quota'`` means the
+    account has no credits left.  Retrying will never succeed, so the caller
+    should raise immediately instead of burning retry attempts.
+    """
+    return (
+        isinstance(exc, RateLimitError)
+        and getattr(exc, "code", None) == "insufficient_quota"
+    )
 
 _client: Optional[OpenAI] = None
 
@@ -73,6 +84,7 @@ Produce a clean, concise report in English."""
         ),
         resource_name="OpenAI summarise_articles",
         retry_exceptions=(OpenAIError,),
+        no_retry_predicate=_is_quota_exceeded,
     )
     return response.choices[0].message.content.strip()
 
@@ -151,5 +163,6 @@ Respond ONLY with valid JSON in this exact schema:
         ),
         resource_name="OpenAI detect_breaking_news",
         retry_exceptions=(OpenAIError,),
+        no_retry_predicate=_is_quota_exceeded,
     )
     return json.loads(response.choices[0].message.content)

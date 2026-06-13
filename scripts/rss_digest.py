@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import feedparser  # type: ignore
 import pytz
+from openai import OpenAIError
 
 # Allow running as a top-level script inside the ``scripts/`` directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -178,7 +179,11 @@ def main() -> None:
         return
 
     print("[rss_digest] Summarising with OpenAI…")
-    summary = summarise_articles(articles)
+    try:
+        summary = summarise_articles(articles)
+    except OpenAIError as exc:
+        print(f"[rss_digest] OpenAI error – skipping digest: {exc}", file=sys.stderr)
+        return
 
     message = format_digest_message(summary, now_vnt)
 
