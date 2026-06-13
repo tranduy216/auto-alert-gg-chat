@@ -1,0 +1,36 @@
+name: Daily RSS Digest
+
+on:
+  schedule:
+    # 7:30 AM VNT (UTC+7) = 00:30 UTC
+    - cron: '30 0 * * *'
+    # 7:30 PM VNT (UTC+7) = 12:30 UTC
+    - cron: '30 12 * * *'
+  workflow_dispatch: {}   # allow manual trigger for testing
+
+jobs:
+  digest:
+    name: Fetch, summarise and send daily digest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily RSS digest
+        working-directory: scripts
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CHAT_WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}
+        run: python rss_digest.py

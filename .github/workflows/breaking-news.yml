@@ -1,0 +1,38 @@
+name: Breaking News Monitor
+
+on:
+  schedule:
+    # Every 2 hours (UTC): checks for breaking news and queues during quiet hours.
+    # Quiet hours in VNT (UTC+7): 22:00–06:00 VNT = 15:00–23:00 UTC.
+    - cron: '0 0,2,4,6,8,10,12,14,16,18,20,22 * * *'
+    # 23:00 UTC = 06:00 VNT: flush alerts held during quiet hours.
+    - cron: '0 23 * * *'
+  workflow_dispatch: {}   # allow manual trigger for testing
+
+jobs:
+  breaking-news:
+    name: Check for high-impact financial news
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run breaking-news monitor
+        working-directory: scripts
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CHAT_WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python breaking_news.py
