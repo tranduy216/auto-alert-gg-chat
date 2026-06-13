@@ -1,34 +1,36 @@
-"""OpenAI helpers for news summarisation and breaking-news detection."""
+"""Google Gemini helpers for news summarisation and breaking-news detection."""
 
 import json
 import os
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from typing import Optional
-
-from openai import OpenAI, OpenAIError  # type: ignore
+import google.generativeai as genai  # type: ignore
+from google.api_core import exceptions as google_exceptions  # type: ignore
 
 from .retry_utils import call_with_retry
 
-_client: Optional[OpenAI] = None
+GEMINI_MODEL = "gemini-1.5-flash"
+
+_model: Optional[genai.GenerativeModel] = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    return _client
+def _get_model() -> genai.GenerativeModel:
+    global _model
+    if _model is None:
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        _model = genai.GenerativeModel(GEMINI_MODEL)
+    return _model
 
 
 # ---------------------------------------------------------------------------
-# Daily digest – summarise & filter RSS articles
+# Daily digest – select top-2 per topic and summarise
 # ---------------------------------------------------------------------------
 
 def summarise_articles(articles: List[Dict[str, Any]]) -> str:
-    """Filter and summarise a list of RSS articles by topic.
+    """From each topic select the 2 most important articles and produce a digest.
 
-    Topics of interest: AI/ML, Java, Software Development, Finance/Economics,
-    Commodity prices (oil, gold, rubber, etc.).
+    For every topic group the model picks the 2 most impactful articles,
+    writes a 2-3 sentence summary for each, and groups them under topic headings.
 
     Returns a formatted multi-section report string.
     """
@@ -41,18 +43,17 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> str:
 
     prompt = f"""You are a professional news curator. Review the articles below and:
 
-1. Keep ONLY articles that are relevant to these topics:
-   - Artificial Intelligence / Machine Learning
-   - Java programming / JVM ecosystem
-   - Software development & engineering
-   - Finance, economics, global markets
-   - Commodity prices: oil, gold, rubber, or other major commodities
-
-2. For each relevant article write a 2-3 sentence summary.
+1. From EACH topic group, select the 2 most important and impactful articles.
+   Prioritise articles that report major developments, have broad market or
+   industry impact, or break new ground.
+2. For each selected article write a 2-3 sentence summary.
 3. Group the selected articles under clear topic headings.
 4. For every article include its URL.
-5. Use emoji icons to make the output scannable (e.g. 🤖 for AI, ☕ for Java, 💻 for Dev, 💰 for Finance, 🛢️ for commodities).
-6. If no relevant articles are found, say so briefly.
+5. Use emoji icons to make the output scannable
+   (🤖 AI, ☕ Java, 💻 Dev, 💰 Finance, 🛢️ Commodities).
+6. If a topic has no relevant articles, omit that section entirely.
+
+Select at most 2 articles per topic.
 
 Articles to review:
 {articles_text}
@@ -60,21 +61,11 @@ Articles to review:
 Produce a clean, concise report in English."""
 
     response = call_with_retry(
-        lambda: _get_client().chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a professional news curator and financial analyst.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=1200,
-        ),
-        resource_name="OpenAI summarise_articles",
-        retry_exceptions=(OpenAIError,),
+        lambda: _get_model().generate_content(prompt),
+        resource_name="Gemini summarise_articles",
+        retry_exceptions=(google_exceptions.GoogleAPIError,),
     )
-    return response.choices[0].message.content.strip()
+    return response.text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +125,11 @@ Respond ONLY with valid JSON in this exact schema:
 }}"""
 
     response = call_with_retry(
-        lambda: _get_client().chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional financial analyst. "
-                        "Always respond with valid JSON only."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=1200,
-            response_format={"type": "json_object"},
+        lambda: _get_model().generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"},
         ),
-        resource_name="OpenAI detect_breaking_news",
-        retry_exceptions=(OpenAIError,),
+        resource_name="Gemini detect_breaking_news",
+        retry_exceptions=(google_exceptions.GoogleAPIError,),
     )
-    return json.loads(response.choices[0].message.content)
+    return json.loads(response.text)
