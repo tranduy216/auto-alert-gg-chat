@@ -54,9 +54,15 @@ requirements.txt
 
 ## Setup
 
-### 1. Discord – create an incoming webhook
+### 1. Discord – create two incoming webhooks
 
-1. Open your Discord server → go to the channel that should receive alerts.
+Create one webhook for each channel:
+
+- **Daily digest channel** — receives the twice-daily RSS summaries.
+- **Breaking news channel** — receives high-impact alerts.
+
+For each channel:
+1. Open your Discord server → go to the channel.
 2. Click the gear icon (**Edit Channel**) → **Integrations** → **Webhooks** → **New Webhook**.
 3. Give it a name, then click **Copy Webhook URL**.
 
@@ -74,7 +80,8 @@ In your repository go to **Settings → Secrets and variables → Actions → Ne
 | Secret name | Value |
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI API key |
-| `DISCORD_WEBHOOK_URL` | The webhook URL from step 1 |
+| `DISCORD_DAILY_WEBHOOK_URL` | Webhook URL for the daily digest channel (step 1) |
+| `DISCORD_BREAKING_WEBHOOK_URL` | Webhook URL for the breaking news channel (step 1) |
 | `FIREBASE_SERVICE_ACCOUNT` | The entire content of the service-account JSON from step 2 |
 
 > `FIREBASE_SERVICE_ACCOUNT` is optional. Without it the monitor still works but
@@ -94,6 +101,6 @@ You can also trigger them manually via **Actions → workflow name → Run workf
 | GitHub Actions | Workflow scheduler & runner |
 | OpenAI `gpt-4o-mini` | News filtering, summarisation, breaking-news detection |
 | Firebase Firestore | Quiet-hours alert queue & deduplication |
-| Discord webhook | Notification delivery |
+| Discord webhooks (×2) | Notification delivery (daily digest & breaking news) |
 | CoinGecko API | Real-time Bitcoin price (free, no key needed) |
 | RSS feeds | News source (AI, Java, Dev, Finance, Commodities) |

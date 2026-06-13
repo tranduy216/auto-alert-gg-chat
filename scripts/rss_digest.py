@@ -9,8 +9,8 @@ Workflow:
 3. Send the digest to a Discord channel via an incoming webhook.
 
 Required environment variables:
-  OPENAI_API_KEY       – OpenAI API key
-  DISCORD_WEBHOOK_URL  – Discord incoming webhook URL
+  OPENAI_API_KEY             – OpenAI API key
+  DISCORD_DAILY_WEBHOOK_URL  – Discord incoming webhook URL for the daily digest channel
 """
 
 import os
@@ -130,9 +130,9 @@ def format_digest_message(summary: str, now_vnt: datetime) -> str:
 
 
 def main() -> None:
-    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    webhook_url = os.environ.get("DISCORD_DAILY_WEBHOOK_URL")
     if not webhook_url:
-        print("Error: DISCORD_WEBHOOK_URL is not set.", file=sys.stderr)
+        print("Error: DISCORD_DAILY_WEBHOOK_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     now_vnt = datetime.now(VNT)
