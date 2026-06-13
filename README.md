@@ -54,11 +54,20 @@ requirements.txt
 
 ## Setup
 
-### 1. Discord – create an incoming webhook
+### 1. Discord – create two incoming webhooks
 
-1. Open your Discord server → go to the channel that should receive alerts.
+This bot uses **two separate Discord webhooks** — one per channel:
+
+| Channel purpose | Env var used |
+|---|---|
+| Daily RSS digest | `DISCORD_DAILY_WEBHOOK_URL` |
+| Breaking-news alerts | `DISCORD_BREAKING_WEBHOOK_URL` |
+
+For **each** channel:
+
+1. Open your Discord server → go to the target channel.
 2. Click the gear icon (**Edit Channel**) → **Integrations** → **Webhooks** → **New Webhook**.
-3. Give it a name, then click **Copy Webhook URL**.
+3. Give it a name (e.g. `Daily Digest Bot` or `Breaking News Bot`), then click **Copy Webhook URL**.
 
 ### 2. Firebase – create a Firestore database
 
@@ -74,7 +83,8 @@ In your repository go to **Settings → Secrets and variables → Actions → Ne
 | Secret name | Value |
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI API key |
-| `DISCORD_WEBHOOK_URL` | The webhook URL from step 1 |
+| `DISCORD_DAILY_WEBHOOK_URL` | Webhook URL for the daily-digest Discord channel (step 1) |
+| `DISCORD_BREAKING_WEBHOOK_URL` | Webhook URL for the breaking-news Discord channel (step 1) |
 | `FIREBASE_SERVICE_ACCOUNT` | The entire content of the service-account JSON from step 2 |
 
 > `FIREBASE_SERVICE_ACCOUNT` is optional. Without it the monitor still works but

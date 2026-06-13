@@ -16,9 +16,9 @@ Workflow:
 5. At 06:00 VNT: flush all queued alerts before the regular news check.
 
 Required environment variables:
-  OPENAI_API_KEY            – OpenAI API key
-  DISCORD_WEBHOOK_URL       – Discord incoming webhook URL
-  FIREBASE_SERVICE_ACCOUNT  – Firebase service-account JSON (enables queue)
+  OPENAI_API_KEY                  – OpenAI API key
+  DISCORD_BREAKING_WEBHOOK_URL    – Discord incoming webhook URL for the breaking-news channel
+  FIREBASE_SERVICE_ACCOUNT        – Firebase service-account JSON (enables queue)
 """
 
 import os
@@ -187,9 +187,9 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    webhook_url = os.environ.get("DISCORD_BREAKING_WEBHOOK_URL")
     if not webhook_url:
-        print("Error: DISCORD_WEBHOOK_URL is not set.", file=sys.stderr)
+        print("Error: DISCORD_BREAKING_WEBHOOK_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     now_vnt = datetime.now(VNT)
