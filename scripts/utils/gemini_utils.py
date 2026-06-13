@@ -9,7 +9,7 @@ from google.api_core import exceptions as google_exceptions  # type: ignore
 
 from .retry_utils import call_with_retry
 
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 _model: Optional[genai.GenerativeModel] = None
 

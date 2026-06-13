@@ -250,9 +250,7 @@ def main() -> None:
     except google_exceptions.GoogleAPIError as exc:
         print(
             f"[breaking_news] Gemini API error – skipping analysis: {exc}",
-            file=sys.stderr,
-        )
-        return
+        sys.exit(1)
 
     if not result.get("has_breaking_news"):
         print("[breaking_news] No breaking news detected.")
