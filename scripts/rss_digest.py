@@ -125,7 +125,7 @@ def _parse_entry_time(entry) -> datetime | None:
 def format_digest_message(summary: str, now_vnt: datetime) -> str:
     """Wrap the AI summary in a Discord-friendly header."""
     timestamp = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
-    header = f"📰 *Daily News Digest* — {timestamp}\n{'─' * 44}\n\n"
+    header = f"📰 **Daily News Digest** — {timestamp}\n{'─' * 44}\n\n"
     return header + summary
 
 

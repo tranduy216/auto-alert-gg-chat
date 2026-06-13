@@ -141,13 +141,13 @@ def format_breaking_alert(alert: dict, now_vnt: datetime) -> str:
     )
 
     parts = [
-        f"🚨 *BREAKING NEWS* — {timestamp}",
+        f"🚨 **BREAKING NEWS** — {timestamp}",
         "─" * 44,
-        f"📌 *{alert.get('headline', 'Breaking News')}*",
+        f"📌 **{alert.get('headline', 'Breaking News')}**",
         "",
-        f"💥 *Impact:* {alert.get('impact', '')}",
+        f"💥 **Impact:** {alert.get('impact', '')}",
         "",
-        f"📋 *Summary:*\n{alert.get('summary', '')}",
+        f"📋 **Summary:**\n{alert.get('summary', '')}",
     ]
     if urls_lines:
         parts += ["", urls_lines]
@@ -168,7 +168,7 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
 
     print(f"[breaking_news] Flushing {len(queued)} queued alert(s)…")
     header = (
-        f"📬 *Queued Alerts* (held during 22:00–06:00 VNT) "
+        f"📬 **Queued Alerts** (held during 22:00–06:00 VNT) "
         f"— {now_vnt.strftime('%d/%m/%Y %H:%M (VNT)')}\n{'─' * 44}"
     )
     send_message(webhook_url, header)
@@ -177,7 +177,7 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
         alert = item.get("alert", {})
         queued_at = item.get("queued_at_str", "earlier")
         message = format_breaking_alert(alert, now_vnt)
-        send_message(webhook_url, f"_Originally detected at {queued_at}_\n{message}")
+        send_message(webhook_url, f"*Originally detected at {queued_at}*\n{message}")
         mark_alert_sent(item["_doc_id"])
         print(f"[breaking_news] Flushed: {alert.get('headline', 'N/A')}")
 
