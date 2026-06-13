@@ -183,6 +183,7 @@ def main() -> None:
     try:
         summary = summarise_articles(articles)
     except google_exceptions.GoogleAPIError as exc:
+        print(f"[rss_digest] Gemini API error – skipping digest: {exc}", file=sys.stderr)
         sys.exit(1)
 
     message = format_digest_message(summary, now_vnt)

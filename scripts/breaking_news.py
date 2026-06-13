@@ -248,8 +248,7 @@ def main() -> None:
     try:
         result = detect_breaking_news(articles, bitcoin_data)
     except google_exceptions.GoogleAPIError as exc:
-        print(
-            f"[breaking_news] Gemini API error – skipping analysis: {exc}",
+        print(f"[breaking_news] Gemini API error – skipping analysis: {exc}", file=sys.stderr)
         sys.exit(1)
 
     if not result.get("has_breaking_news"):
