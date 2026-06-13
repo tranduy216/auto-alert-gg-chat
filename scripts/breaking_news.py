@@ -12,12 +12,12 @@ Workflow:
    decisions, conflicts, etc.).
 4. If breaking news is found:
    - Quiet hours (22:00–06:00 VNT): queue alert in Firebase.
-   - Otherwise: send immediately to Google Chat.
+   - Otherwise: send immediately to Discord.
 5. At 06:00 VNT: flush all queued alerts before the regular news check.
 
 Required environment variables:
   OPENAI_API_KEY            – OpenAI API key
-  GOOGLE_CHAT_WEBHOOK_URL   – Google Chat incoming webhook URL
+  DISCORD_WEBHOOK_URL       – Discord incoming webhook URL
   FIREBASE_SERVICE_ACCOUNT  – Firebase service-account JSON (enables queue)
 """
 
@@ -38,7 +38,7 @@ from utils.firebase_utils import (
     record_sent_alert,
     was_recently_alerted,
 )
-from utils.google_chat import send_message
+from utils.discord_webhook import send_message
 from utils.openai_utils import detect_breaking_news
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -134,20 +134,20 @@ def fetch_news_articles() -> list:
 # ---------------------------------------------------------------------------
 
 def format_breaking_alert(alert: dict, now_vnt: datetime) -> str:
-    """Return a Google Chat message string for one breaking-news alert."""
+    """Return a Discord message string for one breaking-news alert."""
     timestamp = now_vnt.strftime("%d/%m/%Y %H:%M (VNT)")
     urls_lines = "\n".join(
         f"🔗 {url}" for url in alert.get("urls", []) if url
     )
 
     parts = [
-        f"🚨 *BREAKING NEWS* — {timestamp}",
+        f"🚨 **BREAKING NEWS** — {timestamp}",
         "─" * 44,
-        f"📌 *{alert.get('headline', 'Breaking News')}*",
+        f"📌 **{alert.get('headline', 'Breaking News')}**",
         "",
-        f"💥 *Impact:* {alert.get('impact', '')}",
+        f"💥 **Impact:** {alert.get('impact', '')}",
         "",
-        f"📋 *Summary:*\n{alert.get('summary', '')}",
+        f"📋 **Summary:**\n{alert.get('summary', '')}",
     ]
     if urls_lines:
         parts += ["", urls_lines]
@@ -168,7 +168,7 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
 
     print(f"[breaking_news] Flushing {len(queued)} queued alert(s)…")
     header = (
-        f"📬 *Queued Alerts* (held during 22:00–06:00 VNT) "
+        f"📬 **Queued Alerts** (held during 22:00–06:00 VNT) "
         f"— {now_vnt.strftime('%d/%m/%Y %H:%M (VNT)')}\n{'─' * 44}"
     )
     send_message(webhook_url, header)
@@ -177,7 +177,7 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
         alert = item.get("alert", {})
         queued_at = item.get("queued_at_str", "earlier")
         message = format_breaking_alert(alert, now_vnt)
-        send_message(webhook_url, f"_Originally detected at {queued_at}_\n{message}")
+        send_message(webhook_url, f"*Originally detected at {queued_at}*\n{message}")
         mark_alert_sent(item["_doc_id"])
         print(f"[breaking_news] Flushed: {alert.get('headline', 'N/A')}")
 
@@ -187,9 +187,9 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    webhook_url = os.environ.get("GOOGLE_CHAT_WEBHOOK_URL")
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
-        print("Error: GOOGLE_CHAT_WEBHOOK_URL is not set.", file=sys.stderr)
+        print("Error: DISCORD_WEBHOOK_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     now_vnt = datetime.now(VNT)

@@ -1,6 +1,6 @@
 # auto-alert-gg-chat
 
-Automated news alerts delivered to a **Google Chat** space via **GitHub Actions**, **OpenAI**, and **Firebase**.
+Automated news alerts delivered to a **Discord** channel via **GitHub Actions**, **OpenAI**, and **Firebase**.
 
 ---
 
@@ -15,7 +15,7 @@ Automated news alerts delivered to a **Google Chat** space via **GitHub Actions*
 
 - Reads RSS feeds covering **AI/ML**, **Java/JVM**, **Software Development**, **Finance/Economics**, and **Commodity prices** (oil, gold, rubber, …).
 - OpenAI filters only relevant articles and produces a concise, topic-grouped summary.
-- Summary is sent to Google Chat with source URLs.
+- Summary is sent to Discord with source URLs.
 
 ### 2 · Breaking-News Monitor (every 2 hours)
 
@@ -44,7 +44,7 @@ scripts/
   rss_digest.py             # daily digest entry point
   breaking_news.py          # breaking news entry point
   utils/
-    google_chat.py          # Google Chat webhook helper
+    discord_webhook.py      # Discord webhook helper
     firebase_utils.py       # Firestore queue + deduplication
     openai_utils.py         # OpenAI summarisation & detection
 requirements.txt
@@ -54,10 +54,11 @@ requirements.txt
 
 ## Setup
 
-### 1. Google Chat – create an incoming webhook
+### 1. Discord – create an incoming webhook
 
-1. Open the Google Chat space → **Manage webhooks** → **Add webhook**.
-2. Copy the webhook URL.
+1. Open your Discord server → go to the channel that should receive alerts.
+2. Click the gear icon (**Edit Channel**) → **Integrations** → **Webhooks** → **New Webhook**.
+3. Give it a name, then click **Copy Webhook URL**.
 
 ### 2. Firebase – create a Firestore database
 
@@ -73,7 +74,7 @@ In your repository go to **Settings → Secrets and variables → Actions → Ne
 | Secret name | Value |
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI API key |
-| `GOOGLE_CHAT_WEBHOOK_URL` | The webhook URL from step 1 |
+| `DISCORD_WEBHOOK_URL` | The webhook URL from step 1 |
 | `FIREBASE_SERVICE_ACCOUNT` | The entire content of the service-account JSON from step 2 |
 
 > `FIREBASE_SERVICE_ACCOUNT` is optional. Without it the monitor still works but
@@ -93,6 +94,6 @@ You can also trigger them manually via **Actions → workflow name → Run workf
 | GitHub Actions | Workflow scheduler & runner |
 | OpenAI `gpt-4o-mini` | News filtering, summarisation, breaking-news detection |
 | Firebase Firestore | Quiet-hours alert queue & deduplication |
-| Google Chat webhook | Notification delivery |
+| Discord webhook | Notification delivery |
 | CoinGecko API | Real-time Bitcoin price (free, no key needed) |
 | RSS feeds | News source (AI, Java, Dev, Finance, Commodities) |
