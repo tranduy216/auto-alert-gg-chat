@@ -37,5 +37,3 @@ def call_with_retry(
                 file=sys.stderr,
             )
             time.sleep(RETRY_DELAY_SECONDS)
-
-    raise RuntimeError(f"Retry exhausted for {resource_name}")

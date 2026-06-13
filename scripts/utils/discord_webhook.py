@@ -17,7 +17,7 @@ def send_message(webhook_url: str, text: str) -> None:
         requests.HTTPError: If the request fails.
     """
     payload = {"content": text}
-    def _send() -> None:
+    def _post_webhook() -> None:
         response = requests.post(
             webhook_url,
             headers={"Content-Type": "application/json"},
@@ -27,7 +27,7 @@ def send_message(webhook_url: str, text: str) -> None:
         response.raise_for_status()
 
     call_with_retry(
-        _send,
+        _post_webhook,
         resource_name="Discord webhook",
         retry_exceptions=(requests.RequestException,),
     )
