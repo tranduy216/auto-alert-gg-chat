@@ -6,7 +6,9 @@ from typing import Dict, Any, List
 
 from typing import Optional
 
-from openai import OpenAI  # type: ignore
+from openai import OpenAI, OpenAIError  # type: ignore
+
+from .retry_utils import call_with_retry
 
 _client: Optional[OpenAI] = None
 
@@ -57,16 +59,20 @@ Articles to review:
 
 Produce a clean, concise report in English."""
 
-    response = _get_client().chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a professional news curator and financial analyst.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        max_tokens=1200,
+    response = call_with_retry(
+        lambda: _get_client().chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a professional news curator and financial analyst.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=1200,
+        ),
+        resource_name="OpenAI summarise_articles",
+        retry_exceptions=(OpenAIError,),
     )
     return response.choices[0].message.content.strip()
 
@@ -127,19 +133,23 @@ Respond ONLY with valid JSON in this exact schema:
   ]
 }}"""
 
-    response = _get_client().chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a professional financial analyst. "
-                    "Always respond with valid JSON only."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        max_tokens=1200,
-        response_format={"type": "json_object"},
+    response = call_with_retry(
+        lambda: _get_client().chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional financial analyst. "
+                        "Always respond with valid JSON only."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+        ),
+        resource_name="OpenAI detect_breaking_news",
+        retry_exceptions=(OpenAIError,),
     )
     return json.loads(response.choices[0].message.content)

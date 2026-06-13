@@ -12,6 +12,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 
+from .retry_utils import call_with_retry
+
 _db: Optional[Any] = None
 _firebase_enabled: Optional[bool] = None
 
@@ -52,12 +54,15 @@ def queue_alert(alert: Dict[str, Any], queued_at_str: str) -> None:
     if not is_firebase_enabled():
         return
     db = get_db()
-    db.collection("queued_alerts").add(
-        {
-            "alert": alert,
-            "queued_at_str": queued_at_str,
-            "sent": False,
-        }
+    call_with_retry(
+        lambda: db.collection("queued_alerts").add(
+            {
+                "alert": alert,
+                "queued_at_str": queued_at_str,
+                "sent": False,
+            }
+        ),
+        resource_name="Firestore queued_alerts.add",
     )
 
 
@@ -66,10 +71,13 @@ def get_unsent_queued_alerts() -> List[Dict[str, Any]]:
     if not is_firebase_enabled():
         return []
     db = get_db()
-    docs = (
-        db.collection("queued_alerts")
-        .where("sent", "==", False)
-        .stream()
+    docs = call_with_retry(
+        lambda: (
+            db.collection("queued_alerts")
+            .where("sent", "==", False)
+            .stream()
+        ),
+        resource_name="Firestore queued_alerts.stream",
     )
     alerts = []
     for doc in docs:
@@ -84,7 +92,10 @@ def mark_alert_sent(doc_id: str) -> None:
     if not is_firebase_enabled():
         return
     db = get_db()
-    db.collection("queued_alerts").document(doc_id).update({"sent": True})
+    call_with_retry(
+        lambda: db.collection("queued_alerts").document(doc_id).update({"sent": True}),
+        resource_name="Firestore queued_alerts.update",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -104,12 +115,15 @@ def was_recently_alerted(alert: Dict[str, Any], within_hours: int = 6) -> bool:
     db = get_db()
     key = _alert_hash(alert)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=within_hours)
-    docs = (
-        db.collection("sent_alert_hashes")
-        .where("hash", "==", key)
-        .where("sent_at", ">=", cutoff)
-        .limit(1)
-        .stream()
+    docs = call_with_retry(
+        lambda: (
+            db.collection("sent_alert_hashes")
+            .where("hash", "==", key)
+            .where("sent_at", ">=", cutoff)
+            .limit(1)
+            .stream()
+        ),
+        resource_name="Firestore sent_alert_hashes.stream",
     )
     return any(True for _ in docs)
 
@@ -121,9 +135,12 @@ def record_sent_alert(alert: Dict[str, Any]) -> None:
     from firebase_admin import firestore as _fs  # type: ignore
 
     db = get_db()
-    db.collection("sent_alert_hashes").add(
-        {
-            "hash": _alert_hash(alert),
-            "sent_at": _fs.SERVER_TIMESTAMP,
-        }
+    call_with_retry(
+        lambda: db.collection("sent_alert_hashes").add(
+            {
+                "hash": _alert_hash(alert),
+                "sent_at": _fs.SERVER_TIMESTAMP,
+            }
+        ),
+        resource_name="Firestore sent_alert_hashes.add",
     )
