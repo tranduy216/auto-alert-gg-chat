@@ -1,20 +1,20 @@
-"""Helper for sending messages to a Google Chat webhook."""
+"""Helper for sending messages to a Discord webhook."""
 
 import json
 import requests
 
 
 def send_message(webhook_url: str, text: str) -> None:
-    """Send a plain-text message to a Google Chat webhook.
+    """Send a plain-text message to a Discord webhook.
 
     Args:
-        webhook_url: The incoming webhook URL for the Google Chat space.
-        text: Message body (Google Chat markdown is supported).
+        webhook_url: The incoming webhook URL for the Discord channel.
+        text: Message body.
 
     Raises:
         requests.HTTPError: If the request fails.
     """
-    payload = {"text": text}
+    payload = {"content": text}
     response = requests.post(
         webhook_url,
         headers={"Content-Type": "application/json"},

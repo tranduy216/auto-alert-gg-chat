@@ -6,11 +6,11 @@ Runs twice a day (7:30 AM VNT and 7:30 PM VNT via GitHub Actions cron).
 Workflow:
 1. Fetch RSS articles published in the last 24 hours from curated feeds.
 2. Use OpenAI to filter relevant topics and produce a concise summary.
-3. Send the digest to a Google Chat space via an incoming webhook.
+3. Send the digest to a Discord channel via an incoming webhook.
 
 Required environment variables:
-  OPENAI_API_KEY           – OpenAI API key
-  GOOGLE_CHAT_WEBHOOK_URL  – Google Chat incoming webhook URL
+  OPENAI_API_KEY       – OpenAI API key
+  DISCORD_WEBHOOK_URL  – Discord incoming webhook URL
 """
 
 import os
@@ -23,7 +23,7 @@ import pytz
 # Allow running as a top-level script inside the ``scripts/`` directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.google_chat import send_message
+from utils.discord_webhook import send_message
 from utils.openai_utils import summarise_articles
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -123,16 +123,16 @@ def _parse_entry_time(entry) -> datetime | None:
 
 
 def format_digest_message(summary: str, now_vnt: datetime) -> str:
-    """Wrap the AI summary in a Google Chat-friendly header."""
+    """Wrap the AI summary in a Discord-friendly header."""
     timestamp = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
     header = f"📰 *Daily News Digest* — {timestamp}\n{'─' * 44}\n\n"
     return header + summary
 
 
 def main() -> None:
-    webhook_url = os.environ.get("GOOGLE_CHAT_WEBHOOK_URL")
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
-        print("Error: GOOGLE_CHAT_WEBHOOK_URL is not set.", file=sys.stderr)
+        print("Error: DISCORD_WEBHOOK_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     now_vnt = datetime.now(VNT)
@@ -151,7 +151,7 @@ def main() -> None:
 
     message = format_digest_message(summary, now_vnt)
 
-    print("[rss_digest] Sending to Google Chat…")
+    print("[rss_digest] Sending to Discord…")
     send_message(webhook_url, message)
     print("[rss_digest] Done.")
 
