@@ -39,16 +39,20 @@ VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
 # ---------------------------------------------------------------------------
 # RSS feed catalogue
-# Topics: AI, Java, Developer, Finance, Commodities
+# Topics: AI, Java, Developer, Big Tech, Finance, Commodities
 # ---------------------------------------------------------------------------
 RSS_FEEDS = [
-    # Artificial Intelligence
+    # Artificial Intelligence (feeds về AI + big AI companies)
     {
-        "url": "https://www.artificialintelligence-news.com/feed/",
+        "url": "https://www.technologyreview.com/feed/",
         "topic": "AI",
     },
     {
-        "url": "https://www.technologyreview.com/feed/",
+        "url": "https://blog.research.google/feed/",
+        "topic": "AI",
+    },
+    {
+        "url": "https://ai.meta.com/blog/feed/",
         "topic": "AI",
     },
     # Java / JVM
@@ -56,7 +60,7 @@ RSS_FEEDS = [
         "url": "https://www.infoq.com/feed/?topic=java",
         "topic": "Java",
     },
-    # Software development
+    # Developer (programmer, framework, performance)
     {
         "url": "https://hnrss.org/frontpage",
         "topic": "Developer",
@@ -64,6 +68,27 @@ RSS_FEEDS = [
     {
         "url": "https://dev.to/feed",
         "topic": "Developer",
+    },
+    {
+        "url": "https://github.blog/feed/",
+        "topic": "Developer",
+    },
+    {
+        "url": "https://stackoverflow.blog/feed/",
+        "topic": "Developer",
+    },
+    # Big Tech
+    {
+        "url": "https://techcrunch.com/feed/",
+        "topic": "Big Tech",
+    },
+    {
+        "url": "https://www.theverge.com/rss/index.xml",
+        "topic": "Big Tech",
+    },
+    {
+        "url": "https://feeds.arstechnica.com/arstechnica/index",
+        "topic": "Big Tech",
     },
     # Finance & crypto
     {
@@ -85,11 +110,16 @@ RSS_FEEDS = [
     },
 ]
 
+MAX_ARTICLES_PER_FEED = 7
 MAX_ARTICLES_PER_TOPIC = 10
 
 
 def fetch_recent_articles(hours: int = 24) -> list:
-    """Return articles published within the last *hours* hours."""
+    """Return articles published within the last *hours* hours.
+
+    Per feed: keep at most ``MAX_ARTICLES_PER_FEED`` newest articles.
+    Across all feeds: de-duplicate by URL (first occurrence wins).
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     articles: list = []
 
@@ -100,11 +130,12 @@ def fetch_recent_articles(hours: int = 24) -> list:
                 resource_name=f"RSS feed {feed_info['url']}",
                 retry_exceptions=(OSError, ValueError),
             )
+            entries = []
             for entry in feed.entries:
                 pub_time = _parse_entry_time(entry)
                 if pub_time is None or pub_time < cutoff:
                     continue
-                articles.append(
+                entries.append(
                     {
                         "title": getattr(entry, "title", ""),
                         "link": getattr(entry, "link", ""),
@@ -112,26 +143,41 @@ def fetch_recent_articles(hours: int = 24) -> list:
                         "topic": feed_info["topic"],
                     }
                 )
+            # Keep newest N per feed
+            entries.sort(key=lambda e: e["published"], reverse=True)
+            articles.extend(entries[:MAX_ARTICLES_PER_FEED])
         except (OSError, ValueError) as exc:
             print(
                 f"Warning: could not fetch {feed_info['url']}: {exc}",
                 file=sys.stderr,
             )
 
-    topic_groups: dict = defaultdict(list)
-    for article in articles:
-        topic_groups[article.get("topic", "")].append(article)
+    # De-duplicate by URL across all feeds
+    seen_urls: set = set()
+    deduped: list = []
+    for a in articles:
+        url = a.get("link", "")
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped.append(a)
 
-    limited_articles: list = []
+    # Group by topic and cap per topic
+    topic_groups: dict = defaultdict(list)
+    for a in deduped:
+        topic_groups[a.get("topic", "")].append(a)
+
+    result: list = []
     for topic in TOPIC_KEYWORDS.keys():
         ranked = sorted(
             topic_groups.get(topic, []),
             key=lambda item: item.get("published", ""),
             reverse=True,
         )
-        limited_articles.extend(ranked[:MAX_ARTICLES_PER_TOPIC])
+        result.extend(ranked[:MAX_ARTICLES_PER_TOPIC])
 
-    return limited_articles
+    return result
 
 
 def _parse_entry_time(entry) -> datetime | None:
@@ -212,5 +258,15 @@ def main() -> None:
     print("[rss_digest] Done.")
 
 
+def run() -> None:
+    try:
+        main()
+    except Exception as exc:
+        webhook_url = os.environ.get("DISCORD_DAILY_WEBHOOK_URL")
+        if webhook_url:
+            send_message(webhook_url, f"Cannot run due to {exc}")
+        raise
+
+
 if __name__ == "__main__":
-    main()
+    run()

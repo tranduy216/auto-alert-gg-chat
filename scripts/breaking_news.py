@@ -269,5 +269,15 @@ def main() -> None:
             record_sent_alert(alert)
 
 
+def run() -> None:
+    try:
+        main()
+    except Exception as exc:
+        webhook_url = os.environ.get("DISCORD_BREAKING_WEBHOOK_URL")
+        if webhook_url:
+            send_message(webhook_url, f"Cannot run due to {exc}")
+        raise
+
+
 if __name__ == "__main__":
-    main()
+    run()

@@ -21,12 +21,12 @@ def _get_client() -> genai.Client:
 
 
 # ---------------------------------------------------------------------------
-# Daily digest – select top-3 per topic and summarise
+# Daily digest – select top articles per topic and summarise
 # ---------------------------------------------------------------------------
 
 
 def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """From each topic select the 3 most important articles.
+    """From each topic select the most important articles.
 
     Returns a list of dicts with keys: ``topic``, ``title``, ``url``.
     """
@@ -39,15 +39,18 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
 
     prompt = f"""You are a professional news curator. Review the articles below and:
 
-1. From EACH topic group, select the 3 most important and impactful articles.
+1. From EACH topic group, select the most important and impactful articles.
+   Topics: AI (gồm cả tin về các công ty AI lớn), Java, Developer (lập trình,
+   framework, performance), Big Tech (Google, Microsoft, Apple, Meta, Amazon…),
+   Finance, Commodities.
 2. If a topic has no relevant articles, omit it.
 
 Articles to review:
 {articles_text}
 
 Respond ONLY with valid JSON — an array of objects, each with:
-- "topic": topic name in English (AI / Java / Developer / Finance / Commodities)
-- "title": title or short summary in Vietnamese (descriptive, 30 words limit)
+- "topic": topic name in English (AI / Java / Developer / Big Tech / Finance / Commodities)
+- "title": descriptive title in Vietnamese
 - "url": the article URL exactly as given"""
 
     response = call_with_retry(
