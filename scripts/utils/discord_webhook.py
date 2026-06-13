@@ -1,23 +1,54 @@
 """Helper for sending messages to a Discord webhook."""
 
 import json
+
 import requests
 
 from .retry_utils import call_with_retry
 
+# Discord webhook content limit per message
+CHAR_LIMIT = 2000
+
 
 def send_message(webhook_url: str, text: str) -> None:
-    """Send a plain-text message to a Discord webhook.
+    """Send a plain-text message (or split messages) to a Discord webhook.
+
+    Discord's ``content`` field has a 2000-character limit.  If *text* exceeds
+    that, it is split on newline boundaries and sent as separate messages.
 
     Args:
         webhook_url: The incoming webhook URL for the Discord channel.
         text: Message body.
-
-    Raises:
-        requests.HTTPError: If the request fails.
     """
+    for chunk in _chunk_text(text, CHAR_LIMIT):
+        _post_chunk(webhook_url, chunk)
+
+
+def _chunk_text(text: str, limit: int) -> list[str]:
+    """Split *text* into *limit*-sized pieces, breaking on newlines."""
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+
+        # Try to break at the last newline before the limit
+        break_at = text.rfind("\n", 0, limit)
+        if break_at == -1:
+            break_at = limit
+        chunks.append(text[:break_at])
+        text = text[break_at:].lstrip("\n")
+    return chunks
+
+
+def _post_chunk(webhook_url: str, text: str) -> None:
+    """Post a single message chunk to the webhook."""
     payload = {"content": text}
-    def _post_webhook() -> None:
+
+    def _post() -> None:
         response = requests.post(
             webhook_url,
             headers={"Content-Type": "application/json"},
@@ -27,7 +58,7 @@ def send_message(webhook_url: str, text: str) -> None:
         response.raise_for_status()
 
     call_with_retry(
-        _post_webhook,
+        _post,
         resource_name="Discord webhook",
         retry_exceptions=(requests.RequestException,),
     )

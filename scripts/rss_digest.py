@@ -21,18 +21,19 @@ from datetime import datetime, timedelta, timezone
 
 import feedparser  # type: ignore
 import pytz
-from google.api_core import exceptions as google_exceptions  # type: ignore
+from google.genai import errors as genai_errors  # type: ignore
 
 # Allow running as a top-level script inside the ``scripts/`` directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.discord_webhook import send_message
-from utils.gemini_utils import summarise_articles
-from utils.retry_utils import call_with_retry
 from utils.article_prefilter import (
     TOPIC_KEYWORDS,
     filter_articles_by_topic_keywords,
 )
+from utils.discord_webhook import send_message
+from utils.gemini_utils import summarise_articles
+from utils.retry_utils import call_with_retry
+from utils.url_shortener import shorten_urls_in_articles
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -148,11 +149,22 @@ def _parse_entry_time(entry) -> datetime | None:
     return None
 
 
-def format_digest_message(summary: str, now_vnt: datetime) -> str:
-    """Wrap the AI summary in a Discord-friendly header."""
+def format_digest_message(selected: list[dict], now_vnt: datetime) -> str:
+    """Format selected articles: all titles first, then all URLs at bottom."""
     timestamp = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
-    header = f"📰 **Daily News Digest** — {timestamp}\n{'─' * 44}\n\n"
-    return header + summary
+    lines = [f"Daily News Digest — {timestamp}", ""]
+
+    topic_titles = []
+    urls = []
+    for item in selected:
+        topic_titles.append(f"• {item['title']}")
+        urls.append(f"🔗 {item['url']}")
+
+    lines.extend(topic_titles)
+    lines.append("")
+    lines.extend(urls)
+
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -179,14 +191,21 @@ def main() -> None:
         print("[rss_digest] No recent articles – skipping digest.")
         return
 
+    print("[rss_digest] Shortening URLs…")
+    articles = shorten_urls_in_articles(articles)
+
     print("[rss_digest] Summarising with Gemini…")
     try:
-        summary = summarise_articles(articles)
-    except google_exceptions.GoogleAPIError as exc:
+        selected = summarise_articles(articles)
+    except genai_errors.APIError as exc:
         print(f"[rss_digest] Gemini API error – skipping digest: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    message = format_digest_message(summary, now_vnt)
+    if not selected:
+        print("[rss_digest] No articles selected by AI – skipping digest.")
+        return
+
+    message = format_digest_message(selected, now_vnt)
 
     print("[rss_digest] Sending to Discord…")
     send_message(webhook_url, message)

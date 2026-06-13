@@ -1,38 +1,34 @@
 """Google Gemini helpers for news summarisation and breaking-news detection."""
 
 import json
-import os
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai  # type: ignore
-from google.api_core import exceptions as google_exceptions  # type: ignore
+from google import genai
+from google.genai import errors as genai_errors
 
 from .retry_utils import call_with_retry
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
-_model: Optional[genai.GenerativeModel] = None
+_client: Optional[genai.Client] = None
 
 
-def _get_model() -> genai.GenerativeModel:
-    global _model
-    if _model is None:
-        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        _model = genai.GenerativeModel(GEMINI_MODEL)
-    return _model
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client()
+    return _client
 
 
 # ---------------------------------------------------------------------------
-# Daily digest – select top-2 per topic and summarise
+# Daily digest – select top-3 per topic and summarise
 # ---------------------------------------------------------------------------
 
-def summarise_articles(articles: List[Dict[str, Any]]) -> str:
-    """From each topic select the 2 most important articles and produce a digest.
 
-    For every topic group the model picks the 2 most impactful articles,
-    writes a 2-3 sentence summary for each, and groups them under topic headings.
+def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """From each topic select the 3 most important articles.
 
-    Returns a formatted multi-section report string.
+    Returns a list of dicts with keys: ``topic``, ``title``, ``url``.
     """
     articles_text = "\n\n".join(
         f"Title: {a.get('title', '')}\n"
@@ -43,34 +39,33 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> str:
 
     prompt = f"""You are a professional news curator. Review the articles below and:
 
-1. From EACH topic group, select the 2 most important and impactful articles.
-   Prioritise articles that report major developments, have broad market or
-   industry impact, or break new ground.
-2. For each selected article write a 2-3 sentence summary.
-3. Group the selected articles under clear topic headings.
-4. For every article include its URL.
-5. Use emoji icons to make the output scannable
-   (🤖 AI, ☕ Java, 💻 Dev, 💰 Finance, 🛢️ Commodities).
-6. If a topic has no relevant articles, omit that section entirely.
-
-Select at most 2 articles per topic.
+1. From EACH topic group, select the 3 most important and impactful articles.
+2. If a topic has no relevant articles, omit it.
 
 Articles to review:
 {articles_text}
 
-Produce a clean, concise report in English."""
+Respond ONLY with valid JSON — an array of objects, each with:
+- "topic": topic name in English (AI / Java / Developer / Finance / Commodities)
+- "title": title or short summary in Vietnamese (descriptive, 30 words limit)
+- "url": the article URL exactly as given"""
 
     response = call_with_retry(
-        lambda: _get_model().generate_content(prompt),
+        lambda: _get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
+        ),
         resource_name="Gemini summarise_articles",
-        retry_exceptions=(google_exceptions.GoogleAPIError,),
+        retry_exceptions=(genai_errors.APIError,),
     )
-    return response.text.strip()
+    return json.loads(response.text)
 
 
 # ---------------------------------------------------------------------------
 # Breaking news – detect high-impact financial events
 # ---------------------------------------------------------------------------
+
 
 def detect_breaking_news(
     articles: List[Dict[str, Any]], bitcoin_data: Dict[str, Any]
@@ -116,20 +111,19 @@ Respond ONLY with valid JSON in this exact schema:
   "has_breaking_news": true | false,
   "alerts": [
     {{
-      "headline": "short headline",
-      "impact": "why this matters for global finance",
-      "summary": "2-3 sentences",
+      "headline": "descriptive title in Vietnamese with cause and effect, e.g. 'Trump tăng thuế. Thị trường chứng khoán Mỹ giảm mạnh.'",
       "urls": ["url1", "url2"]
     }}
   ]
 }}"""
 
     response = call_with_retry(
-        lambda: _get_model().generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"},
+        lambda: _get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
         ),
         resource_name="Gemini detect_breaking_news",
-        retry_exceptions=(google_exceptions.GoogleAPIError,),
+        retry_exceptions=(genai_errors.APIError,),
     )
     return json.loads(response.text)

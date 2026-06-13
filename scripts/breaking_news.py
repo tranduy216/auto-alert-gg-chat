@@ -28,10 +28,15 @@ from datetime import datetime, timezone
 import feedparser  # type: ignore
 import pytz
 import requests
-from google.api_core import exceptions as google_exceptions  # type: ignore
+from google.genai import errors as genai_errors  # type: ignore
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from utils.article_prefilter import (
+    BREAKING_NEWS_KEYWORDS,
+    filter_articles_by_keywords,
+)
+from utils.discord_webhook import send_message
 from utils.firebase_utils import (
     get_unsent_queued_alerts,
     mark_alert_sent,
@@ -39,13 +44,9 @@ from utils.firebase_utils import (
     record_sent_alert,
     was_recently_alerted,
 )
-from utils.discord_webhook import send_message
 from utils.gemini_utils import detect_breaking_news
 from utils.retry_utils import call_with_retry
-from utils.article_prefilter import (
-    BREAKING_NEWS_KEYWORDS,
-    filter_articles_by_keywords,
-)
+from utils.url_shortener import shorten_urls_in_articles
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -152,24 +153,14 @@ def fetch_news_articles() -> list:
 # ---------------------------------------------------------------------------
 
 def format_breaking_alert(alert: dict, now_vnt: datetime) -> str:
-    """Return a Discord message string for one breaking-news alert."""
-    timestamp = now_vnt.strftime("%d/%m/%Y %H:%M (VNT)")
+    """Return a compact plain-text alert: descriptive title then URLs."""
+    headline = alert.get('headline', 'Breaking News')
     urls_lines = "\n".join(
-        f"🔗 {url}" for url in alert.get("urls", []) if url
+        url for url in alert.get("urls", []) if url
     )
-
-    parts = [
-        f"🚨 **BREAKING NEWS** — {timestamp}",
-        "─" * 44,
-        f"📌 **{alert.get('headline', 'Breaking News')}**",
-        "",
-        f"💥 **Impact:** {alert.get('impact', '')}",
-        "",
-        f"📋 **Summary:**\n{alert.get('summary', '')}",
-    ]
+    parts = [headline]
     if urls_lines:
-        parts += ["", urls_lines]
-
+        parts.append(urls_lines)
     return "\n".join(parts)
 
 
@@ -185,17 +176,13 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
         return
 
     print(f"[breaking_news] Flushing {len(queued)} queued alert(s)…")
-    header = (
-        f"📬 **Queued Alerts** (held during 22:00–06:00 VNT) "
-        f"— {now_vnt.strftime('%d/%m/%Y %H:%M (VNT)')}\n{'─' * 44}"
-    )
+    header = "Queued Alerts (overnight)"
     send_message(webhook_url, header)
 
     for item in queued:
         alert = item.get("alert", {})
-        queued_at = item.get("queued_at_str", "earlier")
         message = format_breaking_alert(alert, now_vnt)
-        send_message(webhook_url, f"*Originally detected at {queued_at}*\n{message}")
+        send_message(webhook_url, message)
         mark_alert_sent(item["_doc_id"])
         print(f"[breaking_news] Flushed: {alert.get('headline', 'N/A')}")
 
@@ -235,6 +222,9 @@ def main() -> None:
     )
     print(f"[breaking_news] {len(articles)} keyword-matched articles selected.")
 
+    print("[breaking_news] Shortening URLs…")
+    articles = shorten_urls_in_articles(articles)
+
     print("[breaking_news] Fetching Bitcoin price…")
     bitcoin_data = get_bitcoin_price()
     if bitcoin_data:
@@ -247,7 +237,7 @@ def main() -> None:
     print("[breaking_news] Analysing with Gemini…")
     try:
         result = detect_breaking_news(articles, bitcoin_data)
-    except google_exceptions.GoogleAPIError as exc:
+    except genai_errors.APIError as exc:
         print(f"[breaking_news] Gemini API error – skipping analysis: {exc}", file=sys.stderr)
         sys.exit(1)
 
