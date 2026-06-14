@@ -203,6 +203,14 @@ def compute_entry_prices(
     is_long = signal in ("STRONG_LONG", "WEAK_LONG")
     is_short = signal in ("STRONG_SHORT", "WEAK_SHORT")
 
+    if not is_long and not is_short:
+        return {
+            "entry_2": None,
+            "entry_3": None,
+            "confidence_2": 0,
+            "confidence_3": 0,
+        }
+
     bias_score = min(1.0, max(0.0, abs(s_trend) / 5.0))
     pullback_factor = 1.0 - bias_score
 
@@ -675,11 +683,11 @@ def format_detail(result: dict) -> str:
     score_str = f"{score:+.1f}" if score != 0 else "0.0"
     lines = [heading, f"STAGE: {position}. Score={score_str}", f"ACTION: {action}"]
     lines.append(f"OPTIMAL: {optimal}. ZONE: {zone}")
-    if e2 is not None and e3 is not None:
+    sig = result["signal"]
+    if sig in ("STRONG_LONG", "WEAK_LONG", "STRONG_SHORT", "WEAK_SHORT") and e2 is not None and e3 is not None:
         c2 = z.get("confidence_2", "?")
         c3 = z.get("confidence_3", "?")
-        sig = result["signal"]
-        prefix = "LONG" if sig in ("STRONG_LONG", "WEAK_LONG") else "SHORT" if sig in ("STRONG_SHORT", "WEAK_SHORT") else ""
+        prefix = "LONG" if sig in ("STRONG_LONG", "WEAK_LONG") else "SHORT"
         lines.append(f"{prefix} ENTRY2: ${e2} (confidence {c2}%) | {prefix} ENTRY3: ${e3} (confidence {c3}%)")
     return "\n".join(lines)
 
@@ -863,12 +871,16 @@ def main() -> None:
         f"**Crypto Trading Signals**{ks_flag}\n"
         f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')} | {LEVERAGE}x | 15%/coin"
     )
-    lines = [header, "", "Action:", *action_blocks, ""]
-    for r in results:
-        lines.append(format_detail(r))
-        lines.append("")
+    active = [r for r in results if r['signal'] not in ('WAIT', 'NA')]
 
-    message = "\n".join(lines)
+    if not active:
+        message = f"{header}\n\nNo action for all coin."
+    else:
+        lines = [header, "", "Action:", *action_blocks, ""]
+        for r in active:
+            lines.append(format_detail(r))
+            lines.append("")
+        message = "\n".join(lines)
 
     print("[crypto_trading] Sending to Discord…")
     send_message(webhook_url, message)
