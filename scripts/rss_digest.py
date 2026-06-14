@@ -196,21 +196,16 @@ def _parse_entry_time(entry) -> datetime | None:
 
 
 def format_digest_message(selected: list[dict], now_vnt: datetime) -> str:
-    """Format selected articles: all titles first, then all URLs at bottom."""
+    """Format selected articles: title then URL under it."""
     timestamp = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
     lines = [f"Daily News Digest — {timestamp}", ""]
 
-    topic_titles = []
-    urls = []
     for item in selected:
-        topic_titles.append(f"• {item['title']}")
-        urls.append(f"🔗 {item['url']}")
+        lines.append(f"• {item['title']}")
+        lines.append(f"  🔗 {item['url']}")
+        lines.append("")
 
-    lines.extend(topic_titles)
-    lines.append("")
-    lines.extend(urls)
-
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip("\n")
 
 
 def main() -> None:
