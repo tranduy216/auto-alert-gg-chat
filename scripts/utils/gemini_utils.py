@@ -40,16 +40,18 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     prompt = f"""You are a professional news curator. Review the articles below and:
 
 1. From EACH topic group, select the most important and impactful articles.
-   Topics: AI (gồm cả tin về các công ty AI lớn), Java, Developer (lập trình,
-   framework, performance), Big Tech (Google, Microsoft, Apple, Meta, Amazon…),
-   Finance, Commodities.
+   Topics: Technical Trend (AI coding agent, agentic workflow, software
+   architecture, engineering leadership, developer tools), AI (gồm AI OS,
+   Agentic Runtime, Digital Workforce, Autonomous Organization và các công
+   ty AI lớn), Java, Developer (lập trình, framework, performance), Big Tech
+   (Google, Microsoft, Apple, Meta, Amazon…), Finance, Commodities.
 2. If a topic has no relevant articles, omit it.
 
 Articles to review:
 {articles_text}
 
 Respond ONLY with valid JSON — an array of objects, each with:
-- "topic": topic name in English (AI / Java / Developer / Big Tech / Finance / Commodities)
+- "topic": topic name in English (Technical Trend / AI / Java / Developer / Big Tech / Finance / Commodities)
 - "title": descriptive title in Vietnamese
 - "url": the article URL exactly as given"""
 

@@ -16,6 +16,10 @@ TOPIC_KEYWORDS: Dict[str, List[str]] = {
         "deepmind",
         "model",
         "ai agent",
+        "ai os",
+        "agentic runtime",
+        "digital workforce",
+        "autonomous organization",
         "reasoning",
         "multimodal",
         "fine-tuning",
@@ -143,6 +147,28 @@ TOPIC_KEYWORDS: Dict[str, List[str]] = {
         "futures",
         "derivatives",
     ],
+    "Technical Trend": [
+        "ai coding agent",
+        "agentic workflow",
+        "claude code",
+        "openhands",
+        "mcp",
+        "software architecture",
+        "distributed systems",
+        "system design",
+        "kafka",
+        "postgresql",
+        "engineering leadership",
+        "staff engineer",
+        "team topology",
+        "developer experience",
+        "product strategy",
+        "b2b saas",
+        "developer tools",
+        "engineering trends",
+        "technology forecast",
+        "ai software development",
+    ],
     "Commodities": [
         "oil",
         "gold",
@@ -195,8 +221,12 @@ def filter_articles_by_topic_keywords(
     articles: List[Dict[str, Any]],
     topic_keywords: Dict[str, List[str]],
     max_per_topic: int,
+    topic_limits: Dict[str, int] | None = None,
 ) -> List[Dict[str, Any]]:
-    """Keep keyword-matched articles per topic, ranked by keyword hit count."""
+    """Keep keyword-matched articles per topic, ranked by keyword hit count.
+
+    ``topic_limits`` overrides ``max_per_topic`` for specific topics.
+    """
     by_topic: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for article in articles:
         topic = str(article.get("topic", ""))
@@ -207,11 +237,12 @@ def filter_articles_by_topic_keywords(
 
     filtered: List[Dict[str, Any]] = []
     for topic in topic_keywords.keys():
+        limit = topic_limits.get(topic, max_per_topic) if topic_limits else max_per_topic
         ranked = sorted(
             by_topic.get(topic, []),
             key=lambda item: item.get("_keyword_score", 0),
             reverse=True,
-        )[:max_per_topic]
+        )[:limit]
         for item in ranked:
             item.pop("_keyword_score", None)
             filtered.append(item)

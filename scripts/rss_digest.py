@@ -39,7 +39,7 @@ VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
 # ---------------------------------------------------------------------------
 # RSS feed catalogue
-# Topics: AI, Java, Developer, Big Tech, Finance, Commodities
+# Topics: Technical Trend, AI, Java, Developer, Big Tech, Finance, Commodities
 # ---------------------------------------------------------------------------
 RSS_FEEDS = [
     # Artificial Intelligence (feeds về AI + big AI companies)
@@ -60,11 +60,12 @@ RSS_FEEDS = [
         "url": "https://www.infoq.com/feed/?topic=java",
         "topic": "Java",
     },
-    # Developer (programmer, framework, performance)
+    # Technical Trend (engineering leadership, architecture, AI tools)
     {
         "url": "https://hnrss.org/frontpage",
-        "topic": "Developer",
+        "topic": "Technical Trend",
     },
+    # Developer (programmer, framework, performance)
     {
         "url": "https://dev.to/feed",
         "topic": "Developer",
@@ -225,6 +226,11 @@ def main() -> None:
         recent_articles,
         TOPIC_KEYWORDS,
         max_per_topic=MAX_ARTICLES_PER_TOPIC,
+        topic_limits={
+            "Technical Trend": MAX_ARTICLES_PER_TOPIC * 3,
+            "AI": MAX_ARTICLES_PER_TOPIC * 2,
+            "Developer": MAX_ARTICLES_PER_TOPIC * 2,
+        },
     )
     print(f"[rss_digest] {len(articles)} keyword-matched articles selected.")
 
