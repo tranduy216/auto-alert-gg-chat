@@ -155,28 +155,58 @@ COINGECKO_IDS = {
     "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink",
     "PAXGUSDT": "pax-gold"}
 
-def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
-    """Fetch OHLCV klines, trying multiple sources in order."""
-    sources = [
-        ("Binance", lambda: _fetch_binance(symbol)),
-        ("Binance US", lambda: _fetch_binance(symbol, "api.binance.us")),
-        ("Binance GCP", lambda: _fetch_binance(symbol, "api-gcp.binance.com")),
-        ("OKX", lambda: _fetch_okx(symbol)),
-    ]
+_SOURCE_LIST: list[tuple[str, str | None]] = [
+    ("Binance", None),
+    ("Binance US", "api.binance.us"),
+    ("Binance GCP", "api-gcp.binance.com"),
+    ("OKX", None),
+]
+_ACTIVE_SOURCE_IDX = 0
 
+def _build_source_fns(symbol: str) -> list[tuple[str, callable]]:
+    fns: list[tuple[str, callable]] = []
+    for name, host in _SOURCE_LIST:
+        if name == "OKX":
+            fns.append((name, lambda s=symbol: _fetch_okx(s)))
+        elif host:
+            fns.append((name, lambda s=symbol, h=host: _fetch_binance(s, h)))
+        else:
+            fns.append((name, lambda s=symbol: _fetch_binance(s)))
     cg_id = COINGECKO_IDS.get(symbol)
     if cg_id:
-        sources.append(("CoinGecko", lambda: _parse_coingecko_klines(cg_id, symbol)))
+        fns.append(("CoinGecko", lambda s=symbol, c=cg_id: _parse_coingecko_klines(c, s)))
+    return fns
 
+def _try_source(
+    sources: list[tuple[str, callable]], start: int, symbol: str,
+) -> tuple[list[dict], int, str]:
     last_err = ""
-    for name, fn in sources:
+    for i in range(start, len(sources)):
+        name, fn = sources[i]
         time.sleep(0.5)
         result = fn()
         if result:
-            return result
-        last_err = f"all sources failed for {symbol}"
+            return result, i, ""
+        last_err = f"[{name}] {symbol} failed"
+    # Wrap around from 0 to start-1
+    for i in range(0, start):
+        name, fn = sources[i]
+        time.sleep(0.5)
+        result = fn()
+        if result:
+            return result, i, ""
+        last_err = f"[{name}] {symbol} failed"
+    return None, start, last_err
 
-    raise RuntimeError(f"Cannot fetch klines for {symbol}: {last_err}")
+def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
+    """Fetch OHLCV klines, trying sources with adaptive fallback."""
+    global _ACTIVE_SOURCE_IDX
+    sources = _build_source_fns(symbol)
+    result, idx, err = _try_source(sources, _ACTIVE_SOURCE_IDX, symbol)
+    if result:
+        _ACTIVE_SOURCE_IDX = idx
+        return result
+    raise RuntimeError(f"Cannot fetch klines for {symbol}: {err}")
 
 
 # ---------------------------------------------------------------------------
