@@ -33,6 +33,6 @@ jobs:
       - name: Run crypto trading signal system
         working-directory: scripts
         env:
-          DISCORD_BREAKING_WEBHOOK_URL: ${{ secrets.DISCORD_BREAKING_WEBHOOK_URL }}
+          DISCORD_CRYPTO_WEBHOOK_URL: ${{ secrets.DISCORD_CRYPTO_WEBHOOK_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: python crypto_trading.py
