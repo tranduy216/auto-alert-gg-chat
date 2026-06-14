@@ -873,14 +873,16 @@ def main() -> None:
     )
     active = [r for r in results if r['signal'] not in ('WAIT', 'NA')]
 
+    separator = "\n⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩\n"
+
     if not active:
-        message = f"{header}\n\nNo action for all coin."
+        message = f"{header}\n\nNo action for all coin.{separator}"
     else:
         lines = [header, "", "Action:", *action_blocks, ""]
         for r in active:
             lines.append(format_detail(r))
             lines.append("")
-        message = "\n".join(lines)
+        message = "\n".join(lines) + separator
 
     print("[crypto_trading] Sending to Discord…")
     send_message(webhook_url, message)
