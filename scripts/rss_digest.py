@@ -196,17 +196,24 @@ def _parse_entry_time(entry) -> datetime | None:
     return None
 
 
-def format_digest_message(selected: list[dict], now_vnt: datetime) -> str:
-    """Format selected articles: title then URL under it."""
+def format_digest_message(selected: list[dict], now_vnt: datetime, char_limit: int = 2000) -> str:
+    """Format selected articles, dropping lowest-priority items if over char_limit."""
     timestamp = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
-    lines = [f"Daily News Digest — {timestamp}", ""]
+    header = f"Daily News Digest — {timestamp}"
 
-    for item in selected:
-        lines.append(f"• {item['title']}")
-        lines.append(f"  🔗 {item['url']}")
-        lines.append("")
+    candidates = list(selected)
+    while candidates:
+        lines = [header, ""]
+        for item in candidates:
+            lines.append(f"• {item['title']}")
+            lines.append(f"  🔗 {item['url']}")
+            lines.append("")
+        msg = "\n".join(lines).rstrip("\n")
+        if len(msg) <= char_limit:
+            return msg
+        candidates.pop()
 
-    return "\n".join(lines).rstrip("\n")
+    return header
 
 
 def main() -> None:
@@ -227,9 +234,10 @@ def main() -> None:
         TOPIC_KEYWORDS,
         max_per_topic=MAX_ARTICLES_PER_TOPIC,
         topic_limits={
-            "Technical Trend": 5,
-            "Developer": 5,
+            "Technical Trend": 4,
+            "Developer": 3,
             "AI": 3,
+            "Java": 2,
         },
     )
     print(f"[rss_digest] {len(articles)} keyword-matched articles selected.")
