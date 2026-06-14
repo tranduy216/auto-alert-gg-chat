@@ -1,0 +1,38 @@
+name: Crypto Trading Signal System
+
+on:
+  schedule:
+    # VNT (UTC+7): 06:00 AM = 23:00 UTC (previous day)
+    - cron: '0 23 * * *'
+    # VNT (UTC+7): 12:00 PM = 05:00 UTC
+    - cron: '0 5 * * *'
+    # VNT (UTC+7): 08:00 PM = 13:00 UTC
+    - cron: '0 13 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  crypto-trading:
+    name: Generate crypto trading signals
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run crypto trading signal system
+        working-directory: scripts
+        env:
+          DISCORD_BREAKING_WEBHOOK_URL: ${{ secrets.DISCORD_BREAKING_WEBHOOK_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python crypto_trading.py
