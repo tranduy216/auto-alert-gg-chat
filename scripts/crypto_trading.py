@@ -10,7 +10,7 @@ System (v3):
   Hard capital cap: max 15 % margin per coin
 
 Required environment variables:
-  DISCORD_CRYPTO_WEBHOOK_URL  – Discord webhook for signal output
+  DISCORD_TRADING_WEBHOOK_URL  – Discord webhook for signal output
   FIREBASE_SERVICE_ACCOUNT     – Firebase service-account JSON (optional, for
                                  state persistence across runs)
 """
@@ -875,9 +875,9 @@ def analyse_coin(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    webhook_url = os.environ.get("DISCORD_CRYPTO_WEBHOOK_URL")
+    webhook_url = os.environ.get("DISCORD_TRADING_WEBHOOK_URL")
     if not webhook_url:
-        print("Error: DISCORD_CRYPTO_WEBHOOK_URL is not set.", file=sys.stderr)
+        print("Error: DISCORD_TRADING_WEBHOOK_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     now_vnt = _now_vnt()
@@ -963,7 +963,7 @@ def run() -> None:
     try:
         main()
     except Exception as exc:
-        webhook_url = os.environ.get("DISCORD_CRYPTO_WEBHOOK_URL")
+        webhook_url = os.environ.get("DISCORD_TRADING_WEBHOOK_URL")
         if webhook_url:
             send_message(webhook_url, f"Cannot run due to {exc}")
         raise
