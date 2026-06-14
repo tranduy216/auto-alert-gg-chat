@@ -62,11 +62,13 @@ BREAKING_NEWS_FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://rss.cnn.com/rss/money_news_international.rss",
     "https://hnrss.org/frontpage",
+    "https://techcrunch.com/feed/",
+    "https://feeds.arstechnica.com/arstechnica/index",
 ]
 
 # Maximum articles to pull from each feed (avoid huge prompts)
 MAX_ARTICLES_PER_FEED = 5
-MAX_ARTICLES_FOR_AI = 12
+MAX_ARTICLES_FOR_AI = 20
 
 
 # ---------------------------------------------------------------------------

@@ -184,11 +184,13 @@ TOPIC_KEYWORDS: Dict[str, List[str]] = {
     ],
 }
 
-# Breaking-news keywords: finance + high-impact risk events.
+# Breaking-news keywords: finance, tech + high-impact risk events.
 BREAKING_NEWS_KEYWORDS: List[str] = sorted(
     set(
         TOPIC_KEYWORDS["Finance"]
         + TOPIC_KEYWORDS["Commodities"]
+        + TOPIC_KEYWORDS["Technical Trend"]
+        + TOPIC_KEYWORDS["AI"]
         + [
             "bitcoin",
             "fed",

@@ -96,8 +96,8 @@ def detect_breaking_news(
             f"24-h change: {change:+.2f}%"
         )
 
-    prompt = f"""You are a financial analyst monitoring breaking news for major events
-that could have a huge impact on global finance.
+    prompt = f"""You are a financial and tech analyst monitoring breaking news for
+major events that could have a huge impact on global finance or the tech industry.
 
 Criteria that qualify as BREAKING NEWS:
 - Bitcoin 24-h price change exceeds ±4 %
@@ -106,6 +106,10 @@ Criteria that qualify as BREAKING NEWS:
 - Major corporate collapses or mergers with global market impact
 - Supply-chain disruptions affecting key commodities
 - Pandemic or major public-health declarations
+- Major AI product launches or breakthroughs (AI coding agent, agentic workflow,
+  frontier model release)
+- Significant engineering leadership changes or organisational shifts at big tech
+- Major open-source or platform shifts (MCP, new protocols, runtime releases)
 {btc_line}
 
 Recent news articles:
