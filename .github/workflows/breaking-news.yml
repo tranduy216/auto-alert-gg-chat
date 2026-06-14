@@ -1,6 +1,8 @@
 name: Breaking News Monitor
 
 on:
+  push:
+    branches: [master]
   schedule:
     # Every 2 hours (UTC): checks for breaking news and queues during quiet hours.
     # Quiet hours in VNT (UTC+7): 22:00–06:00 VNT = 15:00–23:00 UTC.

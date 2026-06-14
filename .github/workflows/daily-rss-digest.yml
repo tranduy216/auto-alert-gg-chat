@@ -1,6 +1,8 @@
 name: Daily RSS Digest
 
 on:
+  push:
+    branches: [master]
   schedule:
     # 7:30 AM VNT (UTC+7) = 00:30 UTC
     - cron: '30 0 * * *'
