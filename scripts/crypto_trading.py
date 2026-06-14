@@ -45,7 +45,7 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["BTC", "ETH", "BNB", "SOL", "ARB", "LINK"]
+COINS = ["BTC", "ETH", "BNB", "SOL", "ARB", "LINK", "PAXG"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
@@ -111,7 +111,8 @@ def _fetch_binance(symbol: str, host: str = "api.binance.com") -> list[dict] | N
 
 def _fetch_okx(symbol: str) -> list[dict] | None:
     okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
-               "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT"}
+               "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT",
+               "PAXGUSDT": "PAXG-USDT"}
     inst_id = okx_map.get(symbol)
     if not inst_id:
         return None
@@ -151,7 +152,8 @@ def _parse_coingecko_klines(coin_id: str, symbol: str) -> list[dict] | None:
 
 COINGECKO_IDS = {
     "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
-    "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink"}
+    "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink",
+    "PAXGUSDT": "pax-gold"}
 
 def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
     """Fetch OHLCV klines, trying multiple sources in order."""
