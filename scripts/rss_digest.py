@@ -112,7 +112,7 @@ RSS_FEEDS = [
 ]
 
 MAX_ARTICLES_PER_FEED = 7
-MAX_ARTICLES_PER_TOPIC = 10
+MAX_ARTICLES_PER_TOPIC = 2
 
 
 def fetch_recent_articles(hours: int = 24) -> list:
@@ -227,9 +227,9 @@ def main() -> None:
         TOPIC_KEYWORDS,
         max_per_topic=MAX_ARTICLES_PER_TOPIC,
         topic_limits={
-            "Technical Trend": MAX_ARTICLES_PER_TOPIC * 3,
-            "AI": MAX_ARTICLES_PER_TOPIC * 2,
-            "Developer": MAX_ARTICLES_PER_TOPIC * 2,
+            "Technical Trend": 5,
+            "Developer": 5,
+            "AI": 3,
         },
     )
     print(f"[rss_digest] {len(articles)} keyword-matched articles selected.")
