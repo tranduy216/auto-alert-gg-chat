@@ -18,6 +18,7 @@ Required environment variables:
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from typing import Any
 
@@ -79,34 +80,101 @@ FIRESTORE_COLLECTION = "crypto_trading_states"
 # Binance API
 # ---------------------------------------------------------------------------
 
-def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
-    """Fetch OHLCV klines from Binance public API."""
-    def _fetch() -> requests.Response:
+def _parse_binance_klines(data: list) -> list[dict]:
+    return [
+        {"open_time": k[0], "open": float(k[1]), "high": float(k[2]),
+         "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])}
+        for k in data
+    ]
+
+def _parse_okx_klines(data: list) -> list[dict]:
+    # OKX returns candles in reverse chronological order; reverse to match Binance
+    candles = list(reversed(data))
+    return [
+        {"open_time": int(k[0]), "open": float(k[1]), "high": float(k[2]),
+         "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])}
+        for k in candles
+    ]
+
+def _fetch_binance(symbol: str, host: str = "api.binance.com") -> list[dict] | None:
+    try:
         resp = requests.get(
-            "https://api.binance.com/api/v3/klines",
+            f"https://{host}/api/v3/klines",
             params={"symbol": symbol, "interval": TIMEFRAME, "limit": CANDLE_COUNT},
             timeout=15,
         )
         resp.raise_for_status()
-        return resp
+        return _parse_binance_klines(resp.json())
+    except Exception as e:
+        print(f"  [{host}] {symbol} failed: {e}")
+        return None
 
-    response = call_with_retry(
-        _fetch,
-        resource_name=f"Binance klines {symbol}",
-        retry_exceptions=(requests.RequestException,),
-    )
-    data = response.json()
-    return [
-        {
-            "open_time": k[0],
-            "open": float(k[1]),
-            "high": float(k[2]),
-            "low": float(k[3]),
-            "close": float(k[4]),
-            "volume": float(k[5]),
-        }
-        for k in data
+def _fetch_okx(symbol: str) -> list[dict] | None:
+    okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
+               "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT"}
+    inst_id = okx_map.get(symbol)
+    if not inst_id:
+        return None
+    try:
+        resp = requests.get(
+            "https://www.okx.com/api/v5/market/candles",
+            params={"instId": inst_id, "bar": "1H", "limit": CANDLE_COUNT},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("code") != "0":
+            return None
+        return _parse_okx_klines(body["data"])
+    except Exception as e:
+        print(f"  [OKX] {symbol} failed: {e}")
+        return None
+
+def _parse_coingecko_klines(coin_id: str, symbol: str) -> list[dict] | None:
+    """CoinGecko OHLC has no volume; default volume to 0."""
+    try:
+        resp = requests.get(
+            f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc",
+            params={"vs_currency": "usd", "days": 2},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {"open_time": int(k[0]) // 1000, "open": float(k[1]), "high": float(k[2]),
+             "low": float(k[3]), "close": float(k[4]), "volume": 0.0}
+            for k in data[-CANDLE_COUNT:]
+        ]
+    except Exception as e:
+        print(f"  [CoinGecko] {symbol} failed: {e}")
+        return None
+
+COINGECKO_IDS = {
+    "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
+    "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink"}
+
+def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
+    """Fetch OHLCV klines, trying multiple sources in order."""
+    sources = [
+        ("Binance", lambda: _fetch_binance(symbol)),
+        ("Binance US", lambda: _fetch_binance(symbol, "api.binance.us")),
+        ("Binance GCP", lambda: _fetch_binance(symbol, "api-gcp.binance.com")),
+        ("OKX", lambda: _fetch_okx(symbol)),
     ]
+
+    cg_id = COINGECKO_IDS.get(symbol)
+    if cg_id:
+        sources.append(("CoinGecko", lambda: _parse_coingecko_klines(cg_id, symbol)))
+
+    last_err = ""
+    for name, fn in sources:
+        time.sleep(0.5)
+        result = fn()
+        if result:
+            return result
+        last_err = f"all sources failed for {symbol}"
+
+    raise RuntimeError(f"Cannot fetch klines for {symbol}: {last_err}")
 
 
 # ---------------------------------------------------------------------------
