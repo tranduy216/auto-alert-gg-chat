@@ -890,10 +890,19 @@ def main() -> None:
 
     # Filter coins with real actions
     active = [r for r in results if r['action'] not in ('NO_TRADE', 'HOLD')]
+    scheduled_hours = {5, 10, 15, 21}
 
     if not active:
-        print("[crypto_trading] No action needed – done.")
-        return
+        if now_vnt.hour in scheduled_hours:
+            message = (
+                f"**Crypto Trading Signals**\n"
+                f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}\n\n"
+                f"No action for all coin.\n\n"
+                f"⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩"
+            )
+        else:
+            print("[crypto_trading] No action needed – done.")
+            return
 
     ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
     lines: list[str] = [
