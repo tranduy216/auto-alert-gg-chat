@@ -1,6 +1,7 @@
 """Helper for sending messages to a Discord webhook."""
 
 import json
+from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -8,6 +9,18 @@ from .retry_utils import call_with_retry
 
 # Discord webhook content limit per message
 CHAR_LIMIT = 2000
+
+SILENT_START = 22.5  # 22:30 VNT
+SILENT_END = 5.5     # 05:30 VNT
+
+
+def _is_silent_hours() -> bool:
+    utc = datetime.now(timezone.utc)
+    vnt_hour = utc.hour + 7 + utc.minute / 60.0
+    vnt_hour = vnt_hour % 24
+    if SILENT_START <= vnt_hour or vnt_hour < SILENT_END:
+        return True
+    return False
 
 
 def send_message(webhook_url: str, text: str) -> None:
@@ -20,6 +33,9 @@ def send_message(webhook_url: str, text: str) -> None:
         webhook_url: The incoming webhook URL for the Discord channel.
         text: Message body.
     """
+    if _is_silent_hours():
+        print("[discord_webhook] Silent hours – skipping notification.")
+        return
     for chunk in _chunk_text(text, CHAR_LIMIT):
         _post_chunk(webhook_url, chunk)
 

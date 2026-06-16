@@ -912,8 +912,12 @@ def main() -> None:
         f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')} | {LEVERAGE}x | 15%/coin"
     )
 
-    # Urgent signals: any real action → send immediately (runs hourly)
-    urgent = any(r['action'] not in ('NO_TRADE', 'HOLD') for r in results)
+    # Urgent signals: strong trend (score ±3) with action, or EXIT → send every hour
+    urgent = any(
+        r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH')
+        or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
+        for r in results
+    )
 
     # Scheduled VNT hours: always send summary (5, 10, 15, 21)
     scheduled_hours = {5, 10, 15, 21}
