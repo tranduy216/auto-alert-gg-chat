@@ -787,13 +787,11 @@ def analyse_coin(
             "break_score": break_score_long if trend_score >= 0 else break_score_short,
             "next_rules": ["Wait for market to stabilise"],
             "timestamp": ts,
-            "action_changed": True,
         }
 
     # Load previous state
     prev = load_state(coin)
     prev_pos_state = prev.get("position_state", "FLAT")
-    last_action = prev.get("last_action", "")
 
     # State machine
     pos_state, action = resolve_action_v4(
@@ -806,9 +804,6 @@ def analyse_coin(
         p_short_entry3,
         prev_pos_state,
     )
-
-    # Determine if action changed
-    action_changed = action != last_action
 
     next_rules = compute_next_rules(pos_state)
 
@@ -828,7 +823,7 @@ def analyse_coin(
         "break_score": break_score_long if trend_score >= 0 else break_score_short,
         "next_rules": next_rules,
         "timestamp": ts,
-        "action_changed": action_changed,
+
     }
 
     # Persist state
@@ -891,8 +886,8 @@ def main() -> None:
             f"action={result['action']}"
         )
 
-    # Filter to coins whose action changed
-    changed = [r for r in results if r.get("action_changed", True)]
+    # Filter to coins with real actions (skip NO_TRADE / HOLD)
+    changed = [r for r in results if r['action'] not in ('NO_TRADE', 'HOLD')]
 
     # Build action summary
     action_blocks: list[str] = [
@@ -919,7 +914,7 @@ def main() -> None:
     separator = "\n\u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\n"
 
     if not changed:
-        message = f"{header}\n\nNo action changes for all coins.{separator}"
+        message = f"{header}\n\nNo action for all coin.{separator}"
     else:
         lines = [header, "", "Action:", *action_blocks, ""]
         for r in changed:
