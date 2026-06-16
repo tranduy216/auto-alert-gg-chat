@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Crypto Trading Signal System
+"""Crypto Trading Signal System (v4)
 
 Runs 3 times/day via GitHub Actions cron at 06:00, 12:00, 20:00 VNT.
 
-System (v3):
-  Layer 1 – Trend Engine (MA7, MA10, MA20)  → BULLISH / BEARISH / SIDEWAY
-  Layer 2 – Execution Engine (MA3, Volume)   → E_SCORE
+System (v4):
+  Layer 1 – Trend Engine (3D candles, MA7/MA10/MA20) → TrendScore ±3
+  Layer 2 – Execution Engine (1D candles, MA3/MA7/Vol/ATR14) → weighted probs
   3-stage scaling entries with 3x leverage
   Hard capital cap: max 15 % margin per coin
 
@@ -49,27 +49,11 @@ COINS = ["BTC", "ETH", "BNB", "SOL", "ARB", "LINK", "PAXG"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
-TIMEFRAME = "1h"
 CANDLE_COUNT = 30
 
 LEVERAGE = 3
 MAX_MARGIN_PER_COIN = 0.15
 STAGE_MARGIN = 0.05
-
-E_WEIGHT_TREND = 0.7
-E_WEIGHT_MOMENTUM = 0.3
-
-STRONG_LONG_THRESHOLD = 3.5
-WEAK_LONG_MIN = 2.0
-STRONG_SHORT_THRESHOLD = -3.5
-WEAK_SHORT_MAX = -2.0
-
-LONG_STOP_ADD = 1.0
-LONG_REDUCE = 0.0
-LONG_EXIT = -2.0
-SHORT_STOP_ADD = -1.0
-SHORT_REDUCE = 0.0
-SHORT_EXIT = 2.0
 
 BTC_FLASH_CRASH_PCT = -5.0
 
@@ -88,7 +72,6 @@ def _parse_binance_klines(data: list) -> list[dict]:
     ]
 
 def _parse_okx_klines(data: list) -> list[dict]:
-    # OKX returns candles in reverse chronological order; reverse to match Binance
     candles = list(reversed(data))
     return [
         {"open_time": int(k[0]), "open": float(k[1]), "high": float(k[2]),
@@ -96,11 +79,11 @@ def _parse_okx_klines(data: list) -> list[dict]:
         for k in candles
     ]
 
-def _fetch_binance(symbol: str, host: str = "api.binance.com") -> list[dict] | None:
+def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.com") -> list[dict] | None:
     try:
         resp = requests.get(
             f"https://{host}/api/v3/klines",
-            params={"symbol": symbol, "interval": TIMEFRAME, "limit": CANDLE_COUNT},
+            params={"symbol": symbol, "interval": interval, "limit": CANDLE_COUNT},
             timeout=15,
         )
         resp.raise_for_status()
@@ -109,7 +92,7 @@ def _fetch_binance(symbol: str, host: str = "api.binance.com") -> list[dict] | N
         print(f"  [{host}] {symbol} failed: {e}")
         return None
 
-def _fetch_okx(symbol: str) -> list[dict] | None:
+def _fetch_okx(symbol: str, interval: str = "1D") -> list[dict] | None:
     okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
                "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT",
                "PAXGUSDT": "PAXG-USDT"}
@@ -119,7 +102,7 @@ def _fetch_okx(symbol: str) -> list[dict] | None:
     try:
         resp = requests.get(
             "https://www.okx.com/api/v5/market/candles",
-            params={"instId": inst_id, "bar": "1H", "limit": CANDLE_COUNT},
+            params={"instId": inst_id, "bar": interval, "limit": CANDLE_COUNT},
             timeout=15,
         )
         resp.raise_for_status()
@@ -131,21 +114,44 @@ def _fetch_okx(symbol: str) -> list[dict] | None:
         print(f"  [OKX] {symbol} failed: {e}")
         return None
 
-def _parse_coingecko_klines(coin_id: str, symbol: str) -> list[dict] | None:
+COINGECKO_DAYS = {"1d": 30, "3d": 90}
+OKX_INTERVAL_MAP = {"1d": "1D", "3d": "3D"}
+
+def _aggregate_daily_to_3d(daily: list[dict]) -> list[dict]:
+    result = []
+    for i in range(0, len(daily), 3):
+        chunk = daily[i:i+3]
+        if len(chunk) < 3:
+            continue
+        result.append({
+            "open_time": chunk[0]["open_time"],
+            "open": chunk[0]["open"],
+            "high": max(c["high"] for c in chunk),
+            "low": min(c["low"] for c in chunk),
+            "close": chunk[-1]["close"],
+            "volume": sum(c["volume"] for c in chunk),
+        })
+    return result
+
+def _parse_coingecko_klines(coin_id: str, symbol: str, interval: str = "1d") -> list[dict] | None:
     """CoinGecko OHLC has no volume; default volume to 0."""
+    days = COINGECKO_DAYS.get(interval, 30)
     try:
         resp = requests.get(
             f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc",
-            params={"vs_currency": "usd", "days": 2},
+            params={"vs_currency": "usd", "days": days},
             timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
-        return [
+        candles = [
             {"open_time": int(k[0]) // 1000, "open": float(k[1]), "high": float(k[2]),
              "low": float(k[3]), "close": float(k[4]), "volume": 0.0}
-            for k in data[-CANDLE_COUNT:]
+            for k in data
         ]
+        if interval == "3d":
+            candles = _aggregate_daily_to_3d(candles)
+        return candles[-CANDLE_COUNT:]
     except Exception as e:
         print(f"  [CoinGecko] {symbol} failed: {e}")
         return None
@@ -163,18 +169,19 @@ _SOURCE_LIST: list[tuple[str, str | None]] = [
 ]
 _ACTIVE_SOURCE_IDX = 0
 
-def _build_source_fns(symbol: str) -> list[tuple[str, callable]]:
+def _build_source_fns(symbol: str, interval: str = "1d") -> list[tuple[str, callable]]:
     fns: list[tuple[str, callable]] = []
+    okx_iv = OKX_INTERVAL_MAP.get(interval, interval)
     for name, host in _SOURCE_LIST:
         if name == "OKX":
-            fns.append((name, lambda s=symbol: _fetch_okx(s)))
+            fns.append((name, lambda s=symbol, iv=okx_iv: _fetch_okx(s, iv)))
         elif host:
-            fns.append((name, lambda s=symbol, h=host: _fetch_binance(s, h)))
+            fns.append((name, lambda s=symbol, iv=interval, h=host: _fetch_binance(s, iv, h)))
         else:
-            fns.append((name, lambda s=symbol: _fetch_binance(s)))
+            fns.append((name, lambda s=symbol, iv=interval: _fetch_binance(s, iv)))
     cg_id = COINGECKO_IDS.get(symbol)
     if cg_id:
-        fns.append(("CoinGecko", lambda s=symbol, c=cg_id: _parse_coingecko_klines(c, s)))
+        fns.append(("CoinGecko", lambda s=symbol, c=cg_id, iv=interval: _parse_coingecko_klines(c, s, iv)))
     return fns
 
 def _try_source(
@@ -188,7 +195,6 @@ def _try_source(
         if result:
             return result, i, ""
         last_err = f"[{name}] {symbol} failed"
-    # Wrap around from 0 to start-1
     for i in range(0, start):
         name, fn = sources[i]
         time.sleep(0.5)
@@ -198,10 +204,10 @@ def _try_source(
         last_err = f"[{name}] {symbol} failed"
     return None, start, last_err
 
-def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
+def fetch_klines(symbol: str, interval: str = "1d") -> list[dict[str, float | int]]:
     """Fetch OHLCV klines, trying sources with adaptive fallback."""
     global _ACTIVE_SOURCE_IDX
-    sources = _build_source_fns(symbol)
+    sources = _build_source_fns(symbol, interval)
     result, idx, err = _try_source(sources, _ACTIVE_SOURCE_IDX, symbol)
     if result:
         _ACTIVE_SOURCE_IDX = idx
@@ -214,7 +220,6 @@ def fetch_klines(symbol: str) -> list[dict[str, float | int]]:
 # ---------------------------------------------------------------------------
 
 def _smart_round(v: float) -> float:
-    """Round to sensible decimal places based on value magnitude."""
     if v == 0.0:
         return 0.0
     abs_v = abs(v)
@@ -230,7 +235,6 @@ def _smart_round(v: float) -> float:
 
 
 def sma(values: list[float], period: int) -> list[float | None]:
-    """Simple moving average; first period-1 elements are None."""
     result: list[float | None] = []
     for i in range(len(values)):
         if i < period - 1:
@@ -241,7 +245,6 @@ def sma(values: list[float], period: int) -> list[float | None]:
 
 
 def compute_atr(candles: list[dict], period: int = 14) -> float:
-    """Average True Range for volatility measurement."""
     if len(candles) < period + 1:
         return 0.0
     trs = []
@@ -254,320 +257,231 @@ def compute_atr(candles: list[dict], period: int = 14) -> float:
     return sum(trs[-period:]) / period
 
 
-def compute_entry_zone(
-    candles: list[dict],
-    trend: str,
-    signal: str,
-    ma7: float,
-    ma10: float,
-    ma20: float,
-) -> dict:
-    """Calculate optimal entry price zone and key levels."""
-    atr = compute_atr(candles)
-    recent_low = min(c["low"] for c in candles[-10:])
-    recent_high = max(c["high"] for c in candles[-10:])
-    current_close = candles[-1]["close"]
-
-    if signal in ("STRONG_LONG", "WEAK_LONG"):
-        support = min(ma20, ma10, recent_low)
-        upper_bound = min(current_close * 1.01, ma7)
-        zone = {
-            "support": _smart_round(support),
-            "optimal_entry": _smart_round(max(support, ma10 * 0.99)),
-            "upper_bound": _smart_round(upper_bound),
-        }
-    elif signal in ("STRONG_SHORT", "WEAK_SHORT"):
-        resistance = max(ma20, ma10, recent_high)
-        lower_bound = max(current_close * 0.99, ma7)
-        zone = {
-            "lower_bound": _smart_round(lower_bound),
-            "optimal_entry": _smart_round(min(resistance, ma10 * 1.01)),
-            "resistance": _smart_round(resistance),
-        }
-    else:
-        zone = {
-            "near_support": _smart_round(min(ma20, recent_low)),
-            "near_resistance": _smart_round(max(ma20, recent_high)),
-        }
-
-    zone["atr"] = _smart_round(atr)
-    zone["current_price"] = _smart_round(current_close)
-    return zone
-
-
-def compute_entry_prices(
-    p0: float, atr: float, trend: str, signal: str,
-    vol_ratio: float, s_trend: float, ma7: float, ma10: float, ma20: float,
-) -> dict:
-    """Compute Entry 2 (pullback) and Entry 3 (momentum) prices per pseudocode."""
-    is_long = signal in ("STRONG_LONG", "WEAK_LONG")
-    is_short = signal in ("STRONG_SHORT", "WEAK_SHORT")
-
-    if not is_long and not is_short:
-        return {
-            "entry_2": None,
-            "entry_3": None,
-            "confidence_2": 0,
-            "confidence_3": 0,
-        }
-
-    bias_score = min(1.0, max(0.0, abs(s_trend) / 5.0))
-    pullback_factor = 1.0 - bias_score
-
-    if vol_ratio > 2.0:
-        vol_factor = 1.5
-    elif vol_ratio > 1.5:
-        vol_factor = 1.3
-    elif vol_ratio > 1.0:
-        vol_factor = 1.1
-    elif vol_ratio > 0.7:
-        vol_factor = 1.0
-    else:
-        vol_factor = 0.8
-
-    if is_long:
-        ma_alignment = 1.5 if ma7 > ma10 > ma20 else (1.0 if ma7 > ma10 else 0.75)
-    elif is_short:
-        ma_alignment = 1.5 if ma7 < ma10 < ma20 else (1.0 if ma7 < ma10 else 0.75)
-    else:
-        ma_alignment = 1.0
-
-    momentum_factor = vol_factor * ma_alignment
-
-    if is_long:
-        e2 = p0 - (0.5 * atr * pullback_factor)
-        e3 = p0 + (0.75 * atr * momentum_factor)
-    elif is_short:
-        e2 = p0 + (0.5 * atr * pullback_factor)
-        e3 = p0 - (0.75 * atr * momentum_factor)
-    else:
-        e2 = p0
-        e3 = p0
-
-    # Confidence rates
-    confidence_2 = round(min(100, bias_score * 100))
-    max_momentum = 2.25  # max vol_factor (1.5) * max ma_alignment (1.5)
-    confidence_3 = round(min(100, (momentum_factor / max_momentum) * 100))
-
-    return {
-        "entry_2": _smart_round(e2),
-        "entry_3": _smart_round(e3),
-        "confidence_2": confidence_2,
-        "confidence_3": confidence_3,
-        "bias_score": round(bias_score, 2),
-        "vol_factor": round(vol_factor, 2),
-        "ma_alignment": round(ma_alignment, 2),
-    }
-
-
 # ---------------------------------------------------------------------------
-# Trend Engine  (Layer 1)
+# Trend Engine (3D)
 # ---------------------------------------------------------------------------
 
-def evaluate_trend(ma7: float, ma10: float, ma20: float) -> tuple[str, float]:
-    """Determine trend direction and S_TREND score (range -5 .. +5).
+def _approx_equal(a: float, b: float, threshold: float = 0.005) -> bool:
+    """True if |a-b|/max(|a|,|b|) < threshold."""
+    denom = max(abs(a), abs(b))
+    if denom == 0:
+        return True
+    return abs(a - b) / denom < threshold
 
-    Returns (trend_label, s_trend_score).
-    """
+
+def evaluate_trend_3d(ma7: float, ma10: float, ma20: float) -> tuple[str, int]:
+    """Classify trend from 3D MAs. Returns (label, trend_score)."""
     ma_max = max(ma7, ma10, ma20)
     ma_min = min(ma7, ma10, ma20)
     spread = (ma_max - ma_min) / ma_min * 100 if ma_min > 0 else 0
 
     if spread < 0.5:
-        return ("SIDEWAY", 0.0)
+        return ("SIDEWAY", 0)
 
     if ma7 > ma10 > ma20:
-        gap = (ma7 - ma20) / ma20 * 100
-        if gap > 3.0:
-            return ("BULLISH", 5.0)
-        if gap > 1.5:
-            return ("BULLISH", 4.0)
-        if gap > 0.8:
-            return ("BULLISH", 3.0)
-        if gap > 0.3:
-            return ("BULLISH", 2.0)
-        return ("BULLISH", 1.0)
+        return ("BULLISH", 3)
+
+    if ma7 > ma10 and _approx_equal(ma10, ma20):
+        return ("WEAK_BULLISH", 2)
+
+    if ma7 < ma10 and _approx_equal(ma10, ma20):
+        return ("WEAK_BEARISH", -2)
 
     if ma7 < ma10 < ma20:
-        gap = (ma20 - ma7) / ma20 * 100
-        if gap > 3.0:
-            return ("BEARISH", -5.0)
-        if gap > 1.5:
-            return ("BEARISH", -4.0)
-        if gap > 0.8:
-            return ("BEARISH", -3.0)
-        if gap > 0.3:
-            return ("BEARISH", -2.0)
-        return ("BEARISH", -1.0)
+        return ("BEARISH", -3)
 
-    if ma7 > ma20:
-        return ("BULLISH", 0.5)
-    if ma7 < ma20:
-        return ("BEARISH", -0.5)
-    return ("SIDEWAY", 0.0)
+    return ("SIDEWAY", 0)
+
+
+def trend_strength(score: int) -> float:
+    return {3: 1.0, 2: 0.7, 0: 0.0, -2: -0.7, -3: -1.0}.get(score, 0.0)
 
 
 # ---------------------------------------------------------------------------
-# Execution Engine  (Layer 2)
+# Execution Engine (1D)
 # ---------------------------------------------------------------------------
 
-def compute_momentum_score(
-    close: float,
-    ma3_current: float,
-    ma3_prev: float,
-    volume: float,
-    vol_ma20: float,
-) -> float:
-    """Compute S_MOMENTUM score (capped at -5 .. +5)."""
-    score = 0.0
-
-    # MA3 position
-    diff_pct = (close - ma3_current) / ma3_current * 100 if ma3_current > 0 else 0
-    if diff_pct > 0.5:
-        score += 2.0
-    elif diff_pct > 0.1:
-        score += 1.0
-    elif diff_pct < -0.5:
-        score -= 2.0
-    elif diff_pct < -0.1:
-        score -= 1.0
-
-    # MA3 slope
-    slope_pct = (ma3_current - ma3_prev) / ma3_prev * 100 if ma3_prev > 0 else 0
-    if slope_pct > 0.1:
-        score += 1.0
-    elif slope_pct < -0.1:
-        score -= 1.0
-
-    # Volume ratio (spec §6.2)
-    vol_ratio = volume / vol_ma20 if vol_ma20 > 0 else 0
-    if vol_ratio > 2.0:
-        score += 3.0
-    elif vol_ratio >= 1.5:
-        score += 2.0
-    elif vol_ratio >= 1.0:
-        score += 1.0
-    elif vol_ratio >= 0.7:
-        score += 0.0
-    else:
-        score -= 2.0
-
-    return max(-5.0, min(5.0, score))
+def compute_volume_score(volume: float, vol_ma20: float) -> float:
+    if vol_ma20 <= 0:
+        return 0.2
+    ratio = volume / vol_ma20
+    if ratio >= 2.0:
+        return 1.0
+    if ratio >= 1.5:
+        return 0.8
+    if ratio >= 1.2:
+        return 0.6
+    if ratio >= 1.0:
+        return 0.4
+    return 0.2
 
 
-# ---------------------------------------------------------------------------
-# Signal classification
-# ---------------------------------------------------------------------------
+def compute_reaction_score_long(close: float, low: float, ma3: float) -> float:
+    if close <= ma3 or ma3 <= 0:
+        return 0.0
+    diff_ratio = abs(low - ma3) / ma3
+    if diff_ratio < 0.005:
+        return 1.0
+    if diff_ratio < 0.01:
+        return 0.5
+    return 0.0
 
-def classify_signal(e_score: float, trend: str) -> str:
-    """Map E_SCORE + trend to a signal name."""
-    if trend == "SIDEWAY":
-        return "WAIT"
-    if e_score >= STRONG_LONG_THRESHOLD:
-        return "STRONG_LONG"
-    if e_score >= WEAK_LONG_MIN:
-        return "WEAK_LONG"
-    if e_score <= STRONG_SHORT_THRESHOLD:
-        return "STRONG_SHORT"
-    if e_score <= WEAK_SHORT_MAX:
-        return "WEAK_SHORT"
-    return "WAIT"
+
+def compute_reaction_score_short(close: float, high: float, ma3: float) -> float:
+    if close >= ma3 or ma3 <= 0:
+        return 0.0
+    diff_ratio = abs(high - ma3) / ma3
+    if diff_ratio < 0.005:
+        return 1.0
+    if diff_ratio < 0.01:
+        return 0.5
+    return 0.0
+
+
+def compute_resistance(candles: list[dict], ma7: float, ma10: float) -> float:
+    recent_high = max(c["high"] for c in candles[-10:])
+    return max(ma7, ma10, recent_high)
+
+
+def compute_support(candles: list[dict], ma7: float, ma10: float) -> float:
+    recent_low = min(c["low"] for c in candles[-10:])
+    return min(ma7, ma10, recent_low)
+
+
+def compute_break_score_long(close: float, resistance: float, atr: float) -> float:
+    return 1.0 if close > resistance + 0.3 * atr else 0.0
+
+
+def compute_break_score_short(close: float, support: float, atr: float) -> float:
+    return 1.0 if close < support - 0.3 * atr else 0.0
+
+
+def compute_atr_score(atr: float, price: float) -> float:
+    if price <= 0:
+        return 0.3
+    ratio = atr / price * 100
+    if 0.5 <= ratio <= 1.5:
+        return 1.0
+    if 1.5 < ratio <= 3.0:
+        return 0.7
+    if ratio > 3.0:
+        return 0.4
+    return 0.3
+
+
+def compute_entry1_signal_long(close: float, ma7: float, volume_score: float) -> bool:
+    return close > ma7 and volume_score >= 0.4
+
+
+def compute_entry1_signal_short(close: float, ma7: float, volume_score: float) -> bool:
+    return close < ma7 and volume_score >= 0.4
+
+
+def compute_entry_zone_v4(
+    candles_1d: list[dict],
+    trend_score: int,
+    ma7: float,
+    ma10: float,
+    atr: float,
+) -> dict:
+    current_price = candles_1d[-1]["close"]
+    recent_low = min(c["low"] for c in candles_1d[-10:])
+    recent_high = max(c["high"] for c in candles_1d[-10:])
+
+    if trend_score >= 2:
+        support = min(ma10, recent_low)
+        upper_bound = min(current_price * 1.01, ma7)
+        return {
+            "current_price": _smart_round(current_price),
+            "support": _smart_round(support),
+            "optimal_entry": _smart_round(max(support, ma10 * 0.99)),
+            "upper_bound": _smart_round(upper_bound),
+            "atr": _smart_round(atr),
+        }
+    if trend_score <= -2:
+        resistance = max(ma10, recent_high)
+        lower_bound = max(current_price * 0.99, ma7)
+        return {
+            "current_price": _smart_round(current_price),
+            "resistance": _smart_round(resistance),
+            "optimal_entry": _smart_round(min(resistance, ma10 * 1.01)),
+            "lower_bound": _smart_round(lower_bound),
+            "atr": _smart_round(atr),
+        }
+    return {
+        "current_price": _smart_round(current_price),
+        "near_support": _smart_round(min(ma10, recent_low)),
+        "near_resistance": _smart_round(max(ma10, recent_high)),
+        "atr": _smart_round(atr),
+    }
 
 
 # ---------------------------------------------------------------------------
 # State machine
 # ---------------------------------------------------------------------------
 
-def resolve_action(
-    signal: str,
-    e_score: float,
-    trend: str,
-    ma3_current: float,
-    ma3_prev: float,
-    volume: float,
-    vol_ma20: float,
-    prev_state: str,
-    prev_side: str,
-    prev_entry_count: int,
-) -> tuple[str, str, str, int]:
-    """Return (state, side, action, entry_count).
+def resolve_action_v4(
+    trend_score: int,
+    entry1_long: bool,
+    entry1_short: bool,
+    p_long_entry2: float,
+    p_short_entry2: float,
+    p_long_entry3: float,
+    p_short_entry3: float,
+    prev_pos_state: str,
+) -> tuple[str, str]:
+    """Return (position_state, action)."""
 
-    state  : NO_POSITION | BUILDING_POSITION | IN_POSITION
-    side   : NONE | LONG | SHORT
-    action : NO_TRADE | OPEN_LONG_ENTRY_1 | OPEN_SHORT_ENTRY_1
-             | ADD_LONG_ENTRY_2 | ADD_SHORT_ENTRY_2
-             | ADD_LONG_ENTRY_3 | ADD_SHORT_ENTRY_3
-             | REDUCE_LONG | REDUCE_SHORT
-             | EXIT_LONG | EXIT_SHORT
-             | HOLD
-    """
-    state = prev_state
-    side = prev_side
-    entry_count = prev_entry_count
-    is_long_signal = signal in ("STRONG_LONG", "WEAK_LONG")
-    is_short_signal = signal in ("STRONG_SHORT", "WEAK_SHORT")
+    if prev_pos_state == "FLAT":
+        if trend_score >= 2 and entry1_long:
+            return ("LONG_ENTRY_1", "OPEN_LONG_ENTRY_1")
+        if trend_score <= -2 and entry1_short:
+            return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
+        return ("FLAT", "NO_TRADE")
 
-    vol_ratio = volume / vol_ma20 if vol_ma20 > 0 else 0
-    ma3_slope = (ma3_current - ma3_prev) / ma3_prev * 100 if ma3_prev > 0 else 0
+    if prev_pos_state == "LONG_ENTRY_1":
+        if p_long_entry2 >= 0.70:
+            return ("LONG_ENTRY_2", "ADD_LONG_ENTRY_2")
+        if trend_score < -2:
+            return ("FLAT", "EXIT_LONG")
+        if trend_score < 0:
+            return ("FLAT", "REDUCE_LONG")
+        return ("LONG_ENTRY_1", "HOLD")
 
-    # ---- FLAT: consider Entry 1 ----
-    if state == "NO_POSITION":
-        if is_long_signal and trend == "BULLISH" and e_score >= WEAK_LONG_MIN:
-            return ("BUILDING_POSITION", "LONG", "OPEN_LONG_ENTRY_1", 1)
-        if is_short_signal and trend == "BEARISH" and e_score <= WEAK_SHORT_MAX:
-            return ("BUILDING_POSITION", "SHORT", "OPEN_SHORT_ENTRY_1", 1)
-        return ("NO_POSITION", "NONE", "NO_TRADE", 0)
+    if prev_pos_state == "LONG_ENTRY_2":
+        if p_long_entry3 >= 0.75:
+            return ("LONG_ENTRY_3", "ADD_LONG_ENTRY_3")
+        if trend_score < -2:
+            return ("FLAT", "EXIT_LONG")
+        return ("LONG_ENTRY_2", "HOLD")
 
-    # ---- BUILDING_POSITION ----
-    if state == "BUILDING_POSITION":
-        # Risk management (by position side)
-        if side == "LONG":
-            if e_score < LONG_EXIT:
-                return ("NO_POSITION", "NONE", "EXIT_LONG", 0)
-            if e_score < LONG_REDUCE:
-                return ("NO_POSITION", "NONE", "REDUCE_LONG", 0)
-            if e_score < LONG_STOP_ADD:
-                return (state, side, "HOLD", entry_count)
-        elif side == "SHORT":
-            if e_score > SHORT_EXIT:
-                return ("NO_POSITION", "NONE", "EXIT_SHORT", 0)
-            if e_score > SHORT_REDUCE:
-                return ("NO_POSITION", "NONE", "REDUCE_SHORT", 0)
-            if e_score > SHORT_STOP_ADD:
-                return (state, side, "HOLD", entry_count)
+    if prev_pos_state == "LONG_ENTRY_3":
+        if trend_score < -2:
+            return ("FLAT", "EXIT_LONG")
+        return ("LONG_ENTRY_3", "HOLD")
 
-        # Scaling logic
-        if entry_count == 1 and side == "LONG":
-            if ma3_slope > 0 and vol_ratio > 1.0 and is_long_signal:
-                return ("BUILDING_POSITION", "LONG", "ADD_LONG_ENTRY_2", 2)
-        if entry_count == 1 and side == "SHORT":
-            if ma3_slope < 0 and vol_ratio > 1.0 and is_short_signal:
-                return ("BUILDING_POSITION", "SHORT", "ADD_SHORT_ENTRY_2", 2)
+    if prev_pos_state == "SHORT_ENTRY_1":
+        if p_short_entry2 >= 0.70:
+            return ("SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2")
+        if trend_score > 2:
+            return ("FLAT", "EXIT_SHORT")
+        if trend_score > 0:
+            return ("FLAT", "REDUCE_SHORT")
+        return ("SHORT_ENTRY_1", "HOLD")
 
-        if entry_count == 2 and side == "LONG":
-            if vol_ratio > 2.0 and is_long_signal:
-                return ("IN_POSITION", "LONG", "ADD_LONG_ENTRY_3", 3)
-        if entry_count == 2 and side == "SHORT":
-            if vol_ratio > 2.0 and is_short_signal:
-                return ("IN_POSITION", "SHORT", "ADD_SHORT_ENTRY_3", 3)
+    if prev_pos_state == "SHORT_ENTRY_2":
+        if p_short_entry3 >= 0.75:
+            return ("SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3")
+        if trend_score > 2:
+            return ("FLAT", "EXIT_SHORT")
+        return ("SHORT_ENTRY_2", "HOLD")
 
-        return (state, side, "HOLD", entry_count)
+    if prev_pos_state == "SHORT_ENTRY_3":
+        if trend_score > 2:
+            return ("FLAT", "EXIT_SHORT")
+        return ("SHORT_ENTRY_3", "HOLD")
 
-    # ---- IN_POSITION: only risk management ----
-    if state == "IN_POSITION":
-        if side == "LONG":
-            if e_score < LONG_EXIT:
-                return ("NO_POSITION", "NONE", "EXIT_LONG", 0)
-            if e_score < LONG_REDUCE:
-                return ("BUILDING_POSITION", "LONG", "REDUCE_LONG", 1)
-        elif side == "SHORT":
-            if e_score > SHORT_EXIT:
-                return ("NO_POSITION", "NONE", "EXIT_SHORT", 0)
-            if e_score > SHORT_REDUCE:
-                return ("BUILDING_POSITION", "SHORT", "REDUCE_SHORT", 1)
-        return (state, side, "HOLD", entry_count)
-
-    return (state, side, "HOLD", entry_count)
+    return ("FLAT", "NO_TRADE")
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +489,6 @@ def resolve_action(
 # ---------------------------------------------------------------------------
 
 def check_kill_switch(btc_candles: list[dict]) -> bool:
-    """Return True if market-wide emergency detected."""
     if len(btc_candles) < 2:
         return False
 
@@ -617,7 +530,7 @@ def load_state(coin: str) -> dict:
     """Load saved position state from Firestore."""
     db = _get_db()
     if db is None:
-        return {"state": "NO_POSITION", "side": "NONE", "entry_count": 0}
+        return {"position_state": "FLAT", "last_action": ""}
     try:
         doc = call_with_retry(
             lambda: db.collection(FIRESTORE_COLLECTION).document(coin).get(),
@@ -628,12 +541,17 @@ def load_state(coin: str) -> dict:
     except Exception as exc:
         print(f"[crypto_trading] Warning: could not load state for {coin}: {exc}",
               file=sys.stderr)
-    return {"state": "NO_POSITION", "side": "NONE", "entry_count": 0}
+    return {"position_state": "FLAT", "last_action": ""}
 
 
 def save_state(
-    coin: str, state: str, side: str, entry_count: int,
-    e_score: float, signal: str, action: str, timestamp: str,
+    coin: str,
+    position_state: str,
+    action: str,
+    trend_score: int,
+    entry2_prob: float,
+    entry3_prob: float,
+    timestamp: str,
 ) -> None:
     """Persist position state to Firestore."""
     db = _get_db()
@@ -643,12 +561,12 @@ def save_state(
         doc_ref = db.collection(FIRESTORE_COLLECTION).document(coin)
         call_with_retry(
             lambda: doc_ref.set({
-                "state": state,
-                "side": side,
-                "entry_count": entry_count,
-                "e_score": round(e_score, 2),
-                "signal": signal,
+                "position_state": position_state,
                 "action": action,
+                "last_action": action,
+                "trend_score": trend_score,
+                "entry2_prob": round(entry2_prob, 2),
+                "entry3_prob": round(entry3_prob, 2),
                 "timestamp": timestamp,
             }),
             resource_name=f"Firestore save {coin} state",
@@ -663,78 +581,52 @@ def save_state(
 # ---------------------------------------------------------------------------
 
 def _signal_icon(result: dict) -> str:
-    """Return icon for the coin heading based on signal/action."""
-    sig = result["signal"]
     act = result["action"]
     if act in ("EXIT_LONG", "EXIT_SHORT", "KILL_SWITCH"):
         return "❗❗❗"
     if act in ("REDUCE_LONG", "REDUCE_SHORT"):
         return "🟡"
-    if sig == "STRONG_LONG":
+    if "LONG" in act:
         return "💚"
-    if sig == "WEAK_LONG":
-        return "🟢"
-    if sig == "STRONG_SHORT":
+    if "SHORT" in act:
         return "🔴"
-    if sig == "WEAK_SHORT":
-        return "🟠"
     return "🟡"
 
 
-def compute_position_state(state: str, side: str, entry_count: int) -> str:
-    """Derive standardized position state."""
-    if state == "NO_POSITION":
-        return "FLAT"
-    if side == "LONG":
-        if state == "IN_POSITION":
-            return f"LONG_ENTRY_{entry_count}"
-        return f"LONG_ENTRY_{entry_count}"
-    if side == "SHORT":
-        if state == "IN_POSITION":
-            return f"SHORT_ENTRY_{entry_count}"
-        return f"SHORT_ENTRY_{entry_count}"
-    return "FLAT"
-
-
-def compute_next_rules(position_state: str, signal: str, e_score: float, trend: str) -> list[str]:
-    """Return list of next-action rules based on current position."""
+def compute_next_rules(position_state: str) -> list[str]:
     rules: list[str] = []
     if position_state == "FLAT":
-        if signal in ("STRONG_LONG", "WEAK_LONG") and trend == "BULLISH":
-            rules.append("OPEN_LONG_ENTRY_1 if score >= 2.0")
-        elif signal in ("STRONG_SHORT", "WEAK_SHORT") and trend == "BEARISH":
-            rules.append("OPEN_SHORT_ENTRY_1 if score <= -2.0")
-        else:
-            rules.append("Wait for trend confirmation + score threshold")
+        rules.append("OPEN_LONG if TrendScore >= +2 and Entry1Signal")
+        rules.append("OPEN_SHORT if TrendScore <= -2 and Entry1Signal")
         return rules
-
     if position_state.startswith("LONG"):
-        if position_state in ("LONG_ENTRY_1",):
-            rules.append("LONG_ENTRY_2 (30% money) if MA3 recovery + volume > 1x")
-        if position_state in ("LONG_ENTRY_1", "LONG_ENTRY_2"):
-            rules.append("LONG_ENTRY_3 (40% money) if breakout + volume spike > 2x")
-        rules.append("REDUCE_LONG if score < 0")
-        rules.append("EXIT_LONG if score < -2")
-
-    if position_state.startswith("SHORT"):
-        if position_state in ("SHORT_ENTRY_1",):
-            rules.append("SHORT_ENTRY_2 (30% money) if MA3 rejection + volume > 1x")
-        if position_state in ("SHORT_ENTRY_1", "SHORT_ENTRY_2"):
-            rules.append("SHORT_ENTRY_3 (40% money) if breakdown + volume spike > 2x")
-        rules.append("REDUCE_SHORT if score > 0")
-        rules.append("EXIT_SHORT if score > 2")
-
+        if position_state == "LONG_ENTRY_1":
+            rules.append("ADD ENTRY2 if P_Entry2 >= 0.70")
+            rules.append("REDUCE if TrendScore < 0 | EXIT if TrendScore < -2")
+        elif position_state == "LONG_ENTRY_2":
+            rules.append("ADD ENTRY3 if P_Entry3 >= 0.75")
+            rules.append("EXIT if TrendScore < -2")
+        elif position_state == "LONG_ENTRY_3":
+            rules.append("EXIT if TrendScore < -2")
+    elif position_state.startswith("SHORT"):
+        if position_state == "SHORT_ENTRY_1":
+            rules.append("ADD ENTRY2 if P_Entry2 >= 0.70")
+            rules.append("REDUCE if TrendScore > 0 | EXIT if TrendScore > 2")
+        elif position_state == "SHORT_ENTRY_2":
+            rules.append("ADD ENTRY3 if P_Entry3 >= 0.75")
+            rules.append("EXIT if TrendScore > 2")
+        elif position_state == "SHORT_ENTRY_3":
+            rules.append("EXIT if TrendScore > 2")
     return rules
 
 
 def _action_text(result: dict) -> str:
-    """Human-readable action description."""
     a = result["action"]
     z = result.get("entry_zone", {})
     price = z.get("optimal_entry") or z.get("current_price", "?")
 
     if a == "KILL_SWITCH": return "Emergency exit (kill switch)"
-    if a == "NO_TRADE": return "No action – wait for setup"
+    if a == "NO_TRADE": return "No action \u2013 wait for setup"
     if a == "HOLD": return "Hold current position"
     if a == "EXIT_LONG": return "Exit all LONG position"
     if a == "EXIT_SHORT": return "Exit all SHORT position"
@@ -750,45 +642,49 @@ def _action_text(result: dict) -> str:
 
 
 def _optimal_text(result: dict) -> str:
-    """Optimal entry price."""
     z = result.get("entry_zone", {})
-    if result["signal"] in ("STRONG_LONG", "WEAK_LONG", "STRONG_SHORT", "WEAK_SHORT"):
+    trend_score = result["trend_score"]
+    if trend_score >= 2 or trend_score <= -2:
         return f"${z.get('optimal_entry', '?')}"
     return "-"
 
 
 def _zone_text(result: dict) -> str:
-    """Entry zone range."""
     z = result.get("entry_zone", {})
-    sig = result["signal"]
-    if sig in ("STRONG_LONG", "WEAK_LONG"):
-        return f"${z.get('support', '?')} – ${z.get('upper_bound', '?')} (ATR: ${z.get('atr', '?')})"
-    if sig in ("STRONG_SHORT", "WEAK_SHORT"):
-        return f"${z.get('lower_bound', '?')} – ${z.get('resistance', '?')} (ATR: ${z.get('atr', '?')})"
-    return f"Support ${z.get('near_support', '?')} – Resistance ${z.get('near_resistance', '?')}"
+    trend_score = result["trend_score"]
+    if trend_score >= 2:
+        return f"${z.get('support', '?')} \u2013 ${z.get('upper_bound', '?')} (ATR: ${z.get('atr', '?')})"
+    if trend_score <= -2:
+        return f"${z.get('lower_bound', '?')} \u2013 ${z.get('resistance', '?')} (ATR: ${z.get('atr', '?')})"
+    return f"Sup ${z.get('near_support', '?')} \u2013 Res ${z.get('near_resistance', '?')}"
+
+
+def prob_label(p: float) -> str:
+    if p < 0.50:
+        return "No action"
+    if p < 0.70:
+        return "Watch"
+    if p < 0.85:
+        return "Execute"
+    return "High conv."
 
 
 def format_detail(result: dict) -> str:
-    """Detailed per-coin section (no Action block, shown at top once)."""
     icon = _signal_icon(result)
     position = result["position_state"]
     action = _action_text(result)
     optimal = _optimal_text(result)
     zone = _zone_text(result)
-    score = result["e_score"]
-    z = result.get("entry_zone", {})
-    e2 = z.get("entry_2")
-    e3 = z.get("entry_3")
+    ts = result["trend_score"]
     heading = f"## {icon} {result['coin']}" if icon else f"## {result['coin']}"
-    score_str = f"{score:+.1f}" if score != 0 else "0.0"
-    lines = [heading, f"STAGE: {position}. Score={score_str}", f"ACTION: {action}"]
+    ts_str = f"{ts:+d}" if ts != 0 else "0"
+    lines = [heading, f"STAGE: {position}. TrendScore: {ts_str}"]
+    lines.append(f"ACTION: {action}")
     lines.append(f"OPTIMAL: {optimal}. ZONE: {zone}")
-    sig = result["signal"]
-    if sig in ("STRONG_LONG", "WEAK_LONG", "STRONG_SHORT", "WEAK_SHORT") and e2 is not None and e3 is not None:
-        c2 = z.get("confidence_2", "?")
-        c3 = z.get("confidence_3", "?")
-        prefix = "LONG" if sig in ("STRONG_LONG", "WEAK_LONG") else "SHORT"
-        lines.append(f"{prefix} ENTRY2: ${e2} (confidence {c2}%) | {prefix} ENTRY3: ${e3} (confidence {c3}%)")
+    e2p = result.get("entry2_prob", 0)
+    e3p = result.get("entry3_prob", 0)
+    lines.append(f"E2 Prob: {e2p*100:.0f}% ({prob_label(e2p)}) | "
+                 f"E3 Prob: {e3p*100:.0f}% ({prob_label(e3p)})")
     return "\n".join(lines)
 
 
@@ -798,103 +694,147 @@ def format_detail(result: dict) -> str:
 
 def analyse_coin(
     coin: str,
-    candles: list[dict],
+    candles_3d: list[dict],
+    candles_1d: list[dict],
     kill_switch_active: bool,
 ) -> dict:
-    """Run full analysis pipeline for one coin; return output dict."""
-    closes = [c["close"] for c in candles]
-    volumes = [c["volume"] for c in candles]
+    ts = _now_vnt().isoformat()
 
-    # Indicators
-    ma3_all = sma(closes, 3)
-    ma7_all = sma(closes, 7)
-    ma10_all = sma(closes, 10)
-    ma20_all = sma(closes, 20)
-    vol_ma20_all = sma(volumes, 20)
+    # --- Trend Engine (3D) ---
+    closes_3d = [c["close"] for c in candles_3d]
 
-    ma3 = ma3_all[-1] if ma3_all[-1] is not None else closes[-1]
-    ma3_prev = ma3_all[-2] if len(ma3_all) > 1 and ma3_all[-2] is not None else ma3
-    ma7 = ma7_all[-1] if ma7_all[-1] is not None else closes[-1]
-    ma10 = ma10_all[-1] if ma10_all[-1] is not None else closes[-1]
-    ma20 = ma20_all[-1] if ma20_all[-1] is not None else closes[-1]
-    vol_ma20 = vol_ma20_all[-1] if vol_ma20_all[-1] is not None else volumes[-1]
+    ma7_3d_all = sma(closes_3d, 7)
+    ma10_3d_all = sma(closes_3d, 10)
+    ma20_3d_all = sma(closes_3d, 20)
 
-    last_close = closes[-1]
-    last_volume = volumes[-1]
+    ma7_3d = ma7_3d_all[-1] if ma7_3d_all[-1] is not None else closes_3d[-1]
+    ma10_3d = ma10_3d_all[-1] if ma10_3d_all[-1] is not None else closes_3d[-1]
+    ma20_3d = ma20_3d_all[-1] if ma20_3d_all[-1] is not None else closes_3d[-1]
 
-    # Layer 1 – Trend Engine
-    trend, s_trend = evaluate_trend(ma7, ma10, ma20)
+    trend_label, trend_score = evaluate_trend_3d(ma7_3d, ma10_3d, ma20_3d)
+    ts_val = trend_strength(trend_score)
 
-    # Layer 2 – Execution Engine
-    s_momentum = compute_momentum_score(
-        last_close, ma3, ma3_prev, last_volume, vol_ma20,
-    )
-    e_score = round(E_WEIGHT_TREND * s_trend + E_WEIGHT_MOMENTUM * s_momentum, 2)
+    # --- Execution Engine (1D) ---
+    closes_1d = [c["close"] for c in candles_1d]
+    highs_1d = [c["high"] for c in candles_1d]
+    lows_1d = [c["low"] for c in candles_1d]
+    volumes_1d = [c["volume"] for c in candles_1d]
 
-    # Signal classification
-    signal = classify_signal(e_score, trend)
+    ma3_1d_all = sma(closes_1d, 3)
+    ma7_1d_all = sma(closes_1d, 7)
+    ma10_1d_all = sma(closes_1d, 10)
+    vol_ma20_1d_all = sma(volumes_1d, 20)
+
+    ma3_1d = ma3_1d_all[-1] if ma3_1d_all[-1] is not None else closes_1d[-1]
+    ma7_1d = ma7_1d_all[-1] if ma7_1d_all[-1] is not None else closes_1d[-1]
+    ma10_1d = ma10_1d_all[-1] if ma10_1d_all[-1] is not None else closes_1d[-1]
+    vol_ma20_1d = vol_ma20_1d_all[-1] if vol_ma20_1d_all[-1] is not None else volumes_1d[-1]
+
+    last_close = closes_1d[-1]
+    last_low = lows_1d[-1]
+    last_high = highs_1d[-1]
+    last_volume = volumes_1d[-1]
+
+    atr_1d = compute_atr(candles_1d, 14)
+
+    # Scores
+    volume_score = compute_volume_score(last_volume, vol_ma20_1d)
+    reaction_score_long = compute_reaction_score_long(last_close, last_low, ma3_1d)
+    reaction_score_short = compute_reaction_score_short(last_close, last_high, ma3_1d)
+
+    resistance = compute_resistance(candles_1d, ma7_1d, ma10_1d)
+    support = compute_support(candles_1d, ma7_1d, ma10_1d)
+    break_score_long = compute_break_score_long(last_close, resistance, atr_1d)
+    break_score_short = compute_break_score_short(last_close, support, atr_1d)
+
+    atr_score = compute_atr_score(atr_1d, last_close)
+
+    # Entry 1 signals
+    entry1_long = compute_entry1_signal_long(last_close, ma7_1d, volume_score)
+    entry1_short = compute_entry1_signal_short(last_close, ma7_1d, volume_score)
+
+    # Entry 2 / 3 probabilities
+    ts_long = max(0.0, ts_val)
+    ts_short = max(0.0, -ts_val)
+
+    p_long_entry2 = min(1.0, max(0.0, 0.35 * ts_long + 0.25 * reaction_score_long
+                                  + 0.25 * volume_score + 0.15 * atr_score))
+    p_short_entry2 = min(1.0, max(0.0, 0.35 * ts_short + 0.25 * reaction_score_short
+                                   + 0.25 * volume_score + 0.15 * atr_score))
+    p_long_entry3 = min(1.0, max(0.0, 0.30 * ts_long + 0.20 * reaction_score_long
+                                  + 0.30 * volume_score + 0.20 * break_score_long))
+    p_short_entry3 = min(1.0, max(0.0, 0.30 * ts_short + 0.20 * reaction_score_short
+                                   + 0.30 * volume_score + 0.20 * break_score_short))
 
     # Entry zone
-    entry_zone = compute_entry_zone(candles, trend, signal, ma7, ma10, ma20)
-
-    # Entry 2 & 3 prices
-    vol_ratio = last_volume / vol_ma20 if vol_ma20 > 0 else 0
-    p0 = entry_zone.get("optimal_entry") or last_close
-    entry_prices = compute_entry_prices(
-        p0, entry_zone.get("atr", 0), trend, signal,
-        vol_ratio, s_trend, ma7, ma10, ma20,
-    )
-    entry_zone.update(entry_prices)
+    entry_zone = compute_entry_zone_v4(candles_1d, trend_score, ma7_1d, ma10_1d, atr_1d)
 
     # Kill-switch override
     if kill_switch_active:
         return {
             "coin": coin,
-            "trend": trend,
-            "e_score": e_score,
-            "signal": signal,
+            "trend": trend_label,
+            "trend_score": trend_score,
+            "entry2_prob": 0.0,
+            "entry3_prob": 0.0,
             "position_state": "FLAT",
             "action": "KILL_SWITCH",
             "leverage": LEVERAGE,
             "entry_zone": entry_zone,
+            "volume_score": volume_score,
+            "reaction_score": reaction_score_long if trend_score >= 0 else reaction_score_short,
+            "atr_score": atr_score,
+            "break_score": break_score_long if trend_score >= 0 else break_score_short,
             "next_rules": ["Wait for market to stabilise"],
-            "timestamp": _now_vnt().isoformat(),
+            "timestamp": ts,
+            "action_changed": True,
         }
 
     # Load previous state
     prev = load_state(coin)
-    prev_state = prev.get("state", "NO_POSITION")
-    prev_side = prev.get("side", "NONE")
-    prev_entry_count = prev.get("entry_count", 0)
+    prev_pos_state = prev.get("position_state", "FLAT")
+    last_action = prev.get("last_action", "")
 
     # State machine
-    state, side, action, entry_count = resolve_action(
-        signal, e_score, trend,
-        ma3, ma3_prev,
-        last_volume, vol_ma20,
-        prev_state, prev_side, prev_entry_count,
+    pos_state, action = resolve_action_v4(
+        trend_score,
+        entry1_long,
+        entry1_short,
+        p_long_entry2,
+        p_short_entry2,
+        p_long_entry3,
+        p_short_entry3,
+        prev_pos_state,
     )
 
-    position_state = compute_position_state(state, side, entry_count)
-    next_rules = compute_next_rules(position_state, signal, e_score, trend)
+    # Determine if action changed
+    action_changed = action != last_action
+
+    next_rules = compute_next_rules(pos_state)
 
     output = {
         "coin": coin,
-        "trend": trend,
-        "e_score": e_score,
-        "signal": signal,
-        "position_state": position_state,
+        "trend": trend_label,
+        "trend_score": trend_score,
+        "entry2_prob": round(max(p_long_entry2, p_short_entry2), 2),
+        "entry3_prob": round(max(p_long_entry3, p_short_entry3), 2),
+        "position_state": pos_state,
         "action": action,
         "leverage": LEVERAGE,
         "entry_zone": entry_zone,
+        "volume_score": volume_score,
+        "reaction_score": reaction_score_long if trend_score >= 0 else reaction_score_short,
+        "atr_score": atr_score,
+        "break_score": break_score_long if trend_score >= 0 else break_score_short,
         "next_rules": next_rules,
-        "timestamp": _now_vnt().isoformat(),
+        "timestamp": ts,
+        "action_changed": action_changed,
     }
 
     # Persist state
     save_state(
-        coin, state, side, entry_count,
-        e_score, signal, action, output["timestamp"],
+        coin, pos_state, action, trend_score,
+        output["entry2_prob"], output["entry3_prob"], ts,
     )
 
     return output
@@ -913,8 +853,8 @@ def main() -> None:
     now_vnt = _now_vnt()
     print(f"[crypto_trading] Starting at {now_vnt.strftime('%Y-%m-%d %H:%M %Z')}")
 
-    # Kill-switch check (BTC)
-    print("[crypto_trading] Fetching BTC data for kill-switch…")
+    # Kill-switch check (BTC default 1d)
+    print("[crypto_trading] Fetching BTC data for kill-switch\u2026")
     try:
         btc_candles = fetch_klines(BTC_SYMBOL)
     except requests.RequestException as exc:
@@ -924,7 +864,7 @@ def main() -> None:
 
     kill_switch = check_kill_switch(btc_candles)
     if kill_switch:
-        print("[crypto_trading] KILL SWITCH ACTIVE – market stress detected!")
+        print("[crypto_trading] KILL SWITCH ACTIVE \u2013 market stress detected!")
     else:
         print("[crypto_trading] Kill switch not triggered.")
 
@@ -932,59 +872,62 @@ def main() -> None:
     results: list[dict[str, Any]] = []
     for coin in COINS:
         symbol = SYMBOL_MAP[coin]
-        print(f"[crypto_trading] Fetching {symbol}…")
+        print(f"[crypto_trading] Fetching {symbol} (3D + 1D)\u2026")
         try:
-            candles = fetch_klines(symbol)
+            candles_3d = fetch_klines(symbol, "3d")
+            candles_1d = fetch_klines(symbol, "1d")
         except requests.RequestException as exc:
             print(f"[crypto_trading] Warning: cannot fetch {symbol}: {exc}",
                   file=sys.stderr)
             continue
 
-        print(f"[crypto_trading] Analysing {coin}…")
-        result = analyse_coin(coin, candles, kill_switch)
+        print(f"[crypto_trading] Analysing {coin}\u2026")
+        result = analyse_coin(coin, candles_3d, candles_1d, kill_switch)
         results.append(result)
         print(
             f"  {coin}: trend={result['trend']} "
-            f"E_SCORE={result['e_score']:.2f} "
-            f"signal={result['signal']} "
+            f"TrendScore={result['trend_score']:+d} "
+            f"state={result['position_state']} "
             f"action={result['action']}"
         )
 
-    # Build combined action summary (always show LONG + SHORT rules)
+    # Filter to coins whose action changed
+    changed = [r for r in results if r.get("action_changed", True)]
+
+    # Build action summary
     action_blocks: list[str] = [
         "LONG:\n"
-        "  \u2022 OPEN if score >= 2.0 and trend bullish\n"
-        "  \u2022 ENTRY2 (30% money) if MA3 recovery + volume > 1x\n"
-        "  \u2022 ENTRY3 (40% money) if breakout + volume spike > 2x\n"
-        "  \u2022 REDUCE if score < 0\n"
-        "  \u2022 EXIT if score < -2",
+        "  \u2022 OPEN if TrendScore >= +2 and Entry1Signal\n"
+        "  \u2022 ADD ENTRY2 if P_Entry2 >= 0.70\n"
+        "  \u2022 ADD ENTRY3 if P_Entry3 >= 0.75\n"
+        "  \u2022 REDUCE if TrendScore < 0\n"
+        "  \u2022 EXIT if TrendScore < -2",
         "SHORT:\n"
-        "  \u2022 OPEN if score <= -2.0 and trend bearish\n"
-        "  \u2022 ENTRY2 (30% money) if MA3 rejection + volume > 1x\n"
-        "  \u2022 ENTRY3 (40% money) if breakdown + volume spike > 2x\n"
-        "  \u2022 REDUCE if score > 0\n"
-        "  \u2022 EXIT if score > 2",
+        "  \u2022 OPEN if TrendScore <= -2 and Entry1Signal\n"
+        "  \u2022 ADD ENTRY2 if P_Entry2 >= 0.70\n"
+        "  \u2022 ADD ENTRY3 if P_Entry3 >= 0.75\n"
+        "  \u2022 REDUCE if TrendScore > 0\n"
+        "  \u2022 EXIT if TrendScore > 2",
     ]
 
-    ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
+    ks_flag = " \U0001f6a8 KILL SWITCH" if kill_switch else ""
     header = (
-        f"**Crypto Trading Signals**{ks_flag}\n"
+        f"**Crypto Trading Signals (v4)**{ks_flag}\n"
         f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')} | {LEVERAGE}x | 15%/coin"
     )
-    active = [r for r in results if r['signal'] not in ('WAIT', 'NA')]
 
-    separator = "\n⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩\n"
+    separator = "\n\u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\n"
 
-    if not active:
-        message = f"{header}\n\nNo action for all coin.{separator}"
+    if not changed:
+        message = f"{header}\n\nNo action changes for all coins.{separator}"
     else:
         lines = [header, "", "Action:", *action_blocks, ""]
-        for r in active:
+        for r in changed:
             lines.append(format_detail(r))
             lines.append("")
         message = "\n".join(lines) + separator
 
-    print("[crypto_trading] Sending to Discord…")
+    print("[crypto_trading] Sending to Discord\u2026")
     send_message(webhook_url, message)
     print("[crypto_trading] Done.")
 
