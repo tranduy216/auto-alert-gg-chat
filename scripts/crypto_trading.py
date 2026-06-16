@@ -38,8 +38,9 @@ try:
 except ImportError:
     from datetime import timezone, timedelta
     _VNT_OFFSET = timedelta(hours=7)
+    _VNT_TZ = timezone(timedelta(hours=7), name="VNT")
     def _now_vnt() -> datetime:
-        return datetime.now(timezone.utc) + _VNT_OFFSET
+        return datetime.now(_VNT_TZ)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -910,6 +911,17 @@ def main() -> None:
         f"**Crypto Trading Signals (v4)**{ks_flag}\n"
         f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')} | {LEVERAGE}x | 15%/coin"
     )
+
+    # Urgent signals: any real action → send immediately (runs hourly)
+    urgent = any(r['action'] not in ('NO_TRADE', 'HOLD') for r in results)
+
+    # Scheduled VNT hours: always send summary (5, 10, 15, 21)
+    scheduled_hours = {5, 10, 15, 21}
+    is_scheduled = now_vnt.hour in scheduled_hours
+
+    if not urgent and not is_scheduled:
+        print("[crypto_trading] Skipping – no urgent signal and off-schedule.")
+        return
 
     separator = "\n\u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\n"
 
