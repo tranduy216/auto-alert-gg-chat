@@ -888,8 +888,12 @@ def main() -> None:
             f"action={result['action']}"
         )
 
-    # Filter coins with real actions
-    active = [r for r in results if r['action'] not in ('NO_TRADE', 'HOLD')]
+    # Only notify for strong signals (TrendScore ±3) or EXIT actions
+    active = [
+        r for r in results
+        if r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH')
+        or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
+    ]
     scheduled_hours = {5, 10, 15, 21}
 
     if not active:
