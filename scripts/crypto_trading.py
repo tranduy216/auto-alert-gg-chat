@@ -889,33 +889,38 @@ def main() -> None:
         )
 
     # Only notify for strong signals (TrendScore ±3) or EXIT actions
+    all_wait = all(r['action'] == 'NO_TRADE' for r in results)
+    scheduled_hours = {5, 10, 15, 21}
+
+    if all_wait:
+        if now_vnt.hour not in scheduled_hours:
+            print("[crypto_trading] No action needed – done.")
+            return
+        message = (
+            f"**Crypto Trading Signals**\n"
+            f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}\n\n"
+            f"No action for all coin.\n\n"
+            f"⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩"
+        )
+        print("[crypto_trading] Sending to Discord\u2026")
+        send_message(webhook_url, message)
+        print("[crypto_trading] Done.")
+        return
+
     active = [
         r for r in results
         if r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH')
         or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
     ]
-    scheduled_hours = {5, 10, 15, 21}
 
     if not active:
-        if now_vnt.hour in scheduled_hours:
-            message = (
-                f"**Crypto Trading Signals**\n"
-                f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}\n\n"
-                f"No action for all coin.\n\n"
-                f"⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩"
-            )
-        else:
-            print("[crypto_trading] No action needed – done.")
-            return
+        print("[crypto_trading] No action needed – done.")
+        return
 
     ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
     lines: list[str] = [
         f"**Crypto Trading Signals**{ks_flag}",
         f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}",
-        "",
-        "Action:",
-        "  LONG: OPEN if TrendScore >= +2 | ADD E2 if P≥0.70 | ADD E3 if P≥0.75 | REDUCE if <0 | EXIT if <-2",
-        "  SHORT: OPEN if TrendScore <= -2 | ADD E2 if P≥0.70 | ADD E3 if P≥0.75 | REDUCE if >0 | EXIT if >2",
         "",
     ]
     for r in active:
