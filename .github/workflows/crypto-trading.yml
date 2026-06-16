@@ -2,12 +2,14 @@ name: Crypto Trading Signal System
 
 on:
   schedule:
-    # VNT (UTC+7): 06:00 AM = 23:00 UTC (previous day)
-    - cron: '0 23 * * *'
-    # VNT (UTC+7): 12:00 PM = 05:00 UTC
-    - cron: '0 5 * * *'
-    # VNT (UTC+7): 08:00 PM = 13:00 UTC
-    - cron: '0 13 * * *'
+    # VNT (UTC+7): 05:00 = 22:00 UTC (previous day)
+    - cron: '0 22 * * *'
+    # VNT (UTC+7): 10:00 = 03:00 UTC
+    - cron: '0 3 * * *'
+    # VNT (UTC+7): 15:00 = 08:00 UTC
+    - cron: '0 8 * * *'
+    # VNT (UTC+7): 21:00 = 14:00 UTC
+    - cron: '0 14 * * *'
   workflow_dispatch: {}
 
 jobs:
