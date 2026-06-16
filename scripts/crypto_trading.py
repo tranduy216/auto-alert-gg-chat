@@ -30,6 +30,7 @@ from utils.discord_webhook import send_message
 from utils.retry_utils import call_with_retry
 from utils.firebase_utils import is_firebase_enabled
 
+
 try:
     import pytz
     _VNT = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -887,57 +888,33 @@ def main() -> None:
             f"action={result['action']}"
         )
 
-    # Filter to coins with real actions (skip NO_TRADE / HOLD)
-    changed = [r for r in results if r['action'] not in ('NO_TRADE', 'HOLD')]
+    # Filter coins with real actions
+    active = [r for r in results if r['action'] not in ('NO_TRADE', 'HOLD')]
 
-    # Build action summary
-    action_blocks: list[str] = [
-        "LONG:\n"
-        "  \u2022 OPEN if TrendScore >= +2 and Entry1Signal\n"
-        "  \u2022 ADD ENTRY2 if P_Entry2 >= 0.70\n"
-        "  \u2022 ADD ENTRY3 if P_Entry3 >= 0.75\n"
-        "  \u2022 REDUCE if TrendScore < 0\n"
-        "  \u2022 EXIT if TrendScore < -2",
-        "SHORT:\n"
-        "  \u2022 OPEN if TrendScore <= -2 and Entry1Signal\n"
-        "  \u2022 ADD ENTRY2 if P_Entry2 >= 0.70\n"
-        "  \u2022 ADD ENTRY3 if P_Entry3 >= 0.75\n"
-        "  \u2022 REDUCE if TrendScore > 0\n"
-        "  \u2022 EXIT if TrendScore > 2",
-    ]
-
-    ks_flag = " \U0001f6a8 KILL SWITCH" if kill_switch else ""
-    header = (
-        f"**Crypto Trading Signals (v4)**{ks_flag}\n"
-        f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')} | {LEVERAGE}x | 15%/coin"
-    )
-
-    # Urgent signals: strong trend (score ±3) with action, or EXIT → send every hour
-    urgent = any(
-        r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH')
-        or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
-        for r in results
-    )
-
-    # Scheduled VNT hours: always send summary (5, 10, 15, 21)
-    scheduled_hours = {5, 10, 15, 21}
-    is_scheduled = now_vnt.hour in scheduled_hours
-
-    if not urgent and not is_scheduled:
-        print("[crypto_trading] Skipping – no urgent signal and off-schedule.")
+    if not active:
+        print("[crypto_trading] No action needed – done.")
         return
 
-    separator = "\n\u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\u00a0\u2014 \u22c6\u0451\u00b0\u271d\n"
+    ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
+    lines: list[str] = [
+        f"**Crypto Trading Signals**{ks_flag}",
+        f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}",
+        "",
+        "Action:",
+        "  LONG: OPEN if TrendScore >= +2 | ADD E2 if P≥0.70 | ADD E3 if P≥0.75 | REDUCE if <0 | EXIT if <-2",
+        "  SHORT: OPEN if TrendScore <= -2 | ADD E2 if P≥0.70 | ADD E3 if P≥0.75 | REDUCE if >0 | EXIT if >2",
+        "",
+    ]
+    for r in active:
+        icon = _signal_icon(r)
+        lines.append(f"## {icon} {r['coin']}")
+        lines.append(f"Score={r['trend_score']:+d} | {r['trend']} | {r['position_state']}")
+        lines.append(f"ACTION: {_action_text(r)}")
+        lines.append(f"E2 Prob: {r.get('entry2_prob', 0)*100:.0f}% | E3 Prob: {r.get('entry3_prob', 0)*100:.0f}%")
+        lines.append("")
+    lines.append("⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩")
 
-    if not changed:
-        message = f"{header}\n\nNo action for all coin.{separator}"
-    else:
-        lines = [header, "", "Action:", *action_blocks, ""]
-        for r in changed:
-            lines.append(format_detail(r))
-            lines.append("")
-        message = "\n".join(lines) + separator
-
+    message = "\n".join(lines)
     print("[crypto_trading] Sending to Discord\u2026")
     send_message(webhook_url, message)
     print("[crypto_trading] Done.")
