@@ -259,6 +259,25 @@ def compute_atr(candles: list[dict], period: int = 14) -> float:
     return sum(trs[-period:]) / period
 
 
+def compute_rsi(closes: list[float], period: int = 14) -> float:
+    if len(closes) < period + 1:
+        return 50.0
+    gains = 0.0
+    losses = 0.0
+    for i in range(-period, 0):
+        diff = closes[i] - closes[i - 1]
+        if diff > 0:
+            gains += diff
+        else:
+            losses -= diff
+    avg_gain = gains / period
+    avg_loss = losses / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
 # ---------------------------------------------------------------------------
 # Trend Engine (3D)
 # ---------------------------------------------------------------------------
@@ -487,6 +506,102 @@ def resolve_action_v4(
 
 
 # ---------------------------------------------------------------------------
+# Exit system (v5)
+# ---------------------------------------------------------------------------
+
+def evaluate_exit_v5(
+    position_state: str,
+    entry_price: float | None,
+    current_price: float,
+    remaining_size: float,
+    ma3: float,
+    ma7: float,
+    ma10: float,
+    ma20: float,
+    rsi: float,
+    trend_score: int,
+    ts_val: float,
+) -> tuple[str, float, str]:
+    """Evaluate exit conditions. Returns (exit_action, reduce_pct, reason).
+
+    exit_action: HOLD | EXIT_ALL | TAKE_PROFIT_1 | TAKE_PROFIT_2 | OVER_EXTEND
+    """
+    if position_state == "FLAT":
+        return ("HOLD", 0.0, "")
+
+    is_long = position_state.startswith("LONG")
+
+    if entry_price is None or entry_price <= 0:
+        return ("HOLD", 0.0, "")
+
+    pnl_pct = ((current_price - entry_price) / entry_price *
+               100) if is_long else ((entry_price - current_price) / entry_price * 100)
+
+    # 1. Hard Stop Loss
+    if pnl_pct <= -8:
+        return ("EXIT_ALL", 1.0,
+                f"Stop loss hit at {pnl_pct:.1f}% (limit -8%)")
+
+    # 2. Emergency Exit
+    if is_long:
+        if ma3 < ma7 < ma10 and ts_val < -0.4:
+            return ("EXIT_ALL", 1.0,
+                    f"Emergency exit: MA3<MA7<MA10 & Score {ts_val:.1f} < -0.4")
+    else:
+        if ma3 > ma7 > ma10 and ts_val > 0.4:
+            return ("EXIT_ALL", 1.0,
+                    f"Emergency exit: MA3>MA7>MA10 & Score {ts_val:.1f} > 0.4")
+
+    # 3. Trend Exit
+    if is_long:
+        if ma3 < ma7:
+            return ("EXIT_ALL", 1.0,
+                    f"Trend exit: MA3 ({ma3:.2f}) < MA7 ({ma7:.2f})")
+    else:
+        if ma3 > ma7:
+            return ("EXIT_ALL", 1.0,
+                    f"Trend exit: MA3 ({ma3:.2f}) > MA7 ({ma7:.2f})")
+
+    # 4. Score Exit
+    if is_long:
+        if ts_val < 0.2:
+            return ("EXIT_ALL", 1.0,
+                    f"Score exit: {ts_val:.1f} < +0.2")
+    else:
+        if ts_val > -0.2:
+            return ("EXIT_ALL", 1.0,
+                    f"Score exit: {ts_val:.1f} > -0.2")
+
+    # 5. Trailing Stop (MA10)
+    # Note: relies on stored trailing_stop updated in save_state
+    # (evaluated dynamically via saved state, not here)
+
+    # 6. Take Profit
+    if pnl_pct >= 25:
+        cut = remaining_size * 0.3
+        return ("TAKE_PROFIT_2", cut,
+                f"TP2: +{pnl_pct:.1f}% >= 25% \u2013 reduce {cut/remaining_size*100:.0f}%")
+    if pnl_pct >= 15:
+        cut = remaining_size * 0.3
+        return ("TAKE_PROFIT_1", cut,
+                f"TP1: +{pnl_pct:.1f}% >= 15% \u2013 reduce {cut/remaining_size*100:.0f}%")
+
+    # 7. Over-Extension Exit
+    if is_long:
+        if current_price > ma20 * 1.25 or rsi > 80:
+            cut = remaining_size * 0.25
+            return ("OVER_EXTEND", cut,
+                    f"Over-extended: Price>MA20x1.25 or RSI>{rsi:.0f}>80 \u2013 reduce {cut/remaining_size*100:.0f}%")
+    else:
+        if current_price < ma20 * 0.75 or rsi < 20:
+            cut = remaining_size * 0.25
+            return ("OVER_EXTEND", cut,
+                    f"Over-extended: Price<MA20x0.75 or RSI<{rsi:.0f}<20 \u2013 reduce {cut/remaining_size*100:.0f}%")
+
+    return ("HOLD", 0.0, "")
+
+
+# ---------------------------------------------------------------------------
 # Kill switch
 # ---------------------------------------------------------------------------
 
@@ -532,7 +647,8 @@ def load_state(coin: str) -> dict:
     """Load saved position state from Firestore."""
     db = _get_db()
     if db is None:
-        return {"position_state": "FLAT", "last_action": ""}
+        return {"position_state": "FLAT", "last_action": "",
+                "entry_price": None, "remaining_size": 1.0}
     try:
         doc = call_with_retry(
             lambda: db.collection(FIRESTORE_COLLECTION).document(coin).get(),
@@ -554,6 +670,8 @@ def save_state(
     entry2_prob: float,
     entry3_prob: float,
     timestamp: str,
+    entry_price: float | None = None,
+    remaining_size: float | None = None,
 ) -> None:
     """Persist position state to Firestore."""
     db = _get_db()
@@ -561,16 +679,21 @@ def save_state(
         return
     try:
         doc_ref = db.collection(FIRESTORE_COLLECTION).document(coin)
+        data: dict = {
+            "position_state": position_state,
+            "action": action,
+            "last_action": action,
+            "trend_score": trend_score,
+            "entry2_prob": round(entry2_prob, 2),
+            "entry3_prob": round(entry3_prob, 2),
+            "timestamp": timestamp,
+        }
+        if entry_price is not None:
+            data["entry_price"] = round(entry_price, 2)
+        if remaining_size is not None:
+            data["remaining_size"] = round(remaining_size, 4)
         call_with_retry(
-            lambda: doc_ref.set({
-                "position_state": position_state,
-                "action": action,
-                "last_action": action,
-                "trend_score": trend_score,
-                "entry2_prob": round(entry2_prob, 2),
-                "entry3_prob": round(entry3_prob, 2),
-                "timestamp": timestamp,
-            }),
+            lambda: doc_ref.set(data),
             resource_name=f"Firestore save {coin} state",
         )
     except Exception as exc:
@@ -586,8 +709,11 @@ def _signal_icon(result: dict) -> str:
     act = result["action"]
     if act in ("EXIT_LONG", "EXIT_SHORT", "KILL_SWITCH"):
         return "❗❗❗"
-    if act in ("REDUCE_LONG", "REDUCE_SHORT"):
+    if act in ("REDUCE_LONG", "REDUCE_SHORT",
+               "OVER_EXTEND_LONG", "OVER_EXTEND_SHORT"):
         return "🟡"
+    if "TAKE_PROFIT" in act:
+        return "💰"
     if "LONG" in act:
         return "💚"
     if "SHORT" in act:
@@ -640,6 +766,14 @@ def _action_text(result: dict) -> str:
     if a == "ADD_SHORT_ENTRY_2": return f"Add SHORT Entry 2 at ${price}"
     if a == "ADD_LONG_ENTRY_3": return f"Add LONG Entry 3 at ${price}"
     if a == "ADD_SHORT_ENTRY_3": return f"Add SHORT Entry 3 at ${price}"
+
+    if a == "TAKE_PROFIT_1_LONG": return "TP1: reduce 30% LONG"
+    if a == "TAKE_PROFIT_1_SHORT": return "TP1: reduce 30% SHORT"
+    if a == "TAKE_PROFIT_2_LONG": return "TP2: reduce 30% LONG"
+    if a == "TAKE_PROFIT_2_SHORT": return "TP2: reduce 30% SHORT"
+    if a == "OVER_EXTEND_LONG": return "Over-extension: reduce 25% LONG"
+    if a == "OVER_EXTEND_SHORT": return "Over-extension: reduce 25% SHORT"
+
     return a
 
 
@@ -683,6 +817,10 @@ def format_detail(result: dict) -> str:
     lines = [heading, f"STAGE: {position}. TrendScore: {ts_str}"]
     lines.append(f"ACTION: {action}")
     lines.append(f"OPTIMAL: {optimal}. ZONE: {zone}")
+    pnl = result.get("pnl_pct", 0)
+    rem = result.get("remaining_size", 1.0)
+    if position != "FLAT" and rem > 0:
+        lines.append(f"PNL: {pnl:+.1f}% | Remaining: {rem*100:.0f}%")
     e2p = result.get("entry2_prob", 0)
     e3p = result.get("entry3_prob", 0)
     lines.append(f"E2 Prob: {e2p*100:.0f}% ({prob_label(e2p)}) | "
@@ -705,16 +843,21 @@ def analyse_coin(
     # --- Trend Engine (3D) ---
     closes_3d = [c["close"] for c in candles_3d]
 
+    ma3_3d_all = sma(closes_3d, 3)
     ma7_3d_all = sma(closes_3d, 7)
     ma10_3d_all = sma(closes_3d, 10)
     ma20_3d_all = sma(closes_3d, 20)
 
+    ma3_3d = ma3_3d_all[-1] if ma3_3d_all[-1] is not None else closes_3d[-1]
     ma7_3d = ma7_3d_all[-1] if ma7_3d_all[-1] is not None else closes_3d[-1]
     ma10_3d = ma10_3d_all[-1] if ma10_3d_all[-1] is not None else closes_3d[-1]
     ma20_3d = ma20_3d_all[-1] if ma20_3d_all[-1] is not None else closes_3d[-1]
 
     trend_label, trend_score = evaluate_trend_3d(ma7_3d, ma10_3d, ma20_3d)
     ts_val = trend_strength(trend_score)
+
+    # 3D RSI for exit system
+    rsi_3d = compute_rsi(closes_3d, 14)
 
     # --- Execution Engine (1D) ---
     closes_1d = [c["close"] for c in candles_1d]
@@ -771,8 +914,16 @@ def analyse_coin(
     # Entry zone
     entry_zone = compute_entry_zone_v4(candles_1d, trend_score, ma7_1d, ma10_1d, atr_1d)
 
+    # Load previous state
+    prev = load_state(coin)
+    prev_pos_state = prev.get("position_state", "FLAT")
+    entry_price = prev.get("entry_price")
+    remaining_size = prev.get("remaining_size", 1.0)
+
     # Kill-switch override
     if kill_switch_active:
+        save_state(coin, "FLAT", "KILL_SWITCH", trend_score,
+                   0.0, 0.0, ts, entry_price=last_close, remaining_size=0.0)
         return {
             "coin": coin,
             "trend": trend_label,
@@ -789,25 +940,80 @@ def analyse_coin(
             "break_score": break_score_long if trend_score >= 0 else break_score_short,
             "next_rules": ["Wait for market to stabilise"],
             "timestamp": ts,
+            "pnl_pct": 0.0,
+            "remaining_size": 0.0,
         }
 
-    # Load previous state
-    prev = load_state(coin)
-    prev_pos_state = prev.get("position_state", "FLAT")
+    pnl_pct = 0.0
 
-    # State machine
-    pos_state, action = resolve_action_v4(
-        trend_score,
-        entry1_long,
-        entry1_short,
-        p_long_entry2,
-        p_short_entry2,
-        p_long_entry3,
-        p_short_entry3,
-        prev_pos_state,
-    )
+    if prev_pos_state == "FLAT":
+        # Entry state machine
+        pos_state, action = resolve_action_v4(
+            trend_score, entry1_long, entry1_short,
+            p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
+            prev_pos_state,
+        )
+        next_rules = compute_next_rules(pos_state)
 
-    next_rules = compute_next_rules(pos_state)
+        if action == "OPEN_LONG_ENTRY_1":
+            entry_price = last_close
+            remaining_size = 1.0
+        elif action == "OPEN_SHORT_ENTRY_1":
+            entry_price = last_close
+            remaining_size = 1.0
+    else:
+        # Exit evaluation for active positions
+        is_long = prev_pos_state.startswith("LONG")
+        if entry_price and entry_price > 0:
+            pnl_pct = ((last_close - entry_price) / entry_price * 100
+                       ) if is_long else ((entry_price - last_close) / entry_price * 100)
+        else:
+            pnl_pct = 0.0
+
+        exit_action, reduce_pct, exit_reason = evaluate_exit_v5(
+            prev_pos_state, entry_price, last_close, remaining_size,
+            ma3_3d, ma7_3d, ma10_3d, ma20_3d, rsi_3d, trend_score, ts_val,
+        )
+
+        if exit_action == "HOLD":
+            # Only check add-entry conditions
+            if p_long_entry2 >= 0.70 and prev_pos_state == "LONG_ENTRY_1":
+                pos_state, action = "LONG_ENTRY_2", "ADD_LONG_ENTRY_2"
+            elif p_long_entry3 >= 0.75 and prev_pos_state == "LONG_ENTRY_2":
+                pos_state, action = "LONG_ENTRY_3", "ADD_LONG_ENTRY_3"
+            elif p_short_entry2 >= 0.70 and prev_pos_state == "SHORT_ENTRY_1":
+                pos_state, action = "SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"
+            elif p_short_entry3 >= 0.75 and prev_pos_state == "SHORT_ENTRY_2":
+                pos_state, action = "SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"
+            else:
+                pos_state, action = prev_pos_state, "HOLD"
+            next_rules = compute_next_rules(pos_state)
+        else:
+            next_rules = [exit_reason]
+            if exit_action == "EXIT_ALL":
+                pos_state = "FLAT"
+                remaining_size = 0.0
+                action = "EXIT_LONG" if is_long else "EXIT_SHORT"
+            elif exit_action == "TAKE_PROFIT_1":
+                cut = remaining_size * 0.3
+                remaining_size = round(remaining_size - cut, 4)
+                pos_state = prev_pos_state
+                action = "TAKE_PROFIT_1_LONG" if is_long else "TAKE_PROFIT_1_SHORT"
+            elif exit_action == "TAKE_PROFIT_2":
+                cut = remaining_size * 0.3
+                remaining_size = round(remaining_size - cut, 4)
+                pos_state = prev_pos_state
+                action = "TAKE_PROFIT_2_LONG" if is_long else "TAKE_PROFIT_2_SHORT"
+            elif exit_action == "OVER_EXTEND":
+                cut = remaining_size * 0.25
+                remaining_size = round(remaining_size - cut, 4)
+                pos_state = prev_pos_state
+                action = "OVER_EXTEND_LONG" if is_long else "OVER_EXTEND_SHORT"
+
+            if remaining_size < 0.01 and pos_state != "FLAT":
+                pos_state = "FLAT"
+                remaining_size = 0.0
+                action = "EXIT_LONG" if is_long else "EXIT_SHORT"
 
     output = {
         "coin": coin,
@@ -825,13 +1031,14 @@ def analyse_coin(
         "break_score": break_score_long if trend_score >= 0 else break_score_short,
         "next_rules": next_rules,
         "timestamp": ts,
-
+        "pnl_pct": round(pnl_pct, 2),
+        "remaining_size": remaining_size,
     }
 
-    # Persist state
     save_state(
         coin, pos_state, action, trend_score,
         output["entry2_prob"], output["entry3_prob"], ts,
+        entry_price=entry_price, remaining_size=remaining_size,
     )
 
     return output
@@ -909,7 +1116,10 @@ def main() -> None:
 
     active = [
         r for r in results
-        if r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH')
+        if r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH',
+                           'TAKE_PROFIT_1_LONG', 'TAKE_PROFIT_1_SHORT',
+                           'TAKE_PROFIT_2_LONG', 'TAKE_PROFIT_2_SHORT',
+                           'OVER_EXTEND_LONG', 'OVER_EXTEND_SHORT')
         or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
     ]
 
