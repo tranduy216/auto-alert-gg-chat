@@ -1,130 +1,136 @@
 # auto-alert-gg-chat
 
-Automated news alerts delivered to a **Discord** channel via **GitHub Actions**, **OpenAI**, and **Firebase**.
+Automated **crypto trading bot** on OKX + news alerts delivered to Discord via GitHub Actions.
 
 ---
 
-## Features
+## 1 · Crypto Trading System (every 1 hour)
 
-### 1 · Daily RSS Digest (twice a day)
+Real automated trading on **OKX** with limit orders, risk management, and Discord notifications.
 
-| Schedule | Time (VNT UTC+7) | Time (UTC) |
-|---|---|---|
-| Morning | 07:30 | 00:30 |
-| Evening | 19:30 | 12:30 |
+### Coins traded
 
-- Reads RSS feeds covering **AI/ML**, **Java/JVM**, **Software Development**, **Finance/Economics**, and **Commodity prices** (oil, gold, rubber, …).
-- Token-optimized pipeline:
-  - keeps only the **first 5 recent articles per topic**,
-  - prefilters with a **topic keyword map** before AI,
-  - sends only compact fields (`title`, `url`, `topic`) to OpenAI.
-- OpenAI produces a concise, topic-grouped summary from the prefiltered shortlist.
-- Summary is sent to Discord with source URLs.
+| Coin | Symbol (OKX) |
+|------|-------------|
+| ETH  | ETH-USDT-SWAP |
+| BNB  | BNB-USDT-SWAP |
+| LINK | LINK-USDT-SWAP |
+| ADA  | ADA-USDT-SWAP |
+| MATIC| MATIC-USDT-SWAP |
 
-### 2 · Breaking-News Monitor (every 2 hours)
+### Strategy
 
-Checks continuously for high-impact events:
+**Two-layer engine:**
 
-- Bitcoin 24-h price change **> ±4 %** (CoinGecko free API)
-- Major central-bank or government decisions
-- Wars, peace deals, geopolitical escalations
-- Large corporate collapses / mergers with global market impact
-- Supply-chain shocks or commodity crises
+| Layer | Timeframe | Purpose |
+|-------|-----------|---------|
+| Trend Engine | 3D candles (MA7/MA10/MA20) | Trend classification (BULLISH/BEARISH/SIDEWAY, score ±3) |
+| Execution Engine | 1D candles (MA3/MA5/MA7/ATR/Volume) | Entry signals + stage probabilities |
 
-Token optimization for breaking-news:
-- limit feed intake (top 5 per feed),
-- keyword prefilter before OpenAI,
-- only compact article payload (`title` + `url`) is sent to the model.
+**3-stage scaling entries** using **limit orders** at optimal support/resistance levels:
+- Entry 1: 15% capital (triggered when TrendScore ≥ threshold + volume confirmation)
+- Entry 2: additional 8% (when P_Entry2 ≥ 0.80)
+- Entry 3: additional 8% (when P_Entry3 ≥ 0.85)
 
-**Quiet hours (22:00 – 06:00 VNT):** alerts are stored in **Firebase Firestore** and delivered in a batch immediately after 06:00 VNT.
+**Adaptive thresholds:** entry ±2 when 3D trend_score ≥ 2 (strong trend), ±3 otherwise. When >55% of capital deployed, all entries use strict ±3.
 
-**Deduplication:** the same alert is not re-sent within a 6-hour window.
+### Order execution
+
+- **Limit orders** for all entries (at `optimal_entry` price from entry zone)
+- **Market orders** for exits / take-profit / over-extension reduces
+- All positions on **cross-margin** at **2.5x leverage**
+- **Hard stop loss: -5.5%**
+- Exit priority: Stop Loss → Emergency Exit (MA cross + score) → Trend Exit (MA3<MA10) → Score Exit → Take Profit (+15%/+25%) → Over-Extension
+
+### Risk management
+
+| Rule | Detail |
+|------|--------|
+| Max concurrent positions | 4 |
+| Capital per position | 15% (decays 15/12/10/8% for later entries) |
+| Total capital cap | 75% of equity |
+| Tight entry threshold | >55% deployed → force ±3 |
+| BTC regime filter | Bear (MA50<MA200) → block LONG entries |
+| Correlation filter | ETH↔MATIC: skip if correlated coin has position |
+| Time filter | No new entries during economic events (FOMC, NFP, ECB) |
+| Loss streak breaker | 3 consecutive losses → 50% size reduction |
+| Volatility filter | ATR > 2× ATR_MA20 → skip entry |
+| Kill switch | BTC flash crash >5% or -3% with 5× vol spike → close all |
+
+### Backtest results (recent 400 days, 5 coins)
+
+| Metric | Value |
+|--------|-------|
+| Raw PnL (price %) | +169% |
+| ROI (2.5x × 75% deployment) | ~318% |
+| Risk per trade (position) | 13.8% (2.5x × 5.5%) |
+| Win rate | varies by coin/market regime |
+
+### Notifications
+
+- **Order executed:** OPEN / ADD / EXIT / REDUCE with size and price
+- **Errors:** sent to Discord immediately (bypasses silent hours)
+- **Portfolio summary:** 06:00, 13:00, 20:00 VNT — total equity + position details (PnL, leverage, margin)
+- **Silent hours (22:30–05:30 VNT):** notifications queued in Firestore, flushed at 06:00
+
+### Environment variables
+
+| Secret | Purpose |
+|--------|---------|
+| `OKX_API_KEY` | OKX API key (trade permission) |
+| `OKX_API_SECRET` | OKX API secret |
+| `OKX_API_PASSPHRASE` | OKX API passphrase |
+| `DISCORD_TRADING_WEBHOOK_URL` | Discord channel for trading notifications |
+| `FIREBASE_SERVICE_ACCOUNT` | Firestore for state persistence & silent queue |
+
+---
+
+## 2 · Daily RSS Digest (twice a day)
+
+| Schedule | Time (VNT) |
+|----------|------------|
+| Morning | 07:30 |
+| Evening | 19:30 |
+
+AI-curated news summary across topics: AI/ML, Java, Developer, Big Tech, Finance, Commodities.
+
+---
+
+## 3 · Breaking-News Monitor (every 2 hours)
+
+Detects high-impact events via RSS + OpenRouter AI:
+- Bitcoin 24h change >±4%
+- Central bank decisions, military conflicts, market-moving events
+
+Quiet hours (22:00–06:00 VNT): queued in Firestore → delivered at 06:00.
+Deduplication: same alert not re-sent within 6h.
 
 ---
 
 ## Repository structure
 
 ```
-.github/
-  workflows/
-    daily-rss-digest.yml    # twice-daily RSS digest job
-    breaking-news.yml       # every-2-hour breaking news job
+.github/workflows/
+  crypto-trading.yml       # every hour
+  daily-rss-digest.yml     # twice daily
+  breaking-news.yml        # every 2 hours
 scripts/
-  rss_digest.py             # daily digest entry point
-  breaking_news.py          # breaking news entry point
+  crypto_trading.py        # main trading system
+  rss_digest.py            # RSS digest
+  breaking_news.py         # breaking news monitor
   utils/
-    discord_webhook.py      # Discord webhook helper
-    firebase_utils.py       # Firestore queue + deduplication
-    openai_utils.py         # OpenAI summarisation & detection
-requirements.txt
+    okx_utils.py           # OKX API v5 client
+    gemini_utils.py        # OpenRouter/Gemini AI helpers
+    discord_webhook.py     # Discord webhook + silent hours
+    firebase_utils.py      # Firestore queue & dedup
 ```
 
 ---
 
 ## Setup
 
-### 1. Discord – create two incoming webhooks
-
-This bot uses **two separate Discord webhooks** — one per channel:
-
-| Channel purpose | Env var used |
-|---|---|
-| Daily RSS digest | `DISCORD_DAILY_WEBHOOK_URL` |
-| Breaking-news alerts | `DISCORD_BREAKING_WEBHOOK_URL` |
-
-For **each** channel:
-
-1. Open your Discord server → go to the target channel.
-2. Click the gear icon (**Edit Channel**) → **Integrations** → **Webhooks** → **New Webhook**.
-3. Give it a name (e.g. `Daily Digest Bot` or `Breaking News Bot`), then click **Copy Webhook URL**.
-
-### 2. Firebase – create a Firestore database
-
-1. Go to [Firebase Console](https://console.firebase.google.com/) → create (or open) a project.
-2. Enable **Firestore Database** (Native mode).
-3. Go to **Project Settings → Service Accounts → Generate new private key**.
-4. Download the JSON file.
-
-### 3. Add GitHub Secrets
-
-In your repository go to **Settings → Secrets and variables → Actions → New repository secret** and add:
-
-| Secret name | Value |
-|---|---|
-| `OPENAI_API_KEY` | Your OpenAI API key |
-| `DISCORD_DAILY_WEBHOOK_URL` | Webhook URL for the daily-digest Discord channel (step 1) |
-| `DISCORD_BREAKING_WEBHOOK_URL` | Webhook URL for the breaking-news Discord channel (step 1) |
-| `FIREBASE_SERVICE_ACCOUNT` | The entire content of the service-account JSON from step 2 |
-
-> `FIREBASE_SERVICE_ACCOUNT` is optional. Without it the monitor still works but
-> quiet-hours alerts will not be queued and deduplication is disabled.
-
-### 4. Enable GitHub Actions
-
-Workflows run automatically on the defined schedules once the secrets are set.
-You can also trigger them manually via **Actions → workflow name → Run workflow**.
-
----
-
-## Technology stack
-
-| Component | Role |
-|---|---|
-| GitHub Actions | Workflow scheduler & runner |
-| OpenAI `gpt-4o-mini` | News filtering, summarisation, breaking-news detection |
-| Firebase Firestore | Quiet-hours alert queue & deduplication |
-| Discord webhook | Notification delivery |
-| CoinGecko API | Real-time Bitcoin price (free, no key needed) |
-| RSS feeds | News source (AI, Java, Dev, Finance, Commodities) |
-
----
-
-## Keyword map (daily digest prefilter)
-
-Each topic uses a dedicated keyword list for rule-based filtering before OpenAI.
-
-- **AI/ML**: `gpt`, `gemini`, `claude`, `llama`, `mistral`, `openai`, `anthropic`, `deepmind`, `model`, `ai agent`, `reasoning`, `multimodal`, `fine-tuning`
-- **Java/JVM**: `java`, `jvm`, `spring`, `spring boot`, `kotlin`, `gradle`, `maven`, `quarkus`, `micronaut`, `virtual threads`, `jdk`, `openjdk`
-- **Developer**: `culture`, `performance`, `framework`, `architecture`, `design`, `scalability`, `reliability`, `observability`, `refactoring`, `clean code`, `engineering`, `developer experience`, `testing`, `devops`, `api`, `platform`, `security`
-- **Finance/Economics**: `inflation`, `interest rate`, `federal reserve`, `central bank`, `stocks`, `bonds`, `recession`, `gdp`, `unemployment`, `earnings`, `market`, `tariff`
-- **Commodities**: `oil`, `gold`, `gas`, `rubber`, `copper`, `silver`, `crude`, `opec`, `supply`, `demand`, `commodity`
+1. Create **OKX API key** (Trade permission) → save key + secret + passphrase
+2. Create **Discord webhooks** for trading / news channels
+3. (Optional) Create **Firebase Firestore** for state & queue
+4. Add **GitHub Secrets** as listed above
+5. Workflows run on schedule — or trigger manually via **Actions → Run workflow**
