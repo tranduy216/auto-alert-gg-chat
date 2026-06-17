@@ -1375,30 +1375,20 @@ def _exec_action_on_okx(
         if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             pos_side = "long" if action == "OPEN_LONG_ENTRY_1" else "short"
             sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, LEVERAGE, instrument_map)
-            px = result.get("entry_zone", {}).get("optimal_entry")
-            if not px:
-                exec_status["detail"] = "no limit price"
-                return exec_status
-            px_str = str(px)
             side = "buy" if pos_side == "long" else "sell"
-            resp = okx_place_order(inst_id, "cross", side, sz, px_str)
-            exec_status.update({"status": "open", "detail": f"{pos_side} limit {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
-            print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct @ {px_str}")
+            resp = okx_place_order(inst_id, "cross", side, sz)
+            exec_status.update({"status": "open", "detail": f"{pos_side} market {sz}ct", "sz": sz})
+            print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct market")
 
         elif action in ("ADD_LONG_ENTRY_2", "ADD_SHORT_ENTRY_2",
                         "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
             pos_side = "long" if "LONG" in action else "short"
             add_pct = 0.10  # additional 10% of equity
             sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, LEVERAGE, instrument_map)
-            px = result.get("entry_zone", {}).get("optimal_entry")
-            if not px:
-                exec_status["detail"] = "no limit price"
-                return exec_status
-            px_str = str(px)
             side = "buy" if pos_side == "long" else "sell"
-            resp = okx_place_order(inst_id, "cross", side, sz, px_str)
-            exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
-            print(f"  [OKX] {coin} ADD {pos_side} {sz}ct @ {px_str}")
+            resp = okx_place_order(inst_id, "cross", side, sz)
+            exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct", "sz": sz})
+            print(f"  [OKX] {coin} ADD {pos_side} {sz}ct market")
 
         elif action in ("EXIT_LONG", "EXIT_SHORT", "REDUCE_LONG", "REDUCE_SHORT"):
             pos_side = "long" if "LONG" in action else "short"
