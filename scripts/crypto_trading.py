@@ -47,7 +47,7 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["BTC", "ETH", "BNB", "ARB", "LINK", "PAXG"]
+COINS = ["BTC", "ETH", "BNB", "LINK", "ADA", "MATIC"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
@@ -450,13 +450,14 @@ def resolve_action_v4(
     p_long_entry3: float,
     p_short_entry3: float,
     prev_pos_state: str,
+    entry_threshold: int = 3,
 ) -> tuple[str, str]:
     """Return (position_state, action)."""
 
     if prev_pos_state == "FLAT":
-        if trend_score >= 3 and entry1_long:
+        if trend_score >= entry_threshold and entry1_long:
             return ("LONG_ENTRY_1", "OPEN_LONG_ENTRY_1")
-        if trend_score <= -3 and entry1_short:
+        if trend_score <= -entry_threshold and entry1_short:
             return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
         return ("FLAT", "NO_TRADE")
 
@@ -866,11 +867,13 @@ def analyse_coin(
     volumes_1d = [c["volume"] for c in candles_1d]
 
     ma3_1d_all = sma(closes_1d, 3)
+    ma5_1d_all = sma(closes_1d, 5)
     ma7_1d_all = sma(closes_1d, 7)
     ma10_1d_all = sma(closes_1d, 10)
     vol_ma20_1d_all = sma(volumes_1d, 20)
 
     ma3_1d = ma3_1d_all[-1] if ma3_1d_all[-1] is not None else closes_1d[-1]
+    ma5_1d = ma5_1d_all[-1] if ma5_1d_all[-1] is not None else closes_1d[-1]
     ma7_1d = ma7_1d_all[-1] if ma7_1d_all[-1] is not None else closes_1d[-1]
     ma10_1d = ma10_1d_all[-1] if ma10_1d_all[-1] is not None else closes_1d[-1]
     vol_ma20_1d = vol_ma20_1d_all[-1] if vol_ma20_1d_all[-1] is not None else volumes_1d[-1]
@@ -894,9 +897,10 @@ def analyse_coin(
 
     atr_score = compute_atr_score(atr_1d, last_close)
 
-    # Entry 1 signals
-    entry1_long = compute_entry1_signal_long(last_close, ma7_1d, volume_score)
-    entry1_short = compute_entry1_signal_short(last_close, ma7_1d, volume_score)
+    # Entry 1 signals (adaptive: faster MA in weak trends, slower MA in strong trends)
+    _entry1_ma = ma7_1d if trend_score >= 2 else ma5_1d
+    entry1_long = compute_entry1_signal_long(last_close, _entry1_ma, volume_score)
+    entry1_short = compute_entry1_signal_short(last_close, _entry1_ma, volume_score)
 
     # Entry 2 / 3 probabilities
     ts_long = max(0.0, ts_val)
@@ -947,11 +951,12 @@ def analyse_coin(
     pnl_pct = 0.0
 
     if prev_pos_state == "FLAT":
-        # Entry state machine
+        # Adaptive entry: easier (±2) in strong trends, stricter (±3) otherwise
+        _entry_thresh = 2 if abs(trend_score) >= 2 else 3
         pos_state, action = resolve_action_v4(
             trend_score, entry1_long, entry1_short,
             p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
-            prev_pos_state,
+            prev_pos_state, _entry_thresh,
         )
         next_rules = compute_next_rules(pos_state)
 

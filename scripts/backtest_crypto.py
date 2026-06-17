@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backtest crypto_trading v4/v5 strategy over historical data."""
+"""Backtest crypto_trading v4/v5 strategy with bull/bear period support."""
 
 import json
 import os
@@ -17,21 +17,33 @@ from crypto_trading import (
     compute_resistance, compute_support, compute_break_score_long,
     compute_break_score_short, compute_atr_score,
     compute_entry1_signal_long, compute_entry1_signal_short,
-    resolve_action_v4, evaluate_exit_v5, compute_next_rules,
-    _aggregate_daily_to_3d,
-    SYMBOL_MAP, LEVERAGE,
+    resolve_action_v4, evaluate_exit_v5, _aggregate_daily_to_3d,
+    COINS, SYMBOL_MAP, LEVERAGE,
 )
 
-BACKTEST_COINS = ["ETH", "BNB"]
 LOOKBACK_DAYS = 400
 MIN_3D_PERIODS = 25
 
+PERIODS = {
+    "BEAR": {
+        "label": "Recent 400 days (bear/mixed)",
+        "start_time": None,  # most recent data
+    },
+    "BULL_2023": {
+        "label": "Bull 2023 (Jan 2023 – Feb 2024)",
+        "start_time": int(datetime(2023, 1, 1).timestamp() * 1000),
+    },
+}
 
-def _fetch_klines_backtest(symbol: str, interval: str = "1d", limit: int = 400) -> list[dict]:
-    """Fetch historical klines with a configurable limit."""
+
+def _fetch_klines_backtest(symbol: str, interval: str = "1d", limit: int = 400,
+                           start_time: int | None = None) -> list[dict]:
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    if start_time:
+        params["startTime"] = start_time
     resp = req_lib.get(
-        f"https://api.binance.com/api/v3/klines",
-        params={"symbol": symbol, "interval": interval, "limit": limit},
+        "https://api.binance.com/api/v3/klines",
+        params=params,
         timeout=15,
     )
     resp.raise_for_status()
@@ -43,17 +55,13 @@ def _fetch_klines_backtest(symbol: str, interval: str = "1d", limit: int = 400) 
     ]
 
 
-def backtest_coin(coin: str) -> dict:
-    print(f"\n=== Backtesting {coin} ===")
+def backtest_coin(coin: str, start_time: int | None = None) -> dict:
     symbol = SYMBOL_MAP[coin]
-
-    # Fetch 1D historical data
-    print(f"  Fetching {LOOKBACK_DAYS}d of 1D data…")
-    daily_all = _fetch_klines_backtest(symbol, "1d", LOOKBACK_DAYS)
-    print(f"  Got {len(daily_all)} candles")
+    daily_all = _fetch_klines_backtest(symbol, "1d", LOOKBACK_DAYS, start_time)
     daily_all = daily_all[-LOOKBACK_DAYS:]
 
-    closes_1d_all = [c["close"] for c in daily_all]
+    first_date = datetime.utcfromtimestamp(daily_all[0]["open_time"] / 1000).strftime("%Y-%m-%d")
+    last_date = datetime.utcfromtimestamp(daily_all[-1]["open_time"] / 1000).strftime("%Y-%m-%d")
 
     state = {"position_state": "FLAT", "entry_price": None, "remaining_size": 1.0}
     trades = []
@@ -71,7 +79,6 @@ def backtest_coin(coin: str) -> dict:
 
         current_close = candles_1d[-1]["close"]
 
-        # -- 3D indicators --
         closes_3d = [c["close"] for c in candles_3d]
         ma3_3d = (sma(closes_3d, 3)[-1] or closes_3d[-1])
         ma7_3d = (sma(closes_3d, 7)[-1] or closes_3d[-1])
@@ -81,7 +88,6 @@ def backtest_coin(coin: str) -> dict:
         ts_val = trend_strength(trend_score)
         rsi_3d = compute_rsi(closes_3d, 14)
 
-        # -- 1D indicators --
         closes_1d = [c["close"] for c in candles_1d]
         highs_1d = [c["high"] for c in candles_1d]
         lows_1d = [c["low"] for c in candles_1d]
@@ -155,17 +161,19 @@ def backtest_coin(coin: str) -> dict:
             )
 
             if exit_action == "HOLD":
-                add_cond = (
-                    (p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1") or
-                    (p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2") or
-                    (p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1") or
-                    (p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2")
-                )
-                if add_cond:
-                    dir = "LONG" if is_long else "SHORT"
-                    trades.append({"date": date_str, "type": f"{dir}_ADD", "price": current_close, "size": remaining_size, "reason": "add entry"})
+                # Only check add-entry conditions (same as analyse_coin)
                 pos_state = prev_pos_state
                 action = "HOLD"
+                if p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1":
+                    pos_state, action = "LONG_ENTRY_2", "ADD_LONG_ENTRY_2"
+                elif p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2":
+                    pos_state, action = "LONG_ENTRY_3", "ADD_LONG_ENTRY_3"
+                elif p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1":
+                    pos_state, action = "SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"
+                elif p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2":
+                    pos_state, action = "SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"
+                if action != "HOLD":
+                    trades.append({"date": date_str, "type": action, "price": current_close, "size": remaining_size, "reason": "add entry"})
             else:
                 if exit_action == "EXIT_ALL":
                     pnl = pnl_pct
@@ -176,13 +184,11 @@ def backtest_coin(coin: str) -> dict:
                 elif exit_action in ("TAKE_PROFIT_1", "TAKE_PROFIT_2"):
                     cut = remaining_size * 0.3
                     remaining_size = round(remaining_size - cut, 4)
-                    dir = "LONG" if is_long else "SHORT"
                     trades.append({"date": date_str, "type": f"TP_{exit_action[-1]}", "price": current_close, "size": cut, "reason": exit_reason})
                     pos_state = prev_pos_state
                 elif exit_action == "OVER_EXTEND":
                     cut = remaining_size * 0.25
                     remaining_size = round(remaining_size - cut, 4)
-                    dir = "LONG" if is_long else "SHORT"
                     trades.append({"date": date_str, "type": "OVER_EXTEND", "price": current_close, "size": cut, "reason": exit_reason})
                     pos_state = prev_pos_state
 
@@ -193,7 +199,6 @@ def backtest_coin(coin: str) -> dict:
 
             state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size})
 
-        # Equity curve: track P&L of current positions
         if state["position_state"] != "FLAT" and state["entry_price"] and state["remaining_size"] > 0:
             is_long = state["position_state"].startswith("LONG")
             upnl = ((current_close - state["entry_price"]) / state["entry_price"] * 100) if is_long else ((state["entry_price"] - current_close) / state["entry_price"] * 100)
@@ -201,15 +206,17 @@ def backtest_coin(coin: str) -> dict:
         else:
             equity_curve.append(1.0)
 
-    return {"coin": coin, "trades": trades, "equity_curve": equity_curve}
+    return {"coin": coin, "trades": trades, "equity_curve": equity_curve,
+            "period": f"{first_date} → {last_date}"}
 
 
 def compute_metrics(result: dict) -> dict:
     trades = result["trades"]
     closes = [t for t in trades if t["type"] == "CLOSE"]
-    
+
     if not closes:
-        return {"coin": result["coin"], "total_trades": 0, "message": "No trades"}
+        return {"coin": result["coin"], "total_trades": 0, "total_pnl_pct": 0,
+                "message": "No trades", "period": result["period"]}
 
     pnls = [t["pnl_pct"] for t in closes]
     wins = [p for p in pnls if p > 0]
@@ -236,6 +243,10 @@ def compute_metrics(result: dict) -> dict:
     if len(returns) > 1 and stdev(returns) > 0:
         sharpe = (mean(returns) / stdev(returns)) * (365 ** 0.5)
 
+    # Count direction bias
+    long_trades = len([t for t in closes if "LONG" in str(t.get("reason", "")) or t["price"] > 0])
+    short_trades = len([t for t in closes if "SHORT" in str(t.get("reason", "")) or t["price"] < 0])
+
     return {
         "coin": result["coin"],
         "total_trades": len(closes),
@@ -246,53 +257,82 @@ def compute_metrics(result: dict) -> dict:
         "profit_factor": round(profit_factor, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "sharpe_ratio": round(sharpe, 2),
+        "period": result["period"],
+        "message": None,
     }
 
 
 def print_report(metrics: dict):
-    print(f"\n{'='*50}")
-    print(f"  Backtest Results: {metrics['coin']}")
-    print(f"{'='*50}")
     if metrics.get("message"):
-        print(f"  {metrics['message']}")
+        print(f"  {metrics['coin']:6s} | {metrics['message']}")
         return
-    print(f"  Total Trades:     {metrics['total_trades']}")
-    print(f"  Total PnL:        {metrics['total_pnl_pct']:+.2f}%")
-    print(f"  Win Rate:         {metrics['win_rate_pct']:.1f}%")
-    print(f"  Avg Win:          {metrics['avg_win_pct']:+.2f}%")
-    print(f"  Avg Loss:         {metrics['avg_loss_pct']:+.2f}%")
-    print(f"  Profit Factor:    {metrics['profit_factor']:.2f}")
-    print(f"  Max Drawdown:     {metrics['max_drawdown_pct']:.2f}%")
-    print(f"  Sharpe Ratio:     {metrics['sharpe_ratio']:.2f}")
+    dd_str = f"DD={metrics['max_drawdown_pct']:.1f}%"
+    sharpe_str = f"S={metrics['sharpe_ratio']:.2f}"
+    print(f"  {metrics['coin']:6s} | "
+          f"Trades={metrics['total_trades']:2d} | "
+          f"PnL={metrics['total_pnl_pct']:+6.2f}% | "
+          f"Win={metrics['win_rate_pct']:4.0f}% | "
+          f"AvgW={metrics['avg_win_pct']:+5.2f}% | "
+          f"AvgL={metrics['avg_loss_pct']:+5.2f}% | "
+          f"PF={metrics['profit_factor']:<5.2f} | "
+          f"{dd_str:>8s} | {sharpe_str}")
 
 
 def main():
-    print("Crypto Trading Strategy Backtest (v4+v5)")
-    print(f"Coins: {', '.join(BACKTEST_COINS)}")
-    print(f"Period: last {LOOKBACK_DAYS} days of daily data\n")
+    print("Crypto Trading Strategy Backtest (v4+v5 – v6 rules)")
+    print(f"{'='*70}")
 
-    all_metrics = []
-    for coin in BACKTEST_COINS:
-        try:
-            result = backtest_coin(coin)
-            metrics = compute_metrics(result)
-            all_metrics.append(metrics)
-            print_report(metrics)
-        except Exception as e:
-            print(f"\n  Error backtesting {coin}: {e}", file=sys.stderr)
+    for period_key, period_info in PERIODS.items():
+        print(f"\n{'='*70}")
+        print(f"  Period: {period_info['label']}")
+        print(f"{'='*70}")
 
-    print(f"\n{'='*50}")
-    print("  SUMMARY")
-    print(f"{'='*50}")
-    for m in all_metrics:
-        if m.get("message"):
-            print(f"  {m['coin']}: {m['message']}")
-        else:
-            print(f"  {m['coin']}: PnL={m['total_pnl_pct']:+.2f}% | "
-                  f"Trades={m['total_trades']} | "
-                  f"Win={m['win_rate_pct']:.0f}% | "
-                  f"DD={m['max_drawdown_pct']:.1f}% | "
-                  f"Sharpe={m['sharpe_ratio']:.2f}")
+        all_metrics = []
+        for coin in COINS:
+            try:
+                result = backtest_coin(coin, period_info["start_time"])
+                metrics = compute_metrics(result)
+                all_metrics.append(metrics)
+                print_report(metrics)
+            except Exception as e:
+                print(f"  {coin}: ERROR – {e}", file=sys.stderr)
+
+        # Period summary
+        print(f"  {'─'*68}")
+        total_pnl_all = sum(m["total_pnl_pct"] for m in all_metrics if not m.get("message"))
+        n_active = sum(1 for m in all_metrics if not m.get("message"))
+        avg_pnl = total_pnl_all / n_active if n_active else 0
+        avg_pf = mean([m["profit_factor"] for m in all_metrics if not m.get("message") and m.get("profit_factor", 0) != float("inf")]) if n_active else 0
+        print(f"  TOTAL   | Coins={n_active} | Sum PnL={total_pnl_all:+7.2f}% | Avg PnL={avg_pnl:+6.2f}% | Avg PF={avg_pf:.2f}")
+
+    # Cross-period comparison
+    print(f"\n{'='*70}")
+    print("  CROSS-PERIOD COMPARISON (PnL %)")
+    print(f"{'='*70}")
+    print(f"  {'Coin':>6s}  ", end="")
+    for pk in PERIODS:
+        print(f" {pk:>20s}  ", end="")
+    print()
+    print(f"  {'─'*6}  ", end="")
+    for _ in PERIODS:
+        print(f" {'─'*20}  ", end="")
+    print()
+
+    # Need to re-run for cross-period view... or store results
+    # Simple approach: re-run
+    for coin in COINS:
+        print(f"  {coin:>6s}  ", end="")
+        for pk, pi in PERIODS.items():
+            try:
+                res = backtest_coin(coin, pi["start_time"])
+                m = compute_metrics(res)
+                if m.get("message"):
+                    print(f" {'No trades':>20s}  ", end="")
+                else:
+                    print(f" {m['total_pnl_pct']:>+19.2f}%  ", end="")
+            except Exception as e:
+                print(f" {'ERROR':>20s}  ", end="")
+        print()
 
 
 if __name__ == "__main__":
