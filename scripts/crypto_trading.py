@@ -106,7 +106,7 @@ VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
 V6_TRAILING_PCT = 0.85       # trail 15% from high (tighter once in profit)
 V6_INITIAL_STOP_PCT = 0.85   # initial trailing stop at 85% of entry (15% price trail)
 V6_HARD_STOP_PCT = 0.78      # hard cap: 22% price move = 5.5% of total capital @ 10% alloc × 2.5x
-V6_MAX_LOSS_PCT = 0.08       # max loss per trade: -8% PnL → exit immediately
+V6_MAX_LOSS_PCT = 0.06       # max loss per trade: -6% PnL → exit immediately
 
 LEVERAGE = 2.5
 MAX_MARGIN_PER_COIN = 0.15
