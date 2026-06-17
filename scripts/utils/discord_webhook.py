@@ -23,7 +23,7 @@ def _is_silent_hours() -> bool:
     return False
 
 
-def send_message(webhook_url: str, text: str) -> None:
+def send_message(webhook_url: str, text: str, force: bool = False) -> None:
     """Send a plain-text message (or split messages) to a Discord webhook.
 
     Discord's ``content`` field has a 2000-character limit.  If *text* exceeds
@@ -32,8 +32,9 @@ def send_message(webhook_url: str, text: str) -> None:
     Args:
         webhook_url: The incoming webhook URL for the Discord channel.
         text: Message body.
+        force: If True, bypass silent-hours check (used for urgent EXIT_ALL).
     """
-    if _is_silent_hours():
+    if not force and _is_silent_hours():
         print("[discord_webhook] Silent hours – skipping notification.")
         return
     for chunk in _chunk_text(text, CHAR_LIMIT):
