@@ -1,6 +1,7 @@
 name: Test Order
 on:
-  workflow_dispatch:
+  push:
+    branches: [test-order]
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -20,7 +21,7 @@ jobs:
 import os, sys; sys.path.insert(0, '.')
 from utils.okx_utils import okx_place_order
 
-inst = 'BTC-USDT'  # spot
+inst = 'BTC-USDT'
 sz = '5'
 td_mode = 'cash'
 r = okx_place_order(inst, td_mode, 'buy', sz, '20000')
