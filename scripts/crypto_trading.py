@@ -205,26 +205,27 @@ COINGECKO_IDS = {
     "PAXGUSDT": "pax-gold"}
 
 _SOURCE_LIST: list[tuple[str, str | None]] = [
+    ("OKX", None),
     ("Binance", None),
     ("Binance US", "api.binance.us"),
     ("Binance GCP", "api-gcp.binance.com"),
-    ("OKX", None),
 ]
 _ACTIVE_SOURCE_IDX = 0
 
 def _build_source_fns(symbol: str, interval: str = "1d", limit: int = CANDLE_COUNT) -> list[tuple[str, callable]]:
     fns: list[tuple[str, callable]] = []
     okx_iv = OKX_INTERVAL_MAP.get(interval, interval)
+    fns.append(("OKX", lambda s=symbol, iv=okx_iv, l=limit: _fetch_okx(s, iv, l)))
+    cg_id = COINGECKO_IDS.get(symbol)
+    if cg_id:
+        fns.append(("CoinGecko", lambda s=symbol, c=cg_id, iv=interval: _parse_coingecko_klines(c, s, iv)))
     for name, host in _SOURCE_LIST:
         if name == "OKX":
-            fns.append((name, lambda s=symbol, iv=okx_iv, l=limit: _fetch_okx(s, iv, l)))
+            continue
         elif host:
             fns.append((name, lambda s=symbol, iv=interval, h=host, l=limit: _fetch_binance(s, iv, h, l)))
         else:
             fns.append((name, lambda s=symbol, iv=interval, l=limit: _fetch_binance(s, iv, limit=l)))
-    cg_id = COINGECKO_IDS.get(symbol)
-    if cg_id:
-        fns.append(("CoinGecko", lambda s=symbol, c=cg_id, iv=interval: _parse_coingecko_klines(c, s, iv)))
     return fns
 
 def _try_source(
