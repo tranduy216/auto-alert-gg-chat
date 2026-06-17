@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backtest crypto_trading v4/v5 strategy with bull/bear period support."""
+"""Backtest crypto_trading v6 strategy with bull/bear period support."""
 
 import json
 import os
@@ -12,33 +12,48 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import requests as req_lib
 
 from crypto_trading import (
-    sma, compute_atr, compute_rsi, evaluate_trend_3d, trend_strength,
-    compute_volume_score, compute_reaction_score_long, compute_reaction_score_short,
-    compute_resistance, compute_support, compute_break_score_long,
-    compute_break_score_short, compute_atr_score,
-    compute_entry1_signal_long, compute_entry1_signal_short,
-    resolve_action_v4, evaluate_exit_v5, _aggregate_daily_to_3d,
-    COINS, SYMBOL_MAP, LEVERAGE,
+    sma, compute_rsi, evaluate_trend_3d, trend_strength,
+    compute_volume_score,
+    compute_entry_v6_long, compute_entry_v6_short,
+    resolve_action_v6, evaluate_exit_v6, _aggregate_daily_to_3d,
+    COINS, SYMBOL_MAP, LEVERAGE, SHORT_ALLOWED,
+    SHORT_TREND_FAST, SHORT_TREND_SLOW,
+    SHORT_COOLDOWN_LOSSES, SHORT_COOLDOWN_DAYS,
+    LONG_COOLDOWN_LOSSES, LONG_COOLDOWN_DAYS,
 )
 
 LOOKBACK_DAYS = 400
 MIN_3D_PERIODS = 25
 
+BINANCE_MAX_LIMIT = 1000
+
 PERIODS = {
     "BEAR": {
         "label": "Recent 400 days (bear/mixed)",
-        "start_time": None,  # most recent data
+        "start_time": None,
+        "limit": 400,
     },
     "BULL_2023": {
         "label": "Bull 2023 (Jan 2023 – Feb 2024)",
         "start_time": int(datetime(2023, 1, 1).timestamp() * 1000),
+        "limit": 400,
+    },
+    "2021_2023": {
+        "label": "2021–2023",
+        "start_time": int(datetime(2021, 1, 1).timestamp() * 1000),
+        "limit": BINANCE_MAX_LIMIT,
+    },
+    "2024_2026": {
+        "label": "2024–2026",
+        "start_time": int(datetime(2024, 1, 1).timestamp() * 1000),
+        "limit": BINANCE_MAX_LIMIT,
     },
 }
 
 
 def _fetch_klines_backtest(symbol: str, interval: str = "1d", limit: int = 400,
                            start_time: int | None = None) -> list[dict]:
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    params = {"symbol": symbol, "interval": interval, "limit": min(limit, BINANCE_MAX_LIMIT)}
     if start_time:
         params["startTime"] = start_time
     resp = req_lib.get(
@@ -55,15 +70,40 @@ def _fetch_klines_backtest(symbol: str, interval: str = "1d", limit: int = 400,
     ]
 
 
-def backtest_coin(coin: str, start_time: int | None = None) -> dict:
+def _fetch_all_klines(symbol: str, limit: int = 1000,
+                      start_time: int | None = None) -> list[dict]:
+    candles = []
+    remaining = limit
+    cur_start = start_time
+    while remaining > 0:
+        take = min(remaining, BINANCE_MAX_LIMIT)
+        batch = _fetch_klines_backtest(symbol, "1d", take + 50, cur_start)
+        if len(batch) <= 1:
+            break
+        candles.extend(batch)
+        remaining -= len(batch)
+        cur_start = batch[-1]["open_time"] + 1
+        if len(candles) >= limit:
+            break
+    return candles[:limit]
+
+
+def backtest_coin(coin: str, start_time: int | None = None,
+                  limit: int = LOOKBACK_DAYS) -> dict:
     symbol = SYMBOL_MAP[coin]
-    daily_all = _fetch_klines_backtest(symbol, "1d", LOOKBACK_DAYS, start_time)
-    daily_all = daily_all[-LOOKBACK_DAYS:]
+    daily_all = _fetch_all_klines(symbol, limit, start_time)
+    if start_time:
+        daily_all = daily_all[:limit]
+    else:
+        daily_all = daily_all[-limit:]
 
     first_date = datetime.utcfromtimestamp(daily_all[0]["open_time"] / 1000).strftime("%Y-%m-%d")
     last_date = datetime.utcfromtimestamp(daily_all[-1]["open_time"] / 1000).strftime("%Y-%m-%d")
 
-    state = {"position_state": "FLAT", "entry_price": None, "remaining_size": 1.0}
+    state = {"position_state": "FLAT", "entry_price": None, "remaining_size": 1.0,
+             "trailing_stop": None, "highest_since_entry": None,
+             "short_loss_streak": 0, "short_cooldown_until": None,
+             "long_loss_streak": 0, "long_cooldown_until": None}
     trades = []
     equity_curve = [1.0]
 
@@ -71,16 +111,15 @@ def backtest_coin(coin: str, start_time: int | None = None) -> dict:
 
     for day_idx in range(INITIAL_DAYS, len(daily_all)):
         daily_slice = daily_all[:day_idx + 1]
-        candles_1d = daily_slice[-30:]
         candles_3d = _aggregate_daily_to_3d(daily_slice)
 
         if len(candles_3d) < MIN_3D_PERIODS:
             continue
 
-        current_close = candles_1d[-1]["close"]
+        current_close = daily_slice[-1]["close"]
 
+        # 3D indicators
         closes_3d = [c["close"] for c in candles_3d]
-        ma3_3d = (sma(closes_3d, 3)[-1] or closes_3d[-1])
         ma7_3d = (sma(closes_3d, 7)[-1] or closes_3d[-1])
         ma10_3d = (sma(closes_3d, 10)[-1] or closes_3d[-1])
         ma20_3d = (sma(closes_3d, 20)[-1] or closes_3d[-1])
@@ -88,40 +127,23 @@ def backtest_coin(coin: str, start_time: int | None = None) -> dict:
         ts_val = trend_strength(trend_score)
         rsi_3d = compute_rsi(closes_3d, 14)
 
-        closes_1d = [c["close"] for c in candles_1d]
-        highs_1d = [c["high"] for c in candles_1d]
-        lows_1d = [c["low"] for c in candles_1d]
-        volumes_1d = [c["volume"] for c in candles_1d]
+        # 1D indicators (all available data)
+        closes_1d = [c["close"] for c in daily_slice]
+        highs_1d = [c["high"] for c in daily_slice]
+        lows_1d = [c["low"] for c in daily_slice]
+        volumes_1d = [c["volume"] for c in daily_slice]
 
-        ma3_1d = (sma(closes_1d, 3)[-1] or closes_1d[-1])
-        ma7_1d = (sma(closes_1d, 7)[-1] or closes_1d[-1])
-        ma10_1d = (sma(closes_1d, 10)[-1] or closes_1d[-1])
+        ma20_1d_all = sma(closes_1d, 20)
+        ma50_1d_all = sma(closes_1d, 50)
+        ma20_1d = ma20_1d_all[-1] if ma20_1d_all[-1] is not None else closes_1d[-1]
+        ma50_1d = ma50_1d_all[-1] if ma50_1d_all[-1] is not None else closes_1d[-1]
+        trend_ma_fast_1d = (sma(closes_1d, SHORT_TREND_FAST)[-1] or None)
+        trend_ma_slow_1d = sma(closes_1d, SHORT_TREND_SLOW)[-1] or ma50_1d
         vol_ma20 = (sma(volumes_1d, 20)[-1] or volumes_1d[-1])
-
-        last_low = lows_1d[-1]
-        last_high = highs_1d[-1]
-        last_volume = volumes_1d[-1]
-        atr_1d = compute_atr(candles_1d, 14)
-
-        volume_score = compute_volume_score(last_volume, vol_ma20)
-        reaction_score_long = compute_reaction_score_long(current_close, last_low, ma3_1d)
-        reaction_score_short = compute_reaction_score_short(current_close, last_high, ma3_1d)
-
-        resistance = compute_resistance(candles_1d, ma7_1d, ma10_1d)
-        support = compute_support(candles_1d, ma7_1d, ma10_1d)
-        break_score_long = compute_break_score_long(current_close, resistance, atr_1d)
-        break_score_short = compute_break_score_short(current_close, support, atr_1d)
-        atr_score = compute_atr_score(atr_1d, current_close)
-
-        entry1_long = compute_entry1_signal_long(current_close, ma7_1d, volume_score)
-        entry1_short = compute_entry1_signal_short(current_close, ma7_1d, volume_score)
-
-        ts_long = max(0.0, ts_val)
-        ts_short = max(0.0, -ts_val)
-        p_long_entry2 = min(1.0, max(0.0, 0.35 * ts_long + 0.25 * reaction_score_long + 0.25 * volume_score + 0.15 * atr_score))
-        p_short_entry2 = min(1.0, max(0.0, 0.35 * ts_short + 0.25 * reaction_score_short + 0.25 * volume_score + 0.15 * atr_score))
-        p_long_entry3 = min(1.0, max(0.0, 0.30 * ts_long + 0.20 * reaction_score_long + 0.30 * volume_score + 0.20 * break_score_long))
-        p_short_entry3 = min(1.0, max(0.0, 0.30 * ts_short + 0.20 * reaction_score_short + 0.30 * volume_score + 0.20 * break_score_short))
+        volume_score = compute_volume_score(volumes_1d[-1], vol_ma20)
+        rsi_1d = compute_rsi(closes_1d, 14)
+        recent_10d_low = min(lows_1d[-10:]) if len(lows_1d) >= 10 else current_close * 0.95
+        recent_10d_high = max(highs_1d[-10:]) if len(highs_1d) >= 10 else current_close * 1.05
 
         dt = daily_slice[-1]["open_time"]
         if isinstance(dt, int):
@@ -132,22 +154,57 @@ def backtest_coin(coin: str, start_time: int | None = None) -> dict:
         prev_pos_state = state["position_state"]
         entry_price = state["entry_price"]
         remaining_size = state["remaining_size"]
+        trailing_stop = state.get("trailing_stop")
+        highest_since_entry = state.get("highest_since_entry")
 
         if prev_pos_state == "FLAT":
-            pos_state, action = resolve_action_v4(
-                trend_score, entry1_long, entry1_short,
-                p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
-                prev_pos_state,
+            # Long cooldown check
+            _long_allowed = True
+            if state.get("long_cooldown_until"):
+                _cd = state["long_cooldown_until"]
+                if isinstance(_cd, str) and dt and isinstance(dt, int):
+                    _cd_ms = int(datetime.fromisoformat(_cd).timestamp() * 1000)
+                    if dt < _cd_ms:
+                        _long_allowed = False
+                elif isinstance(_cd, (int, float)) and isinstance(dt, int):
+                    if dt < _cd:
+                        _long_allowed = False
+            entry_long = compute_entry_v6_long(
+                trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+            ) if _long_allowed else False
+            # Short cooldown check
+            _short_allowed = coin in SHORT_ALLOWED
+            if _short_allowed and state.get("short_cooldown_until"):
+                _cd = state["short_cooldown_until"]
+                if isinstance(_cd, str) and dt and isinstance(dt, int):
+                    _cd_ms = int(datetime.fromisoformat(_cd).timestamp() * 1000)
+                    if dt < _cd_ms:
+                        _short_allowed = False
+                elif isinstance(_cd, (int, float)) and isinstance(dt, int):
+                    if dt < _cd:
+                        _short_allowed = False
+            entry_short = (
+                compute_entry_v6_short(
+                    trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                ) if _short_allowed else False
+            )
+            pos_state, action = resolve_action_v6(
+                trend_score, entry_long, entry_short, prev_pos_state,
             )
             if action == "OPEN_LONG_ENTRY_1":
                 entry_price = current_close
                 remaining_size = 1.0
+                trailing_stop = None
+                highest_since_entry = None
                 trades.append({"date": date_str, "type": "LONG_OPEN", "price": current_close, "size": 1.0, "reason": f"TrendScore={trend_score}"})
             elif action == "OPEN_SHORT_ENTRY_1":
                 entry_price = current_close
                 remaining_size = 1.0
+                trailing_stop = None
+                highest_since_entry = None
                 trades.append({"date": date_str, "type": "SHORT_OPEN", "price": current_close, "size": 1.0, "reason": f"TrendScore={trend_score}"})
-            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size})
+            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size,
+                          "trailing_stop": trailing_stop, "highest_since_entry": highest_since_entry})
         else:
             is_long = prev_pos_state.startswith("LONG")
             if entry_price and entry_price > 0:
@@ -155,49 +212,58 @@ def backtest_coin(coin: str, start_time: int | None = None) -> dict:
             else:
                 pnl_pct = 0.0
 
-            exit_action, reduce_pct, exit_reason = evaluate_exit_v5(
+            exit_action, reduce_pct, exit_reason, new_ts, new_he = evaluate_exit_v6(
                 prev_pos_state, entry_price, current_close, remaining_size,
-                ma3_3d, ma7_3d, ma10_3d, ma20_3d, rsi_3d, trend_score, ts_val,
+                ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
+                recent_10d_low, recent_10d_high,
+                trailing_stop, highest_since_entry,
             )
+            trailing_stop = new_ts
+            highest_since_entry = new_he
 
             if exit_action == "HOLD":
-                # Only check add-entry conditions (same as analyse_coin)
                 pos_state = prev_pos_state
                 action = "HOLD"
-                if p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1":
-                    pos_state, action = "LONG_ENTRY_2", "ADD_LONG_ENTRY_2"
-                elif p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2":
-                    pos_state, action = "LONG_ENTRY_3", "ADD_LONG_ENTRY_3"
-                elif p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1":
-                    pos_state, action = "SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"
-                elif p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2":
-                    pos_state, action = "SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"
-                if action != "HOLD":
-                    trades.append({"date": date_str, "type": action, "price": current_close, "size": remaining_size, "reason": "add entry"})
             else:
                 if exit_action == "EXIT_ALL":
                     pnl = pnl_pct
                     trades.append({"date": date_str, "type": "CLOSE", "price": current_close, "size": remaining_size, "pnl_pct": round(pnl, 2), "reason": exit_reason})
+                    # Direction-specific cooldown tracking
+                    if "SHORT" in prev_pos_state:
+                        _sls = state.get("short_loss_streak", 0)
+                        if pnl > 0:
+                            state["short_loss_streak"] = 0
+                            state["short_cooldown_until"] = None
+                        else:
+                            _sls += 1
+                            state["short_loss_streak"] = _sls
+                            if _sls >= SHORT_COOLDOWN_LOSSES:
+                                from datetime import timedelta
+                                _cd = datetime.utcfromtimestamp(dt / 1000) + timedelta(days=SHORT_COOLDOWN_DAYS)
+                                state["short_cooldown_until"] = _cd.isoformat()
+                    else:  # LONG
+                        _lls = state.get("long_loss_streak", 0)
+                        if pnl > 0:
+                            state["long_loss_streak"] = 0
+                            state["long_cooldown_until"] = None
+                        else:
+                            _lls += 1
+                            state["long_loss_streak"] = _lls
+                            if _lls >= LONG_COOLDOWN_LOSSES:
+                                from datetime import timedelta
+                                _cd = datetime.utcfromtimestamp(dt / 1000) + timedelta(days=LONG_COOLDOWN_DAYS)
+                                state["long_cooldown_until"] = _cd.isoformat()
                     pos_state = "FLAT"
                     remaining_size = 0.0
                     entry_price = None
-                elif exit_action in ("TAKE_PROFIT_1", "TAKE_PROFIT_2"):
-                    cut = remaining_size * 0.3
-                    remaining_size = round(remaining_size - cut, 4)
-                    trades.append({"date": date_str, "type": f"TP_{exit_action[-1]}", "price": current_close, "size": cut, "reason": exit_reason})
-                    pos_state = prev_pos_state
-                elif exit_action == "OVER_EXTEND":
-                    cut = remaining_size * 0.25
-                    remaining_size = round(remaining_size - cut, 4)
-                    trades.append({"date": date_str, "type": "OVER_EXTEND", "price": current_close, "size": cut, "reason": exit_reason})
-                    pos_state = prev_pos_state
 
                 if remaining_size < 0.01 and pos_state != "FLAT":
                     pos_state = "FLAT"
                     remaining_size = 0.0
                     entry_price = None
 
-            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size})
+            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size,
+                          "trailing_stop": trailing_stop, "highest_since_entry": highest_since_entry})
 
         if state["position_state"] != "FLAT" and state["entry_price"] and state["remaining_size"] > 0:
             is_long = state["position_state"].startswith("LONG")
@@ -279,7 +345,7 @@ def print_report(metrics: dict):
 
 
 def main():
-    print("Crypto Trading Strategy Backtest (v4+v5 – v6 rules)")
+    print("Crypto Trading Strategy Backtest (v6 trend-following)")
     print(f"{'='*70}")
 
     for period_key, period_info in PERIODS.items():
@@ -290,7 +356,8 @@ def main():
         all_metrics = []
         for coin in COINS:
             try:
-                result = backtest_coin(coin, period_info["start_time"])
+                result = backtest_coin(coin, period_info["start_time"],
+                                       period_info.get("limit", LOOKBACK_DAYS))
                 metrics = compute_metrics(result)
                 all_metrics.append(metrics)
                 print_report(metrics)
@@ -324,7 +391,8 @@ def main():
         print(f"  {coin:>6s}  ", end="")
         for pk, pi in PERIODS.items():
             try:
-                res = backtest_coin(coin, pi["start_time"])
+                res = backtest_coin(coin, pi["start_time"],
+                                    pi.get("limit", LOOKBACK_DAYS))
                 m = compute_metrics(res)
                 if m.get("message"):
                     print(f" {'No trades':>20s}  ", end="")

@@ -57,8 +57,9 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "LINK", "ADA", "MATIC"]
+COINS = ["ETH", "BNB", "DOGE", "PAXG", "TRX"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
+SHORT_ALLOWED = {"ETH", "PAXG"}
 BTC_SYMBOL = "BTCUSDT"
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
@@ -89,9 +90,24 @@ CORRELATION_GROUPS: dict[str, list[str]] = {
 # Loss streak
 LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
 LOSS_STREAK_REDUCE = 0.5     # size multiplier
+SHORT_COOLDOWN_LOSSES = 2    # consecutive short losses → pause short on this coin
+SHORT_COOLDOWN_DAYS = 20     # pause duration
+LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
+LONG_COOLDOWN_DAYS = 20      # pause duration
+
+# Short trend filter MA pair (fast MA vs slow MA)
+# MA20/MA50 → short if MA20 < MA50 (bear); MA15/MA35, MA20/MA40
+SHORT_TREND_FAST = 20        # fast MA period for trend filter (both long & short)
+SHORT_TREND_SLOW = 40        # slow MA period (also used as price filter)
 
 # Volatility filter
 VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
+
+# v6 trailing stop
+V6_TRAILING_PCT = 0.85       # trail 15% from high (tighter once in profit)
+V6_INITIAL_STOP_PCT = 0.85   # initial trailing stop at 85% of entry (15% price trail)
+V6_HARD_STOP_PCT = 0.78      # hard cap: 22% price move = 5.5% of total capital @ 10% alloc × 2.5x
+V6_MAX_LOSS_PCT = 0.08       # max loss per trade: -8% PnL → exit immediately
 
 LEVERAGE = 2.5
 MAX_MARGIN_PER_COIN = 0.15
@@ -435,11 +451,13 @@ def compute_atr_score(atr: float, price: float) -> float:
 
 
 def compute_entry1_signal_long(close: float, ma7: float, volume_score: float) -> bool:
-    return close > ma7 and volume_score >= 0.4
+    near_ma7 = close >= ma7 * 0.97 and close <= ma7 * 1.03
+    return near_ma7 and volume_score >= 0.4
 
 
 def compute_entry1_signal_short(close: float, ma7: float, volume_score: float) -> bool:
-    return close < ma7 and volume_score >= 0.4
+    near_ma7 = close <= ma7 * 1.03 and close >= ma7 * 0.97
+    return near_ma7 and volume_score >= 0.4
 
 
 def compute_entry_zone_v4(
@@ -494,7 +512,7 @@ def resolve_action_v4(
     p_long_entry3: float,
     p_short_entry3: float,
     prev_pos_state: str,
-    entry_threshold: int = 3,
+    entry_threshold: int = 2,
 ) -> tuple[str, str]:
     """Return (position_state, action)."""
 
@@ -582,50 +600,50 @@ def evaluate_exit_v5(
     pnl_pct = ((current_price - entry_price) / entry_price *
                100) if is_long else ((entry_price - current_price) / entry_price * 100)
 
-    # 1. Hard Stop Loss
-    if pnl_pct <= -5.5:
+    # 1. Hard Stop Loss (wider)
+    if pnl_pct <= -8.0:
         return ("EXIT_ALL", 1.0,
-                f"Stop loss hit at {pnl_pct:.1f}% (limit -5.5%)")
+                f"Stop loss hit at {pnl_pct:.1f}% (limit -8.0%)")
 
-    # 2. Emergency Exit
+    # 2. Emergency Exit — major trend fail
     if is_long:
-        if ma3 < ma7 < ma10 and ts_val < -0.4:
+        if ma7 < ma20 and ts_val < -0.3:
             return ("EXIT_ALL", 1.0,
-                    f"Emergency exit: MA3<MA7<MA10 & Score {ts_val:.1f} < -0.4")
+                    f"Emergency exit: MA7<MA20 & Score {ts_val:.1f} < -0.3")
     else:
-        if ma3 > ma7 > ma10 and ts_val > 0.4:
+        if ma7 > ma20 and ts_val > 0.3:
             return ("EXIT_ALL", 1.0,
-                    f"Emergency exit: MA3>MA7>MA10 & Score {ts_val:.1f} > 0.4")
+                    f"Emergency exit: MA7>MA20 & Score {ts_val:.1f} > 0.3")
 
-    # 3. Trend Exit
+    # 3. Trend Exit — MA7<MA20 on 3D = major trend reversal
     if is_long:
-        if ma3 < ma10:
+        if ma7 < ma20:
             return ("EXIT_ALL", 1.0,
-                    f"Trend exit: MA3 ({ma3:.2f}) < MA10 ({ma10:.2f})")
+                    f"Trend exit: MA7 ({ma7:.2f}) < MA20 ({ma20:.2f})")
     else:
-        if ma3 > ma10:
+        if ma7 > ma20:
             return ("EXIT_ALL", 1.0,
-                    f"Trend exit: MA3 ({ma3:.2f}) > MA10 ({ma10:.2f})")
+                    f"Trend exit: MA7 ({ma7:.2f}) > MA20 ({ma20:.2f})")
 
-    # 4. Score Exit
+    # 4. Score Exit (more tolerant)
     if is_long:
-        if ts_val < 0.2:
+        if ts_val < 0.1:
             return ("EXIT_ALL", 1.0,
-                    f"Score exit: {ts_val:.1f} < +0.2")
+                    f"Score exit: {ts_val:.1f} < +0.1")
     else:
-        if ts_val > -0.2:
+        if ts_val > -0.1:
             return ("EXIT_ALL", 1.0,
-                    f"Score exit: {ts_val:.1f} > -0.2")
+                    f"Score exit: {ts_val:.1f} > -0.1")
 
-    # 6. Take Profit
-    if pnl_pct >= 25:
+    # 6. Take Profit (closer targets)
+    if pnl_pct >= 18:
         cut = remaining_size * 0.3
         return ("TAKE_PROFIT_2", cut,
-                f"TP2: +{pnl_pct:.1f}% >= 25% \u2013 reduce {cut/remaining_size*100:.0f}%")
-    if pnl_pct >= 15:
+                f"TP2: +{pnl_pct:.1f}% >= 18% \u2013 reduce {cut/remaining_size*100:.0f}%")
+    if pnl_pct >= 10:
         cut = remaining_size * 0.3
         return ("TAKE_PROFIT_1", cut,
-                f"TP1: +{pnl_pct:.1f}% >= 15% \u2013 reduce {cut/remaining_size*100:.0f}%")
+                f"TP1: +{pnl_pct:.1f}% >= 10% \u2013 reduce {cut/remaining_size*100:.0f}%")
 
     # 7. Over-Extension Exit
     if is_long:
@@ -640,6 +658,165 @@ def evaluate_exit_v5(
                     f"Over-extended: Price<MA20x0.75 or RSI<{rsi:.0f}<20 \u2013 reduce {cut/remaining_size*100:.0f}%")
 
     return ("HOLD", 0.0, "")
+
+
+# ---------------------------------------------------------------------------
+# Exit system (v6) — trailing stop + trend reversal
+# ---------------------------------------------------------------------------
+
+def evaluate_exit_v6(
+    position_state: str,
+    entry_price: float | None,
+    current_price: float,
+    remaining_size: float,
+    ma7_3d: float,
+    ma20_3d: float,
+    trend_score: int,
+    ts_val: float,
+    rsi_3d: float,
+    recent_10d_low: float,
+    recent_10d_high: float,
+    trailing_stop: float | None,
+    highest_since_entry: float | None,
+) -> tuple[str, float, str, float | None, float | None]:
+    """Exit logic v6: trailing stop + trend reversal.
+
+    Returns (exit_action, reduce_pct, reason, new_trailing_stop, new_highest).
+    """
+    if position_state == "FLAT" or entry_price is None or entry_price <= 0:
+        return ("HOLD", 0.0, "", trailing_stop, highest_since_entry)
+
+    is_long = position_state.startswith("LONG")
+    pnl_pct = ((current_price - entry_price) / entry_price * 100) if is_long else ((entry_price - current_price) / entry_price * 100)
+
+    # Best price since entry: highest for long, lowest for short
+    best_price = max(highest_since_entry or entry_price, current_price) if is_long \
+                 else min(highest_since_entry or entry_price, current_price)
+    new_stop = trailing_stop
+
+    # Initialise trailing stop if not set (first bar after entry)
+    if new_stop is None:
+        new_stop = round(entry_price * (V6_INITIAL_STOP_PCT if is_long else (2 - V6_INITIAL_STOP_PCT)), 2)
+
+    # Update trailing stop as price moves favorably
+    if is_long:
+        if best_price > (highest_since_entry or entry_price):
+            trail_buffer = best_price * V6_TRAILING_PCT
+            if trail_buffer > new_stop:
+                new_stop = round(trail_buffer, 2)
+    else:
+        if best_price < (highest_since_entry or entry_price):
+            trail_buffer = best_price * (2 - V6_TRAILING_PCT)
+            if trail_buffer < new_stop:
+                new_stop = round(trail_buffer, 2)
+
+    # 0. Max loss stop: -8% PnL → exit immediately
+    if pnl_pct <= -V6_MAX_LOSS_PCT * 100:
+        return ("EXIT_ALL", 1.0, f"Max loss -{V6_MAX_LOSS_PCT*100:.0f}% stop at ${current_price:.2f}",
+                new_stop, best_price)
+
+    # 1. Combined stop: whichever is tighter triggers first
+    #    Hard stop = 7% of total capital cap (28% price move)
+    #    Dynamic trail = 15% from best price, tightens as price moves favorably
+    hard_stop_level = round(entry_price * (V6_HARD_STOP_PCT if is_long else (2 - V6_HARD_STOP_PCT)), 2)
+    if is_long:
+        effective_stop = max(new_stop or 0, hard_stop_level)
+        if current_price <= effective_stop:
+            trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
+            return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
+                    new_stop, best_price)
+    else:
+        effective_stop = min(new_stop or 999999, hard_stop_level)
+        if current_price >= effective_stop:
+            trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
+            return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
+                    new_stop, best_price)
+
+    # 2. Trend reversal exit (3D chart)
+    if is_long and ma7_3d < ma20_3d:
+        return ("EXIT_ALL", 1.0,
+                f"Trend reversal: MA7 ({ma7_3d:.2f}) < MA20 ({ma20_3d:.2f})",
+                new_stop, best_price)
+    if not is_long and ma7_3d > ma20_3d:
+        return ("EXIT_ALL", 1.0,
+                f"Trend reversal: MA7 ({ma7_3d:.2f}) > MA20 ({ma20_3d:.2f})",
+                new_stop, best_price)
+
+    # 3. Emergency exit: trend completely gone
+    if is_long and ts_val < -0.3:
+        return ("EXIT_ALL", 1.0, f"Score collapse: {ts_val:.1f} < -0.3",
+                new_stop, best_price)
+    if not is_long and ts_val > 0.3:
+        return ("EXIT_ALL", 1.0, f"Score collapse: {ts_val:.1f} > +0.3",
+                new_stop, best_price)
+
+    return ("HOLD", 0.0, "", new_stop, best_price)
+
+
+# ---------------------------------------------------------------------------
+# Entry system (v6) — RSI pullback within trend
+# ---------------------------------------------------------------------------
+
+def compute_entry_v6_long(
+    trend_score: int,
+    rsi_1d: float,
+    close: float,
+    ma20_1d: float,
+    trend_ma_slow_1d: float,
+    trend_ma_fast_1d: float | None,
+    volume_score: float,
+) -> bool:
+    """Entry signal for LONG: trend_ma_fast > trend_ma_slow (uptrend) + price above MA20."""
+    if trend_score < 1:
+        return False
+    if trend_ma_fast_1d is not None and trend_ma_fast_1d < trend_ma_slow_1d:
+        return False
+    if close < ma20_1d:
+        return False
+    if close < trend_ma_slow_1d:
+        return False
+    if volume_score < 0.4:
+        return False
+    return True
+
+
+def compute_entry_v6_short(
+    trend_score: int,
+    rsi_1d: float,
+    close: float,
+    ma20_1d: float,
+    trend_ma_slow_1d: float,
+    trend_ma_fast_1d: float | None,
+    volume_score: float,
+) -> bool:
+    """Entry signal for SHORT: bear trend (trend_ma_fast < trend_ma_slow 1D) + price below MA20/trend_ma_slow."""
+    if trend_score > -3:
+        return False
+    if trend_ma_fast_1d is not None and trend_ma_fast_1d > trend_ma_slow_1d:
+        return False
+    if close > ma20_1d:
+        return False
+    if close > trend_ma_slow_1d:
+        return False
+    if volume_score < 0.4:
+        return False
+    return True
+
+
+def resolve_action_v6(
+    trend_score: int,
+    entry_long: bool,
+    entry_short: bool,
+    prev_pos_state: str,
+) -> tuple[str, str]:
+    """State machine v6 — single position, no pyramiding."""
+    if prev_pos_state == "FLAT":
+        if entry_long:
+            return ("LONG_ENTRY_1", "OPEN_LONG_ENTRY_1")
+        if entry_short:
+            return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
+        return ("FLAT", "NO_TRADE")
+    return (prev_pos_state, "HOLD")
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +891,12 @@ def save_state(
     entry_price: float | None = None,
     remaining_size: float | None = None,
     loss_streak: int = 0,
+    trailing_stop: float | None = None,
+    highest_since_entry: float | None = None,
+    short_loss_streak: int = 0,
+    short_cooldown_until: str = "",
+    long_loss_streak: int = 0,
+    long_cooldown_until: str = "",
 ) -> None:
     """Persist position state to Firestore."""
     db = _get_db()
@@ -736,6 +919,18 @@ def save_state(
             data["remaining_size"] = round(remaining_size, 4)
         if loss_streak:
             data["loss_streak"] = loss_streak
+        if trailing_stop is not None:
+            data["trailing_stop"] = trailing_stop
+        if highest_since_entry is not None:
+            data["highest_since_entry"] = highest_since_entry
+        if short_loss_streak:
+            data["short_loss_streak"] = short_loss_streak
+        if short_cooldown_until:
+            data["short_cooldown_until"] = short_cooldown_until
+        if long_loss_streak:
+            data["long_loss_streak"] = long_loss_streak
+        if long_cooldown_until:
+            data["long_cooldown_until"] = long_cooldown_until
         call_with_retry(
             lambda: doc_ref.set(data),
             resource_name=f"Firestore save {coin} state",
@@ -768,27 +963,15 @@ def _signal_icon(result: dict) -> str:
 def compute_next_rules(position_state: str) -> list[str]:
     rules: list[str] = []
     if position_state == "FLAT":
-        rules.append("OPEN_LONG if TrendScore >= +2 and Entry1Signal")
-        rules.append("OPEN_SHORT if TrendScore <= -2 and Entry1Signal")
+        rules.append("OPEN_LONG if TrendScore >= +2 and RSI_1D < 45 near MA20")
+        rules.append("OPEN_SHORT if TrendScore <= -2 and RSI_1D > 55 near MA20")
         return rules
     if position_state.startswith("LONG"):
-        if position_state == "LONG_ENTRY_1":
-            rules.append("ADD ENTRY2 if P_Entry2 >= 0.70")
-            rules.append("REDUCE if TrendScore < 0 | EXIT if TrendScore < -2")
-        elif position_state == "LONG_ENTRY_2":
-            rules.append("ADD ENTRY3 if P_Entry3 >= 0.75")
-            rules.append("EXIT if TrendScore < -2")
-        elif position_state == "LONG_ENTRY_3":
-            rules.append("EXIT if TrendScore < -2")
+        rules.append("Trailing stop active | EXIT if trend reversal (MA7 < MA20)")
+        rules.append("EXIT if TrendScore < 0")
     elif position_state.startswith("SHORT"):
-        if position_state == "SHORT_ENTRY_1":
-            rules.append("ADD ENTRY2 if P_Entry2 >= 0.70")
-            rules.append("REDUCE if TrendScore > 0 | EXIT if TrendScore > 2")
-        elif position_state == "SHORT_ENTRY_2":
-            rules.append("ADD ENTRY3 if P_Entry3 >= 0.75")
-            rules.append("EXIT if TrendScore > 2")
-        elif position_state == "SHORT_ENTRY_3":
-            rules.append("EXIT if TrendScore > 2")
+        rules.append("Trailing stop active | EXIT if trend reversal (MA7 > MA20)")
+        rules.append("EXIT if TrendScore > 0")
     return rules
 
 
@@ -930,49 +1113,44 @@ def analyse_coin(
     last_high = highs_1d[-1]
     last_volume = volumes_1d[-1]
 
+    # v6 indicators
+    rsi_1d = compute_rsi(closes_1d, 14)
+    ma20_1d_all = sma(closes_1d, 20)
+    ma50_1d_all = sma(closes_1d, 50)
+    ma20_1d = ma20_1d_all[-1] if ma20_1d_all[-1] is not None else last_close
+    ma50_1d_all = sma(closes_1d, 50)
+    ma50_1d = ma50_1d_all[-1] if ma50_1d_all[-1] is not None else last_close
+    trend_ma_fast_1d = (sma(closes_1d, SHORT_TREND_FAST)[-1] or None)
+    trend_ma_slow_1d = sma(closes_1d, SHORT_TREND_SLOW)[-1] or ma50_1d
+    ma200_1d_all = sma(closes_1d, 200)
+    ma200_1d = ma200_1d_all[-1] if ma200_1d_all[-1] is not None else None
+    recent_10d_low = min(lows_1d[-10:]) if len(lows_1d) >= 10 else last_close * 0.95
+    recent_10d_high = max(highs_1d[-10:]) if len(highs_1d) >= 10 else last_close * 1.05
+
     atr_1d = compute_atr(candles_1d, 14)
     atrs_1d = [compute_atr(candles_1d[:i+1], 14) for i in range(13, len(candles_1d))]
     atr_ma20_1d_all = sma(atrs_1d, 20)
     atr_ma20_1d = atr_ma20_1d_all[-1] if atr_ma20_1d_all[-1] is not None else atr_1d
 
-    # Scores
     volume_score = compute_volume_score(last_volume, vol_ma20_1d)
-    reaction_score_long = compute_reaction_score_long(last_close, last_low, ma3_1d)
-    reaction_score_short = compute_reaction_score_short(last_close, last_high, ma3_1d)
 
-    resistance = compute_resistance(candles_1d, ma7_1d, ma10_1d)
-    support = compute_support(candles_1d, ma7_1d, ma10_1d)
-    break_score_long = compute_break_score_long(last_close, resistance, atr_1d)
-    break_score_short = compute_break_score_short(last_close, support, atr_1d)
-
-    atr_score = compute_atr_score(atr_1d, last_close)
-
-    # Entry 1 signals (adaptive: faster MA in weak trends, slower MA in strong trends)
-    _entry1_ma = ma7_1d if trend_score >= 2 else ma5_1d
-    entry1_long = compute_entry1_signal_long(last_close, _entry1_ma, volume_score)
-    entry1_short = compute_entry1_signal_short(last_close, _entry1_ma, volume_score)
-
-    # Entry 2 / 3 probabilities
-    ts_long = max(0.0, ts_val)
-    ts_short = max(0.0, -ts_val)
-
-    p_long_entry2 = min(1.0, max(0.0, 0.35 * ts_long + 0.25 * reaction_score_long
-                                  + 0.25 * volume_score + 0.15 * atr_score))
-    p_short_entry2 = min(1.0, max(0.0, 0.35 * ts_short + 0.25 * reaction_score_short
-                                   + 0.25 * volume_score + 0.15 * atr_score))
-    p_long_entry3 = min(1.0, max(0.0, 0.30 * ts_long + 0.20 * reaction_score_long
-                                  + 0.30 * volume_score + 0.20 * break_score_long))
-    p_short_entry3 = min(1.0, max(0.0, 0.30 * ts_short + 0.20 * reaction_score_short
-                                   + 0.30 * volume_score + 0.20 * break_score_short))
-
-    # Entry zone
-    entry_zone = compute_entry_zone_v4(candles_1d, trend_score, ma7_1d, ma10_1d, atr_1d)
+    # v6 entry signals
+    entry_long = compute_entry_v6_long(
+        trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+    )
+    entry_short = (
+        compute_entry_v6_short(
+            trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+        ) if coin in SHORT_ALLOWED else False
+    )
 
     # Load previous state
     prev = load_state(coin)
     prev_pos_state = prev.get("position_state", "FLAT")
     entry_price = prev.get("entry_price")
     remaining_size = prev.get("remaining_size", 1.0)
+    trailing_stop = prev.get("trailing_stop")
+    highest_since_entry = prev.get("highest_since_entry")
 
     # Kill-switch override
     if kill_switch_active:
@@ -987,11 +1165,11 @@ def analyse_coin(
             "position_state": "FLAT",
             "action": "KILL_SWITCH",
             "leverage": LEVERAGE,
-            "entry_zone": entry_zone,
+            "entry_zone": {"current_price": last_close},
             "volume_score": volume_score,
-            "reaction_score": reaction_score_long if trend_score >= 0 else reaction_score_short,
-            "atr_score": atr_score,
-            "break_score": break_score_long if trend_score >= 0 else break_score_short,
+            "reaction_score": 0.0,
+            "atr_score": 0.0,
+            "break_score": 0.0,
             "next_rules": ["Wait for market to stabilise"],
             "timestamp": ts,
             "pnl_pct": 0.0,
@@ -1000,6 +1178,10 @@ def analyse_coin(
 
     pnl_pct = 0.0
     _loss_streak = prev.get("loss_streak", 0)
+    _short_loss_streak = prev.get("short_loss_streak", 0)
+    _short_cooldown_until = prev.get("short_cooldown_until", "")
+    _long_loss_streak = prev.get("long_loss_streak", 0)
+    _long_cooldown_until = prev.get("long_cooldown_until", "")
 
     if prev_pos_state == "FLAT":
         # ── Filter chain ─────────────────────────────────────────────
@@ -1029,26 +1211,36 @@ def analyse_coin(
             entry_price = prev.get("entry_price")
             remaining_size = prev.get("remaining_size", 1.0)
         else:
-            _position_rate = active_count / max_positions if max_positions > 0 else 0
-
-            if _position_rate > POSITION_RATE_TIGHT_THRESHOLD:
-                _entry_thresh = 3
-            else:
-                _entry_thresh = 2 if abs(trend_score) >= 2 else 3
-
             # BTC regime filter: in bear, only SHORT (no LONG)
             if not btc_bull and trend_score > 0:
                 pos_state, action = "FLAT", "NO_TRADE"
             else:
-                pos_state, action = resolve_action_v4(
-                    trend_score, entry1_long, entry1_short,
-                    p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
-                    prev_pos_state, _entry_thresh,
+                entry_long = compute_entry_v6_long(
+                    trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                )
+                entry_short = (
+                    compute_entry_v6_short(
+                        trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                    ) if coin in SHORT_ALLOWED else False
+                )
+                # Direction-specific cooldowns
+                if entry_short and _short_cooldown_until:
+                    _cd_dt = datetime.fromisoformat(_short_cooldown_until)
+                    if _cd_dt > _now_vnt():
+                        entry_short = False
+                if entry_long and _long_cooldown_until:
+                    _cd_dt = datetime.fromisoformat(_long_cooldown_until)
+                    if _cd_dt > _now_vnt():
+                        entry_long = False
+                pos_state, action = resolve_action_v6(
+                    trend_score, entry_long, entry_short, prev_pos_state,
                 )
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
                 remaining_size = 1.0
+                trailing_stop = None
+                highest_since_entry = None
 
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
@@ -1064,46 +1256,49 @@ def analyse_coin(
         else:
             pnl_pct = 0.0
 
-        exit_action, reduce_pct, exit_reason = evaluate_exit_v5(
+        exit_action, reduce_pct, exit_reason, new_trailing_stop, new_highest = evaluate_exit_v6(
             prev_pos_state, entry_price, last_close, remaining_size,
-            ma3_3d, ma7_3d, ma10_3d, ma20_3d, rsi_3d, trend_score, ts_val,
+            ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
+            recent_10d_low, recent_10d_high,
+            trailing_stop, highest_since_entry,
         )
+        trailing_stop = new_trailing_stop
+        highest_since_entry = new_highest
 
         if exit_action == "HOLD":
-            # Only check add-entry conditions
-            if p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1":
-                pos_state, action = "LONG_ENTRY_2", "ADD_LONG_ENTRY_2"
-            elif p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2":
-                pos_state, action = "LONG_ENTRY_3", "ADD_LONG_ENTRY_3"
-            elif p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1":
-                pos_state, action = "SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"
-            elif p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2":
-                pos_state, action = "SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"
-            else:
-                pos_state, action = prev_pos_state, "HOLD"
+            pos_state, action = prev_pos_state, "HOLD"
             next_rules = compute_next_rules(pos_state)
         else:
             next_rules = [exit_reason]
             if exit_action == "EXIT_ALL":
                 _loss_streak = 0 if pnl_pct > 0 else _loss_streak + 1
+                if is_long:
+                    if pnl_pct > 0:
+                        _long_loss_streak = 0
+                        _long_cooldown_until = ""
+                    else:
+                        _long_loss_streak += 1
+                        if _long_loss_streak >= LONG_COOLDOWN_LOSSES:
+                            _cooldown_dt = _now_vnt()
+                            _cooldown_dt = _cooldown_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                            from datetime import timedelta
+                            _cooldown_dt += timedelta(days=LONG_COOLDOWN_DAYS)
+                            _long_cooldown_until = _cooldown_dt.isoformat()
+                else:  # short position closed
+                    if pnl_pct > 0:
+                        _short_loss_streak = 0
+                        _short_cooldown_until = ""
+                    else:
+                        _short_loss_streak += 1
+                        if _short_loss_streak >= SHORT_COOLDOWN_LOSSES:
+                            _cooldown_dt = _now_vnt()
+                            _cooldown_dt = _cooldown_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                            from datetime import timedelta
+                            _cooldown_dt += timedelta(days=SHORT_COOLDOWN_DAYS)
+                            _short_cooldown_until = _cooldown_dt.isoformat()
                 pos_state = "FLAT"
                 remaining_size = 0.0
                 action = "EXIT_LONG" if is_long else "EXIT_SHORT"
-            elif exit_action == "TAKE_PROFIT_1":
-                cut = remaining_size * 0.3
-                remaining_size = round(remaining_size - cut, 4)
-                pos_state = prev_pos_state
-                action = "TAKE_PROFIT_1_LONG" if is_long else "TAKE_PROFIT_1_SHORT"
-            elif exit_action == "TAKE_PROFIT_2":
-                cut = remaining_size * 0.3
-                remaining_size = round(remaining_size - cut, 4)
-                pos_state = prev_pos_state
-                action = "TAKE_PROFIT_2_LONG" if is_long else "TAKE_PROFIT_2_SHORT"
-            elif exit_action == "OVER_EXTEND":
-                cut = remaining_size * 0.25
-                remaining_size = round(remaining_size - cut, 4)
-                pos_state = prev_pos_state
-                action = "OVER_EXTEND_LONG" if is_long else "OVER_EXTEND_SHORT"
 
             if remaining_size < 0.01 and pos_state != "FLAT":
                 pos_state = "FLAT"
@@ -1114,16 +1309,16 @@ def analyse_coin(
         "coin": coin,
         "trend": trend_label,
         "trend_score": trend_score,
-        "entry2_prob": round(max(p_long_entry2, p_short_entry2), 2),
-        "entry3_prob": round(max(p_long_entry3, p_short_entry3), 2),
+        "entry2_prob": 0.0,
+        "entry3_prob": 0.0,
         "position_state": pos_state,
         "action": action,
         "leverage": LEVERAGE,
-        "entry_zone": entry_zone,
+        "entry_zone": {"current_price": last_close},
         "volume_score": volume_score,
-        "reaction_score": reaction_score_long if trend_score >= 0 else reaction_score_short,
-        "atr_score": atr_score,
-        "break_score": break_score_long if trend_score >= 0 else break_score_short,
+        "reaction_score": 0.0,
+        "atr_score": 0.0,
+        "break_score": 0.0,
         "next_rules": next_rules,
         "timestamp": ts,
         "pnl_pct": round(pnl_pct, 2),
@@ -1135,6 +1330,11 @@ def analyse_coin(
         output["entry2_prob"], output["entry3_prob"], ts,
         entry_price=entry_price, remaining_size=remaining_size,
         loss_streak=_loss_streak,
+        trailing_stop=trailing_stop, highest_since_entry=highest_since_entry,
+        short_loss_streak=_short_loss_streak,
+        short_cooldown_until=_short_cooldown_until,
+        long_loss_streak=_long_loss_streak,
+        long_cooldown_until=_long_cooldown_until,
     )
 
     return output

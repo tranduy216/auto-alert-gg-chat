@@ -16,8 +16,9 @@ from .retry_utils import call_with_retry
 
 OKX_BASE = "https://www.okx.com"
 OKX_INSTRUMENTS: Dict[str, str] = {
-    "ETH": "ETH-USDT-SWAP", "BNB": "BNB-USDT-SWAP", "LINK": "LINK-USDT-SWAP",
-    "ADA": "ADA-USDT-SWAP", "MATIC": "MATIC-USDT-SWAP", "BTC": "BTC-USDT-SWAP",
+    "BTC": "BTC-USDT-SWAP", "ETH": "ETH-USDT-SWAP", "BNB": "BNB-USDT-SWAP",
+    "DOGE": "DOGE-USDT-SWAP", "PAXG": "PAXG-USDT-SWAP",
+    "TRX": "TRX-USDT-SWAP",
 }
 LEVERAGE = 2.5
 
