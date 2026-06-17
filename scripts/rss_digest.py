@@ -240,7 +240,7 @@ def main() -> None:
         selected = summarise_articles(articles)
     except genai_errors.APIError as exc:
         print(f"[rss_digest] Gemini API error – skipping digest: {exc}", file=sys.stderr)
-        sys.exit(1)
+        return
 
     if not selected:
         print("[rss_digest] No articles selected by AI – skipping digest.")

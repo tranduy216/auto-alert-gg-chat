@@ -1116,11 +1116,7 @@ def main() -> None:
 
     active = [
         r for r in results
-        if r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH',
-                           'TAKE_PROFIT_1_LONG', 'TAKE_PROFIT_1_SHORT',
-                           'TAKE_PROFIT_2_LONG', 'TAKE_PROFIT_2_SHORT',
-                           'OVER_EXTEND_LONG', 'OVER_EXTEND_SHORT')
-        or (abs(r['trend_score']) >= 3 and r['action'] not in ('NO_TRADE', 'HOLD'))
+        if r['action'] not in ('NO_TRADE', 'HOLD')
     ]
 
     if not active:

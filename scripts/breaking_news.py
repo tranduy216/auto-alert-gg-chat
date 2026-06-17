@@ -239,7 +239,7 @@ def main() -> None:
         result = detect_breaking_news(articles, bitcoin_data)
     except genai_errors.APIError as exc:
         print(f"[breaking_news] Gemini API error – skipping analysis: {exc}", file=sys.stderr)
-        sys.exit(1)
+        return
 
     if not result.get("has_breaking_news"):
         print("[breaking_news] No breaking news detected.")
