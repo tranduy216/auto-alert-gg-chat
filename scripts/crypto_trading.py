@@ -29,8 +29,16 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.discord_webhook import send_message
+from utils.okx_utils import (
+    OKX_INSTRUMENTS, calc_contract_size, get_instrument_map,
+    get_okx_position_for_coin, okx_close_position, okx_get_account,
+    okx_get_positions, okx_place_order, okx_set_leverage, OKXError,
+)
 from utils.retry_utils import call_with_retry
-from utils.firebase_utils import is_firebase_enabled
+from utils.firebase_utils import (
+    get_unsent_queued_alerts, is_firebase_enabled,
+    mark_alert_sent, queue_alert,
+)
 
 
 try:
@@ -1128,6 +1136,258 @@ def analyse_coin(
 
 
 # ---------------------------------------------------------------------------
+# OKX order execution helpers
+# ---------------------------------------------------------------------------
+
+_OKX_SETUP_DONE = False
+
+
+def _ensure_okx_setup(instrument_map: dict) -> None:
+    global _OKX_SETUP_DONE
+    if _OKX_SETUP_DONE:
+        return
+    for coin in COINS:
+        inst_id = OKX_INSTRUMENTS.get(coin)
+        if inst_id:
+            okx_set_leverage(inst_id, LEVERAGE)
+    _OKX_SETUP_DONE = True
+
+
+def _exec_action_on_okx(
+    result: dict,
+    instrument_map: dict,
+    positions: list,
+    equity_usd: float,
+) -> dict:
+    """Execute a single action on OKX. Returns execution result dict."""
+    coin = result["coin"]
+    action = result["action"]
+    inst_id = OKX_INSTRUMENTS.get(coin)
+    if not inst_id:
+        return {"coin": coin, "status": "skip", "detail": "no instrument"}
+
+    exec_status = {"coin": coin, "action": action, "status": "none", "detail": ""}
+
+    try:
+        if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
+            pos_side = "long" if action == "OPEN_LONG_ENTRY_1" else "short"
+            sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, LEVERAGE, instrument_map)
+            px = result.get("entry_zone", {}).get("optimal_entry")
+            if not px:
+                exec_status["detail"] = "no limit price"
+                return exec_status
+            px_str = str(px)
+            side = "buy" if pos_side == "long" else "sell"
+            resp = okx_place_order(inst_id, "cross", side, sz, px_str, pos_side)
+            exec_status.update({"status": "open", "detail": f"{pos_side} limit {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
+            print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct @ {px_str}")
+
+        elif action in ("ADD_LONG_ENTRY_2", "ADD_SHORT_ENTRY_2",
+                        "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
+            pos_side = "long" if "LONG" in action else "short"
+            add_pct = 0.08  # additional 8% of equity
+            sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, LEVERAGE, instrument_map)
+            px = result.get("entry_zone", {}).get("optimal_entry")
+            if not px:
+                exec_status["detail"] = "no limit price"
+                return exec_status
+            px_str = str(px)
+            side = "buy" if pos_side == "long" else "sell"
+            resp = okx_place_order(inst_id, "cross", side, sz, px_str, pos_side)
+            exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
+            print(f"  [OKX] {coin} ADD {pos_side} {sz}ct @ {px_str}")
+
+        elif action in ("EXIT_LONG", "EXIT_SHORT", "REDUCE_LONG", "REDUCE_SHORT"):
+            pos_side = "long" if "LONG" in action else "short"
+            if action.startswith("EXIT"):
+                resp = okx_close_position(inst_id, pos_side)
+                exec_status["status"] = "exit"
+                exec_status["detail"] = f"close {pos_side}"
+                print(f"  [OKX] {coin} EXIT {pos_side}")
+            else:
+                # REDUCE — sell 50% via market
+                pos = get_okx_position_for_coin(positions, coin)
+                if pos and float(pos.get("pos", 0)) > 0:
+                    sz = str(int(float(pos["pos"]) * 0.5))
+                    if int(sz) > 0:
+                        side = "sell" if pos_side == "long" else "buy"
+                        resp = okx_place_order(inst_id, "cross", side, sz, pos_side=pos_side)
+                        exec_status["status"] = "reduce"
+                        exec_status["detail"] = f"reduce 50% {pos_side} ({sz}ct)"
+                        print(f"  [OKX] {coin} REDUCE {pos_side} {sz}ct")
+
+        elif action in ("TAKE_PROFIT_1_LONG", "TAKE_PROFIT_1_SHORT",
+                        "TAKE_PROFIT_2_LONG", "TAKE_PROFIT_2_SHORT",
+                        "OVER_EXTEND_LONG", "OVER_EXTEND_SHORT"):
+            pos_side = "long" if "LONG" in action else "short"
+            reduce_pct = 0.3 if "TAKE_PROFIT" in action else 0.25
+            pos = get_okx_position_for_coin(positions, coin)
+            if pos and float(pos.get("pos", 0)) > 0:
+                sz = str(max(1, int(float(pos["pos"]) * reduce_pct)))
+                if int(sz) > 0:
+                    kind = "TP" if "TAKE_PROFIT" in action else "OE"
+                    side = "sell" if pos_side == "long" else "buy"
+                    resp = okx_place_order(inst_id, "cross", side, sz, pos_side=pos_side)
+                    exec_status["status"] = "reduce"
+                    exec_status["detail"] = f"{kind} reduce {pos_side} {sz}ct"
+                    print(f"  [OKX] {coin} {kind} {pos_side} {sz}ct")
+
+    except OKXError as exc:
+        exec_status["status"] = "error"
+        exec_status["detail"] = str(exc)
+        print(f"  [OKX] {coin} ERROR: {exc}", file=sys.stderr)
+
+    return exec_status
+
+
+def execute_trading_actions(results: list, instrument_map: dict) -> list:
+    """Execute all non-trivial actions on OKX. Returns execution log."""
+    try:
+        account = okx_get_account()
+        equity_usd = float(account.get("data", [{}])[0].get("totalEq", 0))
+        positions = okx_get_positions("SWAP")
+    except OKXError as exc:
+        print(f"[crypto_trading] OKX connection failed: {exc}", file=sys.stderr)
+        return [{"coin": "all", "status": "error", "detail": str(exc)}]
+
+    _ensure_okx_setup(instrument_map)
+    print(f"[crypto_trading] Equity: ${equity_usd:,.2f} | Open positions: {len(positions)}")
+
+    exec_log = []
+    for r in results:
+        if r["action"] not in ("NO_TRADE", "HOLD"):
+            log = _exec_action_on_okx(r, instrument_map, positions, equity_usd)
+            exec_log.append(log)
+    return exec_log
+
+
+# ---------------------------------------------------------------------------
+# Portfolio summary
+# ---------------------------------------------------------------------------
+
+def _format_pnl(pnl: str) -> str:
+    val = float(pnl)
+    return f"{val:+.2f}" if abs(val) < 1000 else f"{val:+.0f}"
+
+
+def build_portfolio_summary(now_vnt: datetime, positions: list, account_info: dict) -> str | None:
+    """Build a portfolio overview message."""
+    try:
+        eq_data = account_info.get("data", [{}])[0]
+        total_eq = float(eq_data.get("totalEq", 0))
+    except (IndexError, ValueError):
+        return None
+
+    ts = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
+    lines = [f"**Portfolio Summary** — {ts}", ""]
+
+    # Overall
+    try:
+        u_pnl = float(eq_data.get("uTime", "0"))
+    except ValueError:
+        u_pnl = 0
+    lines.append(f"Total Equity: **${total_eq:,.2f}**")
+    lines.append("")
+
+    # Positions
+    coin_positions = {}
+    for p in positions:
+        inst = p.get("instId", "")
+        for coin, inst_id in OKX_INSTRUMENTS.items():
+            if inst == inst_id:
+                coin_positions[coin] = p
+                break
+
+    if coin_positions:
+        lines.append("**Open Positions:**")
+        for coin, p in sorted(coin_positions.items()):
+            pos = float(p.get("pos", 0))
+            if pos == 0:
+                continue
+            side = "LONG" if p.get("posSide") == "long" else "SHORT"
+            margin = float(p.get("margin", 0))
+            upl = float(p.get("upl", 0))
+            lev = float(p.get("lever", 1))
+            pnl_pct = (upl / margin * 100) if margin > 0 else 0
+            notional = float(p.get("notionalUsd", 0))
+            lines.append(
+                f"**{coin}** {side} | "
+                f"Notional: ${notional:,.0f} | "
+                f"Lever: {lev:.1f}x | "
+                f"Margin: ${margin:,.2f} | "
+                f"PnL: {_format_pnl(upl)} USD ({pnl_pct:+.2f}%)"
+            )
+        lines.append("")
+
+    lines.append("⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Notification builders
+# ---------------------------------------------------------------------------
+
+def _format_exec_for_notif(exec_log: list) -> str:
+    if not exec_log:
+        return ""
+    lines = []
+    for e in exec_log:
+        status = e["status"]
+        coin = e["coin"]
+        detail = e.get("detail", "")
+        if status == "open":
+            lines.append(f"## OPEN {coin}: {detail}")
+        elif status == "add":
+            lines.append(f"## ADD {coin}: {detail}")
+        elif status == "exit":
+            lines.append(f"## EXIT {coin}: {detail}")
+        elif status == "reduce":
+            lines.append(f"## REDUCE {coin}: {detail}")
+        elif status == "error":
+            lines.append(f"## ERROR {coin}: {detail}")
+        elif status == "skip":
+            pass
+    return "\n".join(lines)
+
+
+def build_action_message(
+    results: list, exec_log: list, kill_switch: bool, now_vnt: datetime,
+) -> str:
+    ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
+    ts = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
+    lines = [f"**Crypto Trading**{ks_flag}", ts, ""]
+
+    exec_text = _format_exec_for_notif(exec_log)
+    if exec_text:
+        lines.append("### Orders Executed")
+        lines.append(exec_text)
+        lines.append("")
+
+    # Also show analysis summary for context
+    has_signal = False
+    for r in results:
+        if r["action"] not in ("NO_TRADE", "HOLD"):
+            has_signal = True
+            icon = _signal_icon(r)
+            lines.append(f"{icon} **{r['coin']}** | Score {r['trend_score']:+d} | {r['position_state']}")
+            lines.append(f"    -> {_action_text(r)}")
+    if not has_signal:
+        lines.append("No action needed.")
+    lines.append("")
+    lines.append("⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩")
+    return "\n".join(lines)
+
+
+def build_no_action_message(now_vnt: datetime) -> str:
+    ts = now_vnt.strftime("%d/%m/%Y %I:%M %p (VNT)")
+    return (
+        f"**Crypto Trading**\n{ts}\n\n"
+        f"No action for all coin.\n\n"
+        f"⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1139,6 +1399,13 @@ def main() -> None:
 
     now_vnt = _now_vnt()
     print(f"[crypto_trading] Starting at {now_vnt.strftime('%Y-%m-%d %H:%M %Z')}")
+
+    okx_enabled = all(os.environ.get(k) for k in
+                      ["OKX_API_KEY", "OKX_API_SECRET", "OKX_API_PASSPHRASE"])
+    print(f"[crypto_trading] OKX mode: {'EXECUTION' if okx_enabled else 'SIGNAL-ONLY'}")
+
+    # Instrument map for contract size calculations
+    instrument_map = get_instrument_map() if okx_enabled else {}
 
     # Kill-switch check (BTC default 1d)
     print("[crypto_trading] Fetching BTC data for kill-switch\u2026")
@@ -1173,7 +1440,7 @@ def main() -> None:
         print(f"[crypto_trading] In economic event window ({_current_hour}h VNT) "
               f"\u2013 skipping new entries")
 
-    # Count active positions
+    # Count active positions (from Firestore)
     _active_positions = sum(
         1 for c in COINS
         if load_state(c).get("position_state", "FLAT") != "FLAT"
@@ -1208,52 +1475,63 @@ def main() -> None:
             f"action={result['action']}"
         )
 
-    # Only notify for strong signals (TrendScore ±3) or EXIT actions
+    # Decide notification timing
     all_wait = all(r['action'] == 'NO_TRADE' for r in results)
     scheduled_hours = {5, 10, 15, 21}
+    is_scheduled = now_vnt.hour in scheduled_hours
 
+    if all_wait and not is_scheduled:
+        print("[crypto_trading] No action needed \u2013 done.")
+        return
+
+    # Execute on OKX
+    exec_log: list = []
+    if okx_enabled:
+        exec_log = execute_trading_actions(results, instrument_map)
+
+    vnt_hour = now_vnt.hour + now_vnt.minute / 60.0
+    is_silent = vnt_hour >= 22.5 or vnt_hour < 5.5
+
+    # Build notification message
     if all_wait:
-        if now_vnt.hour not in scheduled_hours:
-            print("[crypto_trading] No action needed – done.")
-            return
-        message = (
-            f"**Crypto Trading Signals**\n"
-            f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}\n\n"
-            f"No action for all coin.\n\n"
-            f"⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩"
-        )
+        message = build_no_action_message(now_vnt)
+    else:
+        message = build_action_message(results, exec_log, kill_switch, now_vnt)
+
+    if is_silent:
+        if not all_wait:
+            print("[crypto_trading] Silent hours \u2013 queuing notification.")
+            queue_alert({"text": message}, now_vnt.isoformat())
+        else:
+            print("[crypto_trading] Silent hours \u2013 skipped.")
+    else:
         print("[crypto_trading] Sending to Discord\u2026")
         send_message(webhook_url, message)
-        print("[crypto_trading] Done.")
-        return
 
-    active = [
-        r for r in results
-        if r['action'] not in ('NO_TRADE', 'HOLD')
-    ]
+    # Flush queue at 6AM VNT (only once, within first 30 min)
+    if 6.0 <= vnt_hour < 6.5:
+        queued = get_unsent_queued_alerts()
+        if queued:
+            print(f"[crypto_trading] Flushing {len(queued)} queued notification(s)\u2026")
+            for item in queued:
+                text = item.get("alert", {}).get("text", "")
+                if text:
+                    send_message(webhook_url, text)
+                mark_alert_sent(item["_doc_id"])
+            print(f"[crypto_trading] Flushed {len(queued)} message(s).")
 
-    if not active:
-        print("[crypto_trading] No action needed – done.")
-        return
+    # Portfolio summary at 6AM / 1PM / 8PM VNT
+    if okx_enabled and now_vnt.hour in {6, 13, 20}:
+        print("[crypto_trading] Fetching portfolio summary\u2026")
+        try:
+            account = okx_get_account()
+            positions = okx_get_positions("SWAP")
+            summary = build_portfolio_summary(now_vnt, positions, account)
+            if summary:
+                send_message(webhook_url, summary)
+        except OKXError as exc:
+            print(f"[crypto_trading] Portfolio summary failed: {exc}", file=sys.stderr)
 
-    ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
-    lines: list[str] = [
-        f"**Crypto Trading Signals**{ks_flag}",
-        f"{now_vnt.strftime('%d/%m/%Y %I:%M %p (VNT)')}",
-        "",
-    ]
-    for r in active:
-        icon = _signal_icon(r)
-        lines.append(f"## {icon} {r['coin']}")
-        lines.append(f"Score={r['trend_score']:+d} | {r['trend']} | {r['position_state']}")
-        lines.append(f"ACTION: {_action_text(r)}")
-        lines.append(f"E2 Prob: {r.get('entry2_prob', 0)*100:.0f}% | E3 Prob: {r.get('entry3_prob', 0)*100:.0f}%")
-        lines.append("")
-    lines.append("⋆｡°✩ — ⋆｡°✩ — ⋆｡°✩")
-
-    message = "\n".join(lines)
-    print("[crypto_trading] Sending to Discord\u2026")
-    send_message(webhook_url, message)
     print("[crypto_trading] Done.")
 
 

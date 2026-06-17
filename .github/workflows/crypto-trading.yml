@@ -1,4 +1,4 @@
-name: Crypto Trading Signal System
+name: Crypto Trading System
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   crypto-trading:
-    name: Generate crypto trading signals
+    name: Analyse & execute trades on OKX
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,9 +25,12 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Run crypto trading signal system
+      - name: Run crypto trading system
         working-directory: scripts
         env:
           DISCORD_TRADING_WEBHOOK_URL: ${{ secrets.DISCORD_TRADING_WEBHOOK_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
         run: python crypto_trading.py

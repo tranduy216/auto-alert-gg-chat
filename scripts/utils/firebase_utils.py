@@ -60,6 +60,7 @@ def queue_alert(alert: Dict[str, Any], queued_at_str: str) -> None:
                 "alert": alert,
                 "queued_at_str": queued_at_str,
                 "sent": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         ),
         resource_name="Firestore queued_alerts.add",
