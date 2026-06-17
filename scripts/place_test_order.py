@@ -1,20 +1,16 @@
-"""Debug: try placing order and show full response (bypass okx_place_order)."""
-import sys, os, json, base64, hashlib, hmac, time, requests
+"""Debug: try without posSide (net mode)."""
+import sys, os, json, base64, hashlib, hmac, requests
 from datetime import datetime
-
-sys.path.insert(0, os.path.dirname(__file__))
 
 api_key = os.environ["OKX_API_KEY"]
 api_secret = os.environ["OKX_API_SECRET"]
 passphrase = os.environ["OKX_API_PASSPHRASE"]
 
-# Build request manually
 ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
 body = {
     "instId": "BTC-USDT-SWAP",
     "tdMode": "cross",
     "side": "buy",
-    "posSide": "long",
     "sz": "1",
     "px": "20000",
     "ordType": "limit",
@@ -32,5 +28,4 @@ headers = {
     "Content-Type": "application/json",
 }
 resp = requests.post("https://www.okx.com/api/v5/trade/order", headers=headers, json=body, timeout=15)
-print(f"Status: {resp.status_code}")
 print(f"Response: {resp.text}")
