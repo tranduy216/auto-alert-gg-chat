@@ -1,0 +1,24 @@
+name: Test Order
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests
+      - working-directory: scripts
+        env:
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+        run: |
+          python -c "
+import os, sys; sys.path.insert(0, '.')
+from utils.okx_utils import okx_place_order, OKX_INSTRUMENTS
+inst = OKX_INSTRUMENTS['BTC']
+print(f'Placing 1ct BTC limit BUY @ \$20,000...')
+r = okx_place_order(inst, 'cross', 'buy', '1', '20000', 'long')
+print(f'Order placed: {r.get(\"data\", [{}])[0].get(\"ordId\", \"?\")}')
+"
