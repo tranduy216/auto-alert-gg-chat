@@ -91,12 +91,15 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     )
     user_prompt = USER_PROMPT_SUMMARISE_TPL.format(articles=articles_text)
     text = _call_openrouter(SYSTEM_PROMPT_SUMMARISE, user_prompt, "json_object")
-    # Clean markdown fences if present
     text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         text = text.rsplit("```", 1)[0].strip()
-    return json.loads(text)
+    data = json.loads(text)
+    if isinstance(data, list) and all(isinstance(i, dict) and "title" in i for i in data):
+        return data
+    print(f"[gemini_utils] AI returned unexpected format: {type(data).__name__}", file=sys.stderr)
+    return []
 
 
 SYSTEM_PROMPT_BREAKING = """You are a financial analyst monitoring breaking news for major events

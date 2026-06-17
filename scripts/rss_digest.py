@@ -199,8 +199,10 @@ def format_digest_message(selected: list[dict], now_vnt: datetime) -> str:
     lines = [f"Daily News Digest — {timestamp}", ""]
 
     for item in selected:
-        lines.append(f"• {item['title']}")
-        lines.append(f"🔗 {item['url']}")
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"• {item.get('title', 'Untitled')}")
+        lines.append(f"🔗 {item.get('url', 'No URL')}")
         lines.append("")
 
     return "\n".join(lines).rstrip("\n")
