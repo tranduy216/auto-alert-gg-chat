@@ -21,8 +21,6 @@ from datetime import datetime, timedelta, timezone
 
 import feedparser  # type: ignore
 import pytz
-from google.genai import errors as genai_errors  # type: ignore
-
 # Allow running as a top-level script inside the ``scripts/`` directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,7 +29,7 @@ from utils.article_prefilter import (
     filter_articles_by_topic_keywords,
 )
 from utils.discord_webhook import send_message
-from utils.gemini_utils import summarise_articles
+from utils.gemini_utils import AIError, summarise_articles
 from utils.retry_utils import call_with_retry
 from utils.url_shortener import shorten_urls_in_articles
 
@@ -238,8 +236,8 @@ def main() -> None:
     print("[rss_digest] Summarising with Gemini…")
     try:
         selected = summarise_articles(articles)
-    except genai_errors.APIError as exc:
-        print(f"[rss_digest] Gemini API error – skipping digest: {exc}", file=sys.stderr)
+    except AIError as exc:
+        print(f"[rss_digest] AI API error – skipping digest: {exc}", file=sys.stderr)
         return
 
     if not selected:

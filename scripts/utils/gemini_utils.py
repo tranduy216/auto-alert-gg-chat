@@ -1,43 +1,71 @@
-"""Google Gemini helpers for news summarisation and breaking-news detection."""
+"""OpenRouter AI helpers for news summarisation and breaking-news detection."""
 
 import json
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any, Dict, List
 
-from google import genai
-from google.genai import errors as genai_errors
+import requests
 
 from .retry_utils import call_with_retry
 
-GEMINI_MODEL = "gemini-2.5-flash"
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client()
-    return _client
+OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
 
-# ---------------------------------------------------------------------------
-# Daily digest – select top articles per topic and summarise
-# ---------------------------------------------------------------------------
+class AIError(Exception):
+    pass
 
 
-def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """From each topic select the most important articles.
+def _call_openrouter(
+    system_prompt: str,
+    user_prompt: str,
+    response_format: str | None = None,
+) -> str:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise AIError("OPENROUTER_API_KEY is not set")
 
-    Returns a list of dicts with keys: ``topic``, ``title``, ``url``.
-    """
-    articles_text = "\n\n".join(
-        f"Title: {a.get('title', '')}\n"
-        f"URL: {a.get('link', '')}\n"
-        f"Topic: {a.get('topic', '')}"
-        for a in articles
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    body: dict = {
+        "model": OPENROUTER_MODEL,
+        "messages": messages,
+    }
+    if response_format:
+        body["response_format"] = {"type": response_format}
 
-    prompt = f"""You are a professional news curator. Review the articles below and:
+    def _do_request() -> str:
+        resp = requests.post(
+            f"{OPENROUTER_BASE}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        if not text:
+            raise AIError("Empty response from OpenRouter")
+        return text
+
+    try:
+        return call_with_retry(
+            _do_request,
+            resource_name="OpenRouter",
+            retry_exceptions=(requests.RequestException, AIError),
+        )
+    except Exception as exc:
+        raise AIError(str(exc)) from exc
+
+
+SYSTEM_PROMPT_SUMMARISE = """You are a professional news curator. Respond ONLY with valid JSON."""
+
+USER_PROMPT_SUMMARISE_TPL = """Review the articles below and:
 
 1. From EACH topic group, select the most important and impactful articles.
    Topics: AI (gồm cả tin về các công ty AI lớn), Java, Developer (lập trình,
@@ -46,40 +74,61 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
 2. If a topic has no relevant articles, omit it.
 
 Articles to review:
-{articles_text}
+{articles}
 
 Respond ONLY with valid JSON — an array of objects, each with:
 - "topic": topic name in English (AI / Java / Developer / Big Tech / Finance / Commodities)
 - "title": descriptive title in Vietnamese
 - "url": the article URL exactly as given"""
 
-    response = call_with_retry(
-        lambda: _get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        ),
-        resource_name="Gemini summarise_articles",
-        retry_exceptions=(genai_errors.APIError,),
+
+def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    articles_text = "\n\n".join(
+        f"Title: {a.get('title', '')}\n"
+        f"URL: {a.get('link', '')}\n"
+        f"Topic: {a.get('topic', '')}"
+        for a in articles
     )
-    return json.loads(response.text)
+    user_prompt = USER_PROMPT_SUMMARISE_TPL.format(articles=articles_text)
+    text = _call_openrouter(SYSTEM_PROMPT_SUMMARISE, user_prompt, "json_object")
+    # Clean markdown fences if present
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0].strip()
+    return json.loads(text)
 
 
-# ---------------------------------------------------------------------------
-# Breaking news – detect high-impact financial events
-# ---------------------------------------------------------------------------
+SYSTEM_PROMPT_BREAKING = """You are a financial analyst monitoring breaking news for major events
+that could have a huge impact on global finance. Respond ONLY with valid JSON."""
+
+USER_PROMPT_BREAKING_TPL = """Criteria that qualify as BREAKING NEWS:
+- Bitcoin 24-h price change exceeds ±4 %
+- Major decisions from significant economies (US Fed, ECB, PBoC, etc.)
+- Military conflicts starting, escalating, or ending
+- Major corporate collapses or mergers with global market impact
+- Supply-chain disruptions affecting key commodities
+- Pandemic or major public-health declarations
+{btc_line}
+
+Recent news articles:
+{articles}
+
+Respond ONLY with valid JSON in this exact schema:
+{{
+  "has_breaking_news": true | false,
+  "alerts": [
+    {{
+      "headline": "descriptive title in Vietnamese with cause and effect, e.g. 'Trump tăng thuế. Thị trường chứng khoán Mỹ giảm mạnh.'",
+      "urls": ["url1", "url2"]
+    }}
+  ]
+}}"""
 
 
 def detect_breaking_news(
     articles: List[Dict[str, Any]], bitcoin_data: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Analyse recent news and Bitcoin price for major financial-impact events.
-
-    Returns a dict with keys:
-        ``has_breaking_news`` (bool) and ``alerts`` (list of alert dicts).
-
-    Each alert dict has: headline, impact, summary, urls.
-    """
     articles_text = "\n\n".join(
         f"Title: {a.get('title', '')}\n"
         f"URL: {a.get('link', '')}"
@@ -94,39 +143,12 @@ def detect_breaking_news(
             f"24-h change: {change:+.2f}%"
         )
 
-    prompt = f"""You are a financial analyst monitoring breaking news for major events
-that could have a huge impact on global finance.
-
-Criteria that qualify as BREAKING NEWS:
-- Bitcoin 24-h price change exceeds ±4 %
-- Major decisions from significant economies (US Fed, ECB, PBoC, etc.)
-- Military conflicts starting, escalating, or ending
-- Major corporate collapses or mergers with global market impact
-- Supply-chain disruptions affecting key commodities
-- Pandemic or major public-health declarations
-{btc_line}
-
-Recent news articles:
-{articles_text}
-
-Respond ONLY with valid JSON in this exact schema:
-{{
-  "has_breaking_news": true | false,
-  "alerts": [
-    {{
-      "headline": "descriptive title in Vietnamese with cause and effect, e.g. 'Trump tăng thuế. Thị trường chứng khoán Mỹ giảm mạnh.'",
-      "urls": ["url1", "url2"]
-    }}
-  ]
-}}"""
-
-    response = call_with_retry(
-        lambda: _get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        ),
-        resource_name="Gemini detect_breaking_news",
-        retry_exceptions=(genai_errors.APIError,),
+    user_prompt = USER_PROMPT_BREAKING_TPL.format(
+        btc_line=btc_line, articles=articles_text
     )
-    return json.loads(response.text)
+    text = _call_openrouter(SYSTEM_PROMPT_BREAKING, user_prompt, "json_object")
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0].strip()
+    return json.loads(text)

@@ -28,8 +28,6 @@ from datetime import datetime, timezone
 import feedparser  # type: ignore
 import pytz
 import requests
-from google.genai import errors as genai_errors  # type: ignore
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.article_prefilter import (
@@ -44,7 +42,7 @@ from utils.firebase_utils import (
     record_sent_alert,
     was_recently_alerted,
 )
-from utils.gemini_utils import detect_breaking_news
+from utils.gemini_utils import AIError, detect_breaking_news
 from utils.retry_utils import call_with_retry
 from utils.url_shortener import shorten_urls_in_articles
 
@@ -237,8 +235,8 @@ def main() -> None:
     print("[breaking_news] Analysing with Gemini…")
     try:
         result = detect_breaking_news(articles, bitcoin_data)
-    except genai_errors.APIError as exc:
-        print(f"[breaking_news] Gemini API error – skipping analysis: {exc}", file=sys.stderr)
+    except AIError as exc:
+        print(f"[breaking_news] AI API error – skipping analysis: {exc}", file=sys.stderr)
         return
 
     if not result.get("has_breaking_news"):
