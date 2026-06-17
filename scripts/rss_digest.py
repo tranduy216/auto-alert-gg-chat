@@ -230,6 +230,8 @@ def main() -> None:
 
     if not articles:
         print("[rss_digest] No recent articles – skipping digest.")
+        now_vnt = datetime.now(VNT)
+        send_message(webhook_url, f"Không có bài viết mới trong 24h qua.")
         return
 
     print("[rss_digest] Shortening URLs…")
@@ -246,6 +248,8 @@ def main() -> None:
 
     if not selected:
         print("[rss_digest] No articles selected by AI – skipping digest.")
+        now_vnt = datetime.now(VNT)
+        send_message(webhook_url, f"AI không chọn được bài viết nào để tóm tắt.")
         return
 
     message = format_digest_message(selected, now_vnt)

@@ -243,6 +243,7 @@ def main() -> None:
 
     if not result.get("has_breaking_news"):
         print("[breaking_news] No breaking news detected.")
+        send_message(webhook_url, "Không có breaking news mới.")
         return
 
     alerts = result.get("alerts", [])
