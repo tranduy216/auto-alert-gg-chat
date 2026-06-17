@@ -73,12 +73,12 @@ BTC_CANDLE_COUNT = 220  # enough for MA200 + buffer
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 4     # max positions open at the same time
-CAPITAL_PER_POSITION = 0.15      # 15% of total capital per position (3x → 45% exposure)
+CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position (2.5x → 25% exposure)
 CAPITAL_USAGE_HIGH_WATERMARK = 0.75  # total position capital ≤ 75% of total capital
 POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
 
 # Position sizing decay per position tier
-POSITION_SIZES = [0.15, 0.12, 0.10, 0.08]  # pos 1→4: 15/12/10/8%
+POSITION_SIZES = [0.10, 0.10, 0.10]  # pos 1→3: 10% each
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
@@ -1189,7 +1189,7 @@ def _exec_action_on_okx(
         elif action in ("ADD_LONG_ENTRY_2", "ADD_SHORT_ENTRY_2",
                         "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
             pos_side = "long" if "LONG" in action else "short"
-            add_pct = 0.08  # additional 8% of equity
+            add_pct = 0.10  # additional 10% of equity
             sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, LEVERAGE, instrument_map)
             px = result.get("entry_zone", {}).get("optimal_entry")
             if not px:

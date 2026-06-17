@@ -28,9 +28,11 @@ Real automated trading on **OKX** with limit orders, risk management, and Discor
 | Execution Engine | 1D candles (MA3/MA5/MA7/ATR/Volume) | Entry signals + stage probabilities |
 
 **3-stage scaling entries** using **limit orders** at optimal support/resistance levels:
-- Entry 1: 15% capital (triggered when TrendScore ≥ threshold + volume confirmation)
-- Entry 2: additional 8% (when P_Entry2 ≥ 0.80)
-- Entry 3: additional 8% (when P_Entry3 ≥ 0.85)
+- Entry 1: 10% capital (triggered when TrendScore ≥ threshold + volume confirmation)
+- Entry 2: additional 10% (when P_Entry2 ≥ 0.80)
+- Entry 3: additional 10% (when P_Entry3 ≥ 0.85)
+
+Total: 30% equity per coin (2.5x → 75% exposure, capped by 75% capital usage limit).
 
 **Adaptive thresholds:** entry ±2 when 3D trend_score ≥ 2 (strong trend), ±3 otherwise. When >55% of capital deployed, all entries use strict ±3.
 
@@ -47,7 +49,7 @@ Real automated trading on **OKX** with limit orders, risk management, and Discor
 | Rule | Detail |
 |------|--------|
 | Max concurrent positions | 4 |
-| Capital per position | 15% (decays 15/12/10/8% for later entries) |
+| Capital per position | 10% (equal for all 3 entries) |
 | Total capital cap | 75% of equity |
 | Tight entry threshold | >55% deployed → force ±3 |
 | BTC regime filter | Bear (MA50<MA200) → block LONG entries |
