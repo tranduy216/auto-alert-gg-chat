@@ -1,9 +1,8 @@
-name: Test Order
+name: Test BTC Buy
 on:
-  push:
-    branches: [test-order]
+  workflow_dispatch:
 jobs:
-  test:
+  buy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,14 +15,4 @@ jobs:
           OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
           OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
           OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
-        run: |
-          python -c "
-import os, sys; sys.path.insert(0, '.')
-from utils.okx_utils import okx_place_order
-
-inst = 'BTC-USDT'
-sz = '5'
-td_mode = 'cash'
-r = okx_place_order(inst, td_mode, 'buy', sz, '20000')
-print(f'Order result: {r}')
-"
+        run: python place_test_order.py
