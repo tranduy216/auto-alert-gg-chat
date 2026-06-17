@@ -1123,8 +1123,6 @@ def main() -> None:
         print("[crypto_trading] No action needed – done.")
         return
 
-    has_exit_all = any(r['action'] in ('EXIT_LONG', 'EXIT_SHORT', 'KILL_SWITCH') for r in active)
-
     ks_flag = " 🚨 KILL SWITCH" if kill_switch else ""
     lines: list[str] = [
         f"**Crypto Trading Signals**{ks_flag}",
@@ -1142,7 +1140,7 @@ def main() -> None:
 
     message = "\n".join(lines)
     print("[crypto_trading] Sending to Discord\u2026")
-    send_message(webhook_url, message, force=has_exit_all)
+    send_message(webhook_url, message)
     print("[crypto_trading] Done.")
 
 

@@ -232,11 +232,13 @@ def main() -> None:
         )
 
     # Step 3 – AI analysis
-    print("[breaking_news] Analysing with Gemini…")
+    print("[breaking_news] Analysing with AI…")
     try:
         result = detect_breaking_news(articles, bitcoin_data)
     except AIError as exc:
-        print(f"[breaking_news] AI API error – skipping analysis: {exc}", file=sys.stderr)
+        msg = f"[breaking_news] AI API error – skipping analysis: {exc}"
+        print(msg, file=sys.stderr)
+        send_message(webhook_url, msg)
         return
 
     if not result.get("has_breaking_news"):

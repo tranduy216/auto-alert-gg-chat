@@ -233,11 +233,13 @@ def main() -> None:
     print("[rss_digest] Shortening URLs…")
     articles = shorten_urls_in_articles(articles)
 
-    print("[rss_digest] Summarising with Gemini…")
+    print("[rss_digest] Summarising with AI…")
     try:
         selected = summarise_articles(articles)
     except AIError as exc:
-        print(f"[rss_digest] AI API error – skipping digest: {exc}", file=sys.stderr)
+        msg = f"[rss_digest] AI API error – skipping digest: {exc}"
+        print(msg, file=sys.stderr)
+        send_message(webhook_url, msg)
         return
 
     if not selected:
