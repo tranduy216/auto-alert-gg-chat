@@ -91,14 +91,13 @@ CORRELATION_GROUPS: dict[str, list[str]] = {
 LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
 LOSS_STREAK_REDUCE = 0.5     # size multiplier
 SHORT_COOLDOWN_LOSSES = 2    # consecutive short losses → pause short on this coin
-SHORT_COOLDOWN_DAYS = 20     # pause duration
+SHORT_COOLDOWN_DAYS = 12     # pause duration
 LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
-LONG_COOLDOWN_DAYS = 20      # pause duration
+LONG_COOLDOWN_DAYS = 12      # pause duration
 
 # Short trend filter MA pair (fast MA vs slow MA)
-# MA20/MA50 → short if MA20 < MA50 (bear); MA15/MA35, MA20/MA40
-SHORT_TREND_FAST = 20        # fast MA period for trend filter (both long & short)
-SHORT_TREND_SLOW = 40        # slow MA period (also used as price filter)
+SHORT_TREND_FAST = 12        # fast MA period for trend filter (both long & short)
+SHORT_TREND_SLOW = 25        # slow MA period (also used as price filter)
 
 # Volatility filter
 VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
