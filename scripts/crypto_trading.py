@@ -8,7 +8,8 @@ System (v4):
   Layer 2 – Execution Engine (1D candles, MA3/MA7/Vol/ATR14) → weighted probs
   3-stage scaling entries with 3x leverage
   Adaptive entry: ±2 when trend_score≥2, ±3 otherwise
-  Risk: max 3 concurrent positions, 15% capital per position
+  Risk: max 4 concurrent positions, 15% capital per position
+  Position rate limit: no new entries when ≥4 open; tight entry when >50% deployed
 
 Required environment variables:
   DISCORD_TRADING_WEBHOOK_URL  – Discord webhook for signal output
@@ -52,13 +53,38 @@ COINS = ["ETH", "BNB", "LINK", "ADA", "MATIC"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
+# Times (VNT) when major economic events may cause volatility — no new entries ±2h
+ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
+    (1, 3),   # FOMC minutes / fed speeches (~2am VNT)
+    (7, 9),   # US non-farm payroll / CPI (~7:30pm ET → 7:30am VNT+1)
+    (18, 20), # ECB / BOE rate decisions (~1-2pm GMT → 8-9pm VNT)
+]
+
 CANDLE_COUNT = 30
 
 # ── Risk Management ─────────────────────────────────────────────────
-MAX_CONCURRENT_POSITIONS = 3   # max positions open at the same time
-CAPITAL_PER_POSITION = 0.15    # 15% of total capital per position (3x → 45% exposure)
+MAX_CONCURRENT_POSITIONS = 4     # max positions open at the same time
+CAPITAL_PER_POSITION = 0.15      # 15% of total capital per position (3x → 45% exposure)
+CAPITAL_USAGE_HIGH_WATERMARK = 0.75  # total position capital ≤ 75% of total capital
+POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
 
-LEVERAGE = 3
+# Position sizing decay per position tier
+POSITION_SIZES = [0.15, 0.12, 0.10, 0.08]  # pos 1→4: 15/12/10/8%
+
+# Correlation groups: skip entry if correlated coin already has a position
+CORRELATION_GROUPS: dict[str, list[str]] = {
+    "ETH": ["MATIC"],
+    "MATIC": ["ETH"],
+}
+
+# Loss streak
+LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
+LOSS_STREAK_REDUCE = 0.5     # size multiplier
+
+# Volatility filter
+VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
+
+LEVERAGE = 2.5
 MAX_MARGIN_PER_COIN = 0.15
 STAGE_MARGIN = 0.05
 
@@ -544,9 +570,9 @@ def evaluate_exit_v5(
                100) if is_long else ((entry_price - current_price) / entry_price * 100)
 
     # 1. Hard Stop Loss
-    if pnl_pct <= -6:
+    if pnl_pct <= -5.5:
         return ("EXIT_ALL", 1.0,
-                f"Stop loss hit at {pnl_pct:.1f}% (limit -6%)")
+                f"Stop loss hit at {pnl_pct:.1f}% (limit -5.5%)")
 
     # 2. Emergency Exit
     if is_long:
@@ -674,6 +700,7 @@ def save_state(
     timestamp: str,
     entry_price: float | None = None,
     remaining_size: float | None = None,
+    loss_streak: int = 0,
 ) -> None:
     """Persist position state to Firestore."""
     db = _get_db()
@@ -694,6 +721,8 @@ def save_state(
             data["entry_price"] = round(entry_price, 2)
         if remaining_size is not None:
             data["remaining_size"] = round(remaining_size, 4)
+        if loss_streak:
+            data["loss_streak"] = loss_streak
         call_with_retry(
             lambda: doc_ref.set(data),
             resource_name=f"Firestore save {coin} state",
@@ -839,6 +868,10 @@ def analyse_coin(
     candles_3d: list[dict],
     candles_1d: list[dict],
     kill_switch_active: bool,
+    active_count: int = 0,
+    max_positions: int = MAX_CONCURRENT_POSITIONS,
+    btc_bull: bool = True,
+    in_event_window: bool = False,
 ) -> dict:
     ts = _now_vnt().isoformat()
 
@@ -885,6 +918,9 @@ def analyse_coin(
     last_volume = volumes_1d[-1]
 
     atr_1d = compute_atr(candles_1d, 14)
+    atrs_1d = [compute_atr(candles_1d[:i+1], 14) for i in range(13, len(candles_1d))]
+    atr_ma20_1d_all = sma(atrs_1d, 20)
+    atr_ma20_1d = atr_ma20_1d_all[-1] if atr_ma20_1d_all[-1] is not None else atr_1d
 
     # Scores
     volume_score = compute_volume_score(last_volume, vol_ma20_1d)
@@ -950,23 +986,62 @@ def analyse_coin(
         }
 
     pnl_pct = 0.0
+    _loss_streak = prev.get("loss_streak", 0)
 
     if prev_pos_state == "FLAT":
-        # Adaptive entry: easier (±2) in strong trends, stricter (±3) otherwise
-        _entry_thresh = 2 if abs(trend_score) >= 2 else 3
-        pos_state, action = resolve_action_v4(
-            trend_score, entry1_long, entry1_short,
-            p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
-            prev_pos_state, _entry_thresh,
-        )
+        # ── Filter chain ─────────────────────────────────────────────
+        _skip_reason = None
+
+        # 1. Max positions
+        if active_count >= max_positions:
+            _skip_reason = f"Max positions ({max_positions})"
+
+        # 2. Volatility filter
+        if not _skip_reason and atr_1d > atr_ma20_1d * VOLATILITY_ATR_MULTIPLIER:
+            _skip_reason = f"ATR {atr_1d:.2f} > {VOLATILITY_ATR_MULTIPLIER}× ATR_MA20({atr_ma20_1d:.2f})"
+
+        # 3. Time filter
+        if not _skip_reason and in_event_window:
+            _skip_reason = "Economic event window"
+
+        # 4. Correlation filter
+        if not _skip_reason:
+            for _corr_coin in CORRELATION_GROUPS.get(coin, []):
+                if load_state(_corr_coin).get("position_state", "FLAT") != "FLAT":
+                    _skip_reason = f"{_corr_coin} already in position (correlated)"
+                    break
+
+        if _skip_reason:
+            pos_state, action = "FLAT", "NO_TRADE"
+            entry_price = prev.get("entry_price")
+            remaining_size = prev.get("remaining_size", 1.0)
+        else:
+            _position_rate = active_count / max_positions if max_positions > 0 else 0
+
+            if _position_rate > POSITION_RATE_TIGHT_THRESHOLD:
+                _entry_thresh = 3
+            else:
+                _entry_thresh = 2 if abs(trend_score) >= 2 else 3
+
+            # BTC regime filter: in bear, only SHORT (no LONG)
+            if not btc_bull and trend_score > 0:
+                pos_state, action = "FLAT", "NO_TRADE"
+            else:
+                pos_state, action = resolve_action_v4(
+                    trend_score, entry1_long, entry1_short,
+                    p_long_entry2, p_short_entry2, p_long_entry3, p_short_entry3,
+                    prev_pos_state, _entry_thresh,
+                )
+
+            if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
+                entry_price = last_close
+                remaining_size = 1.0
+
+            # Loss streak breaker
+            if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
+                remaining_size *= LOSS_STREAK_REDUCE
         next_rules = compute_next_rules(pos_state)
 
-        if action == "OPEN_LONG_ENTRY_1":
-            entry_price = last_close
-            remaining_size = 1.0
-        elif action == "OPEN_SHORT_ENTRY_1":
-            entry_price = last_close
-            remaining_size = 1.0
     else:
         # Exit evaluation for active positions
         is_long = prev_pos_state.startswith("LONG")
@@ -997,6 +1072,7 @@ def analyse_coin(
         else:
             next_rules = [exit_reason]
             if exit_action == "EXIT_ALL":
+                _loss_streak = 0 if pnl_pct > 0 else _loss_streak + 1
                 pos_state = "FLAT"
                 remaining_size = 0.0
                 action = "EXIT_LONG" if is_long else "EXIT_SHORT"
@@ -1045,6 +1121,7 @@ def analyse_coin(
         coin, pos_state, action, trend_score,
         output["entry2_prob"], output["entry3_prob"], ts,
         entry_price=entry_price, remaining_size=remaining_size,
+        loss_streak=_loss_streak,
     )
 
     return output
@@ -1078,6 +1155,31 @@ def main() -> None:
     else:
         print("[crypto_trading] Kill switch not triggered.")
 
+    # BTC regime filter (MA50 vs MA200 on daily)
+    _btc_closes = [c["close"] for c in btc_candles]
+    _btc_ma50 = (sma(_btc_closes, 50)[-1] or _btc_closes[-1])
+    _btc_ma200 = (sma(_btc_closes, 200)[-1] or _btc_closes[-1])
+    _btc_bull = _btc_ma50 > _btc_ma200
+    print(f"[crypto_trading] BTC regime: {'BULL' if _btc_bull else 'BEAR'} "
+          f"(MA50={_btc_ma50:.0f} MA200={_btc_ma200:.0f})")
+
+    # Time filter: avoid economic events
+    _current_hour = now_vnt.hour
+    _in_event_window = any(
+        start <= _current_hour <= end
+        for start, end in ECONOMIC_EVENT_WINDOWS
+    )
+    if _in_event_window:
+        print(f"[crypto_trading] In economic event window ({_current_hour}h VNT) "
+              f"\u2013 skipping new entries")
+
+    # Count active positions
+    _active_positions = sum(
+        1 for c in COINS
+        if load_state(c).get("position_state", "FLAT") != "FLAT"
+    )
+    print(f"[crypto_trading] Active positions: {_active_positions}/{MAX_CONCURRENT_POSITIONS}")
+
     # Analyse each coin
     results: list[dict[str, Any]] = []
     for coin in COINS:
@@ -1092,7 +1194,12 @@ def main() -> None:
             continue
 
         print(f"[crypto_trading] Analysing {coin}\u2026")
-        result = analyse_coin(coin, candles_3d, candles_1d, kill_switch)
+        result = analyse_coin(
+            coin, candles_3d, candles_1d, kill_switch,
+            active_count=_active_positions,
+            btc_bull=_btc_bull,
+            in_event_window=_in_event_window,
+        )
         results.append(result)
         print(
             f"  {coin}: trend={result['trend']} "
