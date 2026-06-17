@@ -43,12 +43,14 @@ try:
 except Exception as e:
     errs.append(f'Backtest: {e}'); print(f'  FAIL: {e}')
 
-# 5. Signal analysis
+# 5. Signal analysis (BTC_SYMBOL, not in COINS)
 print('=== Signal analysis smoke test ===')
 try:
-    from crypto_trading import SYMBOL_MAP, fetch_klines
-    btc = fetch_klines(SYMBOL_MAP['BTC'], '1d', 250)
+    from crypto_trading import BTC_SYMBOL, fetch_klines, analyse_coin, COINS, SYMBOL_MAP
+    btc = fetch_klines(BTC_SYMBOL, '1d', 250)
     print(f'  BTC candles: {len(btc)}')
+    eth = fetch_klines(SYMBOL_MAP['ETH'], '3d', 100)
+    print(f'  ETH candles (3d): {len(eth)}')
 except Exception as e:
     errs.append(f'Analysis: {e}'); print(f'  FAIL: {e}')
 
