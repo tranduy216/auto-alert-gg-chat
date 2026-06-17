@@ -130,8 +130,8 @@ def okx_place_order(
     return _okx_request("POST", "/api/v5/trade/order", body)
 
 
-def okx_close_position(inst_id: str, pos_side: str, mgn_mode: str = "cross") -> dict:
-    """Close a position entirely via market order."""
+def okx_close_position(inst_id: str, pos_side: str = "net", mgn_mode: str = "cross") -> dict:
+    """Close a position entirely via market order. Defaults to net mode."""
     return _okx_request("POST", "/api/v5/trade/close-position", {
         "instId": inst_id,
         "posSide": pos_side,

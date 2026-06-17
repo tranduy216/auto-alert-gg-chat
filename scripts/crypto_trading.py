@@ -1182,7 +1182,7 @@ def _exec_action_on_okx(
                 return exec_status
             px_str = str(px)
             side = "buy" if pos_side == "long" else "sell"
-            resp = okx_place_order(inst_id, "cross", side, sz, px_str, pos_side)
+            resp = okx_place_order(inst_id, "cross", side, sz, px_str)
             exec_status.update({"status": "open", "detail": f"{pos_side} limit {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
             print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct @ {px_str}")
 
@@ -1197,14 +1197,14 @@ def _exec_action_on_okx(
                 return exec_status
             px_str = str(px)
             side = "buy" if pos_side == "long" else "sell"
-            resp = okx_place_order(inst_id, "cross", side, sz, px_str, pos_side)
+            resp = okx_place_order(inst_id, "cross", side, sz, px_str)
             exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct @ ${px_str}", "sz": sz, "px": px_str})
             print(f"  [OKX] {coin} ADD {pos_side} {sz}ct @ {px_str}")
 
         elif action in ("EXIT_LONG", "EXIT_SHORT", "REDUCE_LONG", "REDUCE_SHORT"):
             pos_side = "long" if "LONG" in action else "short"
             if action.startswith("EXIT"):
-                resp = okx_close_position(inst_id, pos_side)
+                resp = okx_close_position(inst_id)
                 exec_status["status"] = "exit"
                 exec_status["detail"] = f"close {pos_side}"
                 print(f"  [OKX] {coin} EXIT {pos_side}")
@@ -1215,7 +1215,7 @@ def _exec_action_on_okx(
                     sz = str(int(float(pos["pos"]) * 0.5))
                     if int(sz) > 0:
                         side = "sell" if pos_side == "long" else "buy"
-                        resp = okx_place_order(inst_id, "cross", side, sz, pos_side=pos_side)
+                        resp = okx_place_order(inst_id, "cross", side, sz)
                         exec_status["status"] = "reduce"
                         exec_status["detail"] = f"reduce 50% {pos_side} ({sz}ct)"
                         print(f"  [OKX] {coin} REDUCE {pos_side} {sz}ct")
@@ -1231,7 +1231,7 @@ def _exec_action_on_okx(
                 if int(sz) > 0:
                     kind = "TP" if "TAKE_PROFIT" in action else "OE"
                     side = "sell" if pos_side == "long" else "buy"
-                    resp = okx_place_order(inst_id, "cross", side, sz, pos_side=pos_side)
+                    resp = okx_place_order(inst_id, "cross", side, sz)
                     exec_status["status"] = "reduce"
                     exec_status["detail"] = f"{kind} reduce {pos_side} {sz}ct"
                     print(f"  [OKX] {coin} {kind} {pos_side} {sz}ct")
