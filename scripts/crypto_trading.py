@@ -57,7 +57,7 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "DOGE", "PAXG", "TRX"]
+COINS = ["ETH", "BNB", "PAXG", "TRX", "SOL"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 SHORT_ALLOWED = {"ETH", "PAXG"}
 BTC_SYMBOL = "BTCUSDT"
