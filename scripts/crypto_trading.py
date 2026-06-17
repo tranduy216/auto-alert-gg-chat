@@ -773,7 +773,7 @@ def compute_entry_v6_long(
         return False
     if close < trend_ma_slow_1d:
         return False
-    if volume_score < 0.4:
+    if volume_score < 0.3:
         return False
     return True
 
@@ -796,7 +796,7 @@ def compute_entry_v6_short(
         return False
     if close > trend_ma_slow_1d:
         return False
-    if volume_score < 0.4:
+    if volume_score < 0.3:
         return False
     return True
 
