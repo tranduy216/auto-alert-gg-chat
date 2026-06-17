@@ -69,6 +69,7 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
 ]
 
 CANDLE_COUNT = 30
+BTC_CANDLE_COUNT = 220  # enough for MA200 + buffer
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 4     # max positions open at the same time
@@ -120,11 +121,12 @@ def _parse_okx_klines(data: list) -> list[dict]:
         for k in candles
     ]
 
-def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.com") -> list[dict] | None:
+def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.com",
+                   limit: int = CANDLE_COUNT) -> list[dict] | None:
     try:
         resp = requests.get(
             f"https://{host}/api/v3/klines",
-            params={"symbol": symbol, "interval": interval, "limit": CANDLE_COUNT},
+            params={"symbol": symbol, "interval": interval, "limit": limit},
             timeout=15,
         )
         resp.raise_for_status()
@@ -133,7 +135,7 @@ def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.c
         print(f"  [{host}] {symbol} failed: {e}")
         return None
 
-def _fetch_okx(symbol: str, interval: str = "1D") -> list[dict] | None:
+def _fetch_okx(symbol: str, interval: str = "1D", limit: int = CANDLE_COUNT) -> list[dict] | None:
     okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
                "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT",
                "PAXGUSDT": "PAXG-USDT"}
@@ -143,7 +145,7 @@ def _fetch_okx(symbol: str, interval: str = "1D") -> list[dict] | None:
     try:
         resp = requests.get(
             "https://www.okx.com/api/v5/market/candles",
-            params={"instId": inst_id, "bar": interval, "limit": CANDLE_COUNT},
+            params={"instId": inst_id, "bar": interval, "limit": limit},
             timeout=15,
         )
         resp.raise_for_status()
@@ -210,16 +212,16 @@ _SOURCE_LIST: list[tuple[str, str | None]] = [
 ]
 _ACTIVE_SOURCE_IDX = 0
 
-def _build_source_fns(symbol: str, interval: str = "1d") -> list[tuple[str, callable]]:
+def _build_source_fns(symbol: str, interval: str = "1d", limit: int = CANDLE_COUNT) -> list[tuple[str, callable]]:
     fns: list[tuple[str, callable]] = []
     okx_iv = OKX_INTERVAL_MAP.get(interval, interval)
     for name, host in _SOURCE_LIST:
         if name == "OKX":
-            fns.append((name, lambda s=symbol, iv=okx_iv: _fetch_okx(s, iv)))
+            fns.append((name, lambda s=symbol, iv=okx_iv, l=limit: _fetch_okx(s, iv, l)))
         elif host:
-            fns.append((name, lambda s=symbol, iv=interval, h=host: _fetch_binance(s, iv, h)))
+            fns.append((name, lambda s=symbol, iv=interval, h=host, l=limit: _fetch_binance(s, iv, h, l)))
         else:
-            fns.append((name, lambda s=symbol, iv=interval: _fetch_binance(s, iv)))
+            fns.append((name, lambda s=symbol, iv=interval, l=limit: _fetch_binance(s, iv, limit=l)))
     cg_id = COINGECKO_IDS.get(symbol)
     if cg_id:
         fns.append(("CoinGecko", lambda s=symbol, c=cg_id, iv=interval: _parse_coingecko_klines(c, s, iv)))
@@ -245,15 +247,17 @@ def _try_source(
         last_err = f"[{name}] {symbol} failed"
     return None, start, last_err
 
-def fetch_klines(symbol: str, interval: str = "1d") -> list[dict[str, float | int]]:
+def fetch_klines(symbol: str, interval: str = "1d", limit: int = CANDLE_COUNT) -> list[dict[str, float | int]]:
     """Fetch OHLCV klines, trying sources with adaptive fallback."""
     global _ACTIVE_SOURCE_IDX
-    sources = _build_source_fns(symbol, interval)
+    sources = _build_source_fns(symbol, interval, limit)
     result, idx, err = _try_source(sources, _ACTIVE_SOURCE_IDX, symbol)
     if result:
         _ACTIVE_SOURCE_IDX = idx
         return result
     raise RuntimeError(f"Cannot fetch klines for {symbol}: {err}")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -1410,7 +1414,7 @@ def main() -> None:
     # Kill-switch check (BTC default 1d)
     print("[crypto_trading] Fetching BTC data for kill-switch\u2026")
     try:
-        btc_candles = fetch_klines(BTC_SYMBOL)
+        btc_candles = fetch_klines(BTC_SYMBOL, limit=BTC_CANDLE_COUNT)
     except requests.RequestException as exc:
         print(f"[crypto_trading] Fatal: cannot fetch BTC data: {exc}",
               file=sys.stderr)
@@ -1498,7 +1502,10 @@ def main() -> None:
     else:
         message = build_action_message(results, exec_log, kill_switch, now_vnt)
 
-    if is_silent:
+    has_error = any(e.get("status") == "error" for e in exec_log)
+    force_send = has_error  # errors bypass silent hours
+
+    if is_silent and not force_send:
         if not all_wait:
             print("[crypto_trading] Silent hours \u2013 queuing notification.")
             queue_alert({"text": message}, now_vnt.isoformat())

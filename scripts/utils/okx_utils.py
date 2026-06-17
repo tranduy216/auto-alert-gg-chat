@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -28,7 +29,7 @@ class OKXError(Exception):
 def _okx_sign(
     method: str, path: str, body: Any, api_key: str, api_secret: str, passphrase: str
 ) -> Tuple[str, str, str]:
-    ts = str(int(time.time()))
+    ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
     body_str = json.dumps(body) if body else ""
     msg = ts + method.upper() + path + body_str
     mac = hmac.new(
