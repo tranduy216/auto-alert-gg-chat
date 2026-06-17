@@ -47,7 +47,7 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["BTC", "ETH", "BNB", "SOL", "ARB", "LINK", "PAXG"]
+COINS = ["BTC", "ETH", "BNB", "ARB", "LINK", "PAXG"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
@@ -454,14 +454,14 @@ def resolve_action_v4(
     """Return (position_state, action)."""
 
     if prev_pos_state == "FLAT":
-        if trend_score >= 2 and entry1_long:
+        if trend_score >= 3 and entry1_long:
             return ("LONG_ENTRY_1", "OPEN_LONG_ENTRY_1")
-        if trend_score <= -2 and entry1_short:
+        if trend_score <= -3 and entry1_short:
             return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
         return ("FLAT", "NO_TRADE")
 
     if prev_pos_state == "LONG_ENTRY_1":
-        if p_long_entry2 >= 0.70:
+        if p_long_entry2 >= 0.80:
             return ("LONG_ENTRY_2", "ADD_LONG_ENTRY_2")
         if trend_score < -2:
             return ("FLAT", "EXIT_LONG")
@@ -470,7 +470,7 @@ def resolve_action_v4(
         return ("LONG_ENTRY_1", "HOLD")
 
     if prev_pos_state == "LONG_ENTRY_2":
-        if p_long_entry3 >= 0.75:
+        if p_long_entry3 >= 0.85:
             return ("LONG_ENTRY_3", "ADD_LONG_ENTRY_3")
         if trend_score < -2:
             return ("FLAT", "EXIT_LONG")
@@ -482,7 +482,7 @@ def resolve_action_v4(
         return ("LONG_ENTRY_3", "HOLD")
 
     if prev_pos_state == "SHORT_ENTRY_1":
-        if p_short_entry2 >= 0.70:
+        if p_short_entry2 >= 0.80:
             return ("SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2")
         if trend_score > 2:
             return ("FLAT", "EXIT_SHORT")
@@ -491,7 +491,7 @@ def resolve_action_v4(
         return ("SHORT_ENTRY_1", "HOLD")
 
     if prev_pos_state == "SHORT_ENTRY_2":
-        if p_short_entry3 >= 0.75:
+        if p_short_entry3 >= 0.85:
             return ("SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3")
         if trend_score > 2:
             return ("FLAT", "EXIT_SHORT")
@@ -538,9 +538,9 @@ def evaluate_exit_v5(
                100) if is_long else ((entry_price - current_price) / entry_price * 100)
 
     # 1. Hard Stop Loss
-    if pnl_pct <= -8:
+    if pnl_pct <= -6:
         return ("EXIT_ALL", 1.0,
-                f"Stop loss hit at {pnl_pct:.1f}% (limit -8%)")
+                f"Stop loss hit at {pnl_pct:.1f}% (limit -6%)")
 
     # 2. Emergency Exit
     if is_long:
@@ -554,13 +554,13 @@ def evaluate_exit_v5(
 
     # 3. Trend Exit
     if is_long:
-        if ma3 < ma7:
+        if ma3 < ma10:
             return ("EXIT_ALL", 1.0,
-                    f"Trend exit: MA3 ({ma3:.2f}) < MA7 ({ma7:.2f})")
+                    f"Trend exit: MA3 ({ma3:.2f}) < MA10 ({ma10:.2f})")
     else:
-        if ma3 > ma7:
+        if ma3 > ma10:
             return ("EXIT_ALL", 1.0,
-                    f"Trend exit: MA3 ({ma3:.2f}) > MA7 ({ma7:.2f})")
+                    f"Trend exit: MA3 ({ma3:.2f}) > MA10 ({ma10:.2f})")
 
     # 4. Score Exit
     if is_long:
@@ -977,13 +977,13 @@ def analyse_coin(
 
         if exit_action == "HOLD":
             # Only check add-entry conditions
-            if p_long_entry2 >= 0.70 and prev_pos_state == "LONG_ENTRY_1":
+            if p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1":
                 pos_state, action = "LONG_ENTRY_2", "ADD_LONG_ENTRY_2"
-            elif p_long_entry3 >= 0.75 and prev_pos_state == "LONG_ENTRY_2":
+            elif p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2":
                 pos_state, action = "LONG_ENTRY_3", "ADD_LONG_ENTRY_3"
-            elif p_short_entry2 >= 0.70 and prev_pos_state == "SHORT_ENTRY_1":
+            elif p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1":
                 pos_state, action = "SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"
-            elif p_short_entry3 >= 0.75 and prev_pos_state == "SHORT_ENTRY_2":
+            elif p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2":
                 pos_state, action = "SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"
             else:
                 pos_state, action = prev_pos_state, "HOLD"

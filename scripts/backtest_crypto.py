@@ -22,7 +22,7 @@ from crypto_trading import (
     SYMBOL_MAP, LEVERAGE,
 )
 
-BACKTEST_COINS = ["ETH", "BNB", "SOL"]
+BACKTEST_COINS = ["ETH", "BNB"]
 LOOKBACK_DAYS = 400
 MIN_3D_PERIODS = 25
 
@@ -156,10 +156,10 @@ def backtest_coin(coin: str) -> dict:
 
             if exit_action == "HOLD":
                 add_cond = (
-                    (p_long_entry2 >= 0.70 and prev_pos_state == "LONG_ENTRY_1") or
-                    (p_long_entry3 >= 0.75 and prev_pos_state == "LONG_ENTRY_2") or
-                    (p_short_entry2 >= 0.70 and prev_pos_state == "SHORT_ENTRY_1") or
-                    (p_short_entry3 >= 0.75 and prev_pos_state == "SHORT_ENTRY_2")
+                    (p_long_entry2 >= 0.80 and prev_pos_state == "LONG_ENTRY_1") or
+                    (p_long_entry3 >= 0.85 and prev_pos_state == "LONG_ENTRY_2") or
+                    (p_short_entry2 >= 0.80 and prev_pos_state == "SHORT_ENTRY_1") or
+                    (p_short_entry3 >= 0.85 and prev_pos_state == "SHORT_ENTRY_2")
                 )
                 if add_cond:
                     dir = "LONG" if is_long else "SHORT"
