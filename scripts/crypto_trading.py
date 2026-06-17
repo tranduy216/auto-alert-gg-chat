@@ -7,7 +7,8 @@ System (v4):
   Layer 1 – Trend Engine (3D candles, MA7/MA10/MA20) → TrendScore ±3
   Layer 2 – Execution Engine (1D candles, MA3/MA7/Vol/ATR14) → weighted probs
   3-stage scaling entries with 3x leverage
-  Hard capital cap: max 15 % margin per coin
+  Adaptive entry: ±2 when trend_score≥2, ±3 otherwise
+  Risk: max 3 concurrent positions, 15% capital per position
 
 Required environment variables:
   DISCORD_TRADING_WEBHOOK_URL  – Discord webhook for signal output
@@ -47,11 +48,15 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["BTC", "ETH", "BNB", "LINK", "ADA", "MATIC"]
+COINS = ["ETH", "BNB", "LINK", "ADA", "MATIC"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 BTC_SYMBOL = "BTCUSDT"
 
 CANDLE_COUNT = 30
+
+# ── Risk Management ─────────────────────────────────────────────────
+MAX_CONCURRENT_POSITIONS = 3   # max positions open at the same time
+CAPITAL_PER_POSITION = 0.15    # 15% of total capital per position (3x → 45% exposure)
 
 LEVERAGE = 3
 MAX_MARGIN_PER_COIN = 0.15
@@ -572,10 +577,6 @@ def evaluate_exit_v5(
         if ts_val > -0.2:
             return ("EXIT_ALL", 1.0,
                     f"Score exit: {ts_val:.1f} > -0.2")
-
-    # 5. Trailing Stop (MA10)
-    # Note: relies on stored trailing_stop updated in save_state
-    # (evaluated dynamically via saved state, not here)
 
     # 6. Take Profit
     if pnl_pct >= 25:
