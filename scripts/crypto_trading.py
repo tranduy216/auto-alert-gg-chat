@@ -222,7 +222,6 @@ COINGECKO_IDS = {
 
 _SOURCE_LIST: list[tuple[str, str | None]] = [
     ("OKX", None),
-    ("Binance", None),
     ("Binance US", "api.binance.us"),
     ("Binance GCP", "api-gcp.binance.com"),
 ]
