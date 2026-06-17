@@ -57,9 +57,9 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "DOGE", "PAXG", "TRX"]
+COINS = ["ETH", "BNB", "DOGE", "PAXG", "TRX", "LINK"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED = {"ETH", "PAXG"}
+SHORT_ALLOWED = {"ETH", "LINK", "PAXG"}
 BTC_SYMBOL = "BTCUSDT"
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
