@@ -32,5 +32,6 @@ jobs:
         working-directory: scripts
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_DAILY_WEBHOOK_URL: ${{ secrets.DISCORD_DAILY_WEBHOOK_URL }}
         run: python rss_digest.py

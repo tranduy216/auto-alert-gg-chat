@@ -9,12 +9,74 @@ import requests
 
 from .retry_utils import call_with_retry
 
-OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_MODEL = "openai/gpt-oss-120b"
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
 
 
 class AIError(Exception):
     pass
+
+
+def _call_gemini(
+    system_prompt: str,
+    user_prompt: str,
+    response_format: str | None = None,
+) -> str:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise AIError("GEMINI_API_KEY is not set")
+
+    generation_config: dict = {}
+    if response_format == "json_object":
+        generation_config["response_mime_type"] = "application/json"
+
+    body = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": {"parts": [{"text": user_prompt}]},
+        "generationConfig": generation_config,
+    }
+
+    url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent?key={api_key}"
+
+    def _do_request() -> str:
+        resp = requests.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json=body,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise AIError(f"Empty response from Gemini: {data}")
+        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        if not text:
+            raise AIError("Empty text from Gemini")
+        return text
+
+    try:
+        return call_with_retry(
+            _do_request,
+            resource_name="Gemini",
+            retry_exceptions=(requests.RequestException, AIError),
+        )
+    except Exception as exc:
+        raise AIError(str(exc)) from exc
+
+
+def _call_ai(
+    system_prompt: str,
+    user_prompt: str,
+    response_format: str | None = None,
+) -> str:
+    try:
+        return _call_openrouter(system_prompt, user_prompt, response_format)
+    except AIError as exc:
+        print(f"[gemini_utils] OpenRouter failed: {exc}. Falling back to Gemini.", file=sys.stderr)
+        return _call_gemini(system_prompt, user_prompt, response_format)
 
 
 def _call_openrouter(
@@ -91,7 +153,7 @@ def summarise_articles(articles: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         for a in articles
     )
     user_prompt = USER_PROMPT_SUMMARISE_TPL.format(articles=articles_text)
-    text = _call_openrouter(SYSTEM_PROMPT_SUMMARISE, user_prompt, "json_object")
+    text = _call_ai(SYSTEM_PROMPT_SUMMARISE, user_prompt, "json_object")
     text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -150,7 +212,7 @@ def detect_breaking_news(
     user_prompt = USER_PROMPT_BREAKING_TPL.format(
         btc_line=btc_line, articles=articles_text
     )
-    text = _call_openrouter(SYSTEM_PROMPT_BREAKING, user_prompt, "json_object")
+    text = _call_ai(SYSTEM_PROMPT_BREAKING, user_prompt, "json_object")
     text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]

@@ -33,6 +33,7 @@ jobs:
         working-directory: scripts
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_BREAKING_WEBHOOK_URL: ${{ secrets.DISCORD_BREAKING_WEBHOOK_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: python breaking_news.py
