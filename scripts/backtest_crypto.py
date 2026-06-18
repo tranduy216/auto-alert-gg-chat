@@ -16,10 +16,11 @@ from crypto_trading import (
     compute_volume_score,
     compute_entry_v6_long, compute_entry_v6_short,
     resolve_action_v6, evaluate_exit_v6, _aggregate_daily_to_3d,
-    COINS, SYMBOL_MAP, LEVERAGE, SHORT_ALLOWED,
+    COINS, SYMBOL_MAP, SHORT_ALLOWED,
     SHORT_TREND_FAST, SHORT_TREND_SLOW,
     SHORT_COOLDOWN_LOSSES, SHORT_COOLDOWN_DAYS,
     LONG_COOLDOWN_LOSSES, LONG_COOLDOWN_DAYS,
+    get_coin_profile,
 )
 
 LOOKBACK_DAYS = 400
@@ -90,6 +91,7 @@ def _fetch_all_klines(symbol: str, limit: int = 1000,
 
 def backtest_coin(coin: str, start_time: int | None = None,
                   limit: int = LOOKBACK_DAYS) -> dict:
+    profile = get_coin_profile(coin)
     symbol = SYMBOL_MAP[coin]
     daily_all = _fetch_all_klines(symbol, limit, start_time)
     if start_time:
@@ -171,6 +173,7 @@ def backtest_coin(coin: str, start_time: int | None = None,
                         _long_allowed = False
             entry_long = compute_entry_v6_long(
                 trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
             ) if _long_allowed else False
             # Short cooldown check
             _short_allowed = coin in SHORT_ALLOWED
@@ -186,6 +189,7 @@ def backtest_coin(coin: str, start_time: int | None = None,
             entry_short = (
                 compute_entry_v6_short(
                     trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                    trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
                 ) if _short_allowed else False
             )
             pos_state, action = resolve_action_v6(
@@ -217,6 +221,10 @@ def backtest_coin(coin: str, start_time: int | None = None,
                 ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
                 recent_10d_low, recent_10d_high,
                 trailing_stop, highest_since_entry,
+                max_loss_pct=profile["max_loss_pct"],
+                trailing_pct=profile["trailing_pct"],
+                initial_stop_pct=profile["initial_stop_pct"],
+                hard_stop_pct=profile["hard_stop_pct"],
             )
             trailing_stop = new_ts
             highest_since_entry = new_he
@@ -268,7 +276,7 @@ def backtest_coin(coin: str, start_time: int | None = None,
         if state["position_state"] != "FLAT" and state["entry_price"] and state["remaining_size"] > 0:
             is_long = state["position_state"].startswith("LONG")
             upnl = ((current_close - state["entry_price"]) / state["entry_price"] * 100) if is_long else ((state["entry_price"] - current_close) / state["entry_price"] * 100)
-            equity_curve.append(1.0 + upnl / 100 * state["remaining_size"])
+            equity_curve.append(1.0 + upnl / 100 * state["remaining_size"] * profile["leverage"])
         else:
             equity_curve.append(1.0)
 

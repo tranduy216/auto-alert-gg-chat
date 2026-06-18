@@ -20,6 +20,7 @@ OKX_INSTRUMENTS: Dict[str, str] = {
     "PAXG": "PAXG-USDT-SWAP",
     "TRX": "TRX-USDT-SWAP",
     "SOL": "SOL-USDT-SWAP",
+    "ADA": "ADA-USDT-SWAP",
 }
 LEVERAGE = 2.5
 

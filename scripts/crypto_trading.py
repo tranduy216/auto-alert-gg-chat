@@ -58,7 +58,7 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "PAXG", "TRX", "SOL"]
+COINS = ["ETH", "BNB", "PAXG", "TRX", "ADA"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 SHORT_ALLOWED = {"ETH", "PAXG"}
 BTC_SYMBOL = "BTCUSDT"
@@ -81,6 +81,10 @@ POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
 
 # Position sizing decay per position tier
 POSITION_SIZES = [0.10, 0.10, 0.10]  # pos 1→3: 10% each
+POSITION_SIZE_BASE = 0.034      # base entry: 3.4% of equity
+POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4% of equity
+MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3.4% × 5 = 17% × 3x = 51%)
+MAX_MARGIN_PER_COIN_PCT = 0.51  # max total position value (incl leverage) per coin
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
@@ -104,9 +108,9 @@ SHORT_TREND_SLOW = 25        # slow MA period (also used as price filter)
 VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
 
 # v6 trailing stop
-V6_TRAILING_PCT = 0.85       # trail 15% from high (tighter once in profit)
-V6_INITIAL_STOP_PCT = 0.85   # initial trailing stop at 85% of entry (15% price trail)
-V6_HARD_STOP_PCT = 0.78      # hard cap: 22% price move = 5.5% of total capital @ 10% alloc × 2.5x
+V6_TRAILING_PCT = 0.80       # trail 20% from high (tighter trailing → better PF)
+V6_INITIAL_STOP_PCT = 0.80   # initial stop at 80% of entry (20% price trail)
+V6_HARD_STOP_PCT = 0.75      # hard cap: 25% price move = 6.25% of total capital @ 10% alloc × 2.5x
 V6_MAX_LOSS_PCT = 0.06       # max loss per trade: -6% PnL → exit immediately
 
 LEVERAGE = 2.5
@@ -116,6 +120,36 @@ STAGE_MARGIN = 0.05
 BTC_FLASH_CRASH_PCT = -5.0
 
 FIRESTORE_COLLECTION = "crypto_trading_states"
+
+# ── Per-coin Profiles ──────────────────────────────────────────────────
+DEFAULT_PROFILE = {
+    "leverage": 3.0,
+    "trend_min_long": 0,        # T0: allow entries in sideways trend
+    "trend_min_long_tight": 2,  # T2 when >50% deployed: need WEAK_BULLISH
+    "trend_max_short": -3,      # Strong bear only for short
+    "vol_min": 0.3,
+    "max_loss_pct": 0.06,
+    "trailing_pct": 0.80,
+    "initial_stop_pct": 0.80,
+    "hard_stop_pct": 0.75,
+}
+
+COIN_PROFILES: dict[str, dict] = {
+    "PAXG": {
+        "max_loss_pct": 0.04,   # Tighter stop, PAXG less volatile
+    },
+    "ADA": {
+        "max_loss_pct": 0.06,
+        "leverage": 3.0,
+    },
+}
+
+
+def get_coin_profile(coin: str) -> dict:
+    profile = dict(DEFAULT_PROFILE)
+    if coin in COIN_PROFILES:
+        profile.update(COIN_PROFILES[coin])
+    return profile
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +188,7 @@ def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.c
 def _fetch_okx(symbol: str, interval: str = "1D", limit: int = CANDLE_COUNT) -> list[dict] | None:
     okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
                "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT",
-               "PAXGUSDT": "PAXG-USDT"}
+               "PAXGUSDT": "PAXG-USDT", "ADAUSDT": "ADA-USDT"}
     inst_id = okx_map.get(symbol)
     if not inst_id:
         return None
@@ -218,7 +252,7 @@ def _parse_coingecko_klines(coin_id: str, symbol: str, interval: str = "1d") -> 
 COINGECKO_IDS = {
     "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
     "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink",
-    "PAXGUSDT": "pax-gold"}
+    "PAXGUSDT": "pax-gold", "ADAUSDT": "cardano"}
 
 _SOURCE_LIST: list[tuple[str, str | None]] = [
     ("OKX", None),
@@ -350,7 +384,17 @@ def _approx_equal(a: float, b: float, threshold: float = 0.005) -> bool:
 
 
 def evaluate_trend_3d(ma7: float, ma10: float, ma20: float) -> tuple[str, int]:
-    """Classify trend from 3D MAs. Returns (label, trend_score)."""
+    """Classify trend from 3D MAs. Returns (label, trend_score).
+
+    Scores:
+        3 = BULLISH       (MA7 > MA10 > MA20)         — strong uptrend
+        2 = WEAK_BULLISH  (MA7 > MA10 ≈ MA20)         — uptrend flattening
+        1 = EARLY_BULL    (MA7 > MA10 but MA10 < MA20) — early reversal up
+        0 = SIDEWAY       (all MA clustered)
+       -1 = EARLY_BEAR    (MA7 < MA10 but MA10 > MA20) — early reversal down
+       -2 = WEAK_BEARISH  (MA7 < MA10 ≈ MA20)
+       -3 = BEARISH       (MA7 < MA10 < MA20)
+    """
     ma_max = max(ma7, ma10, ma20)
     ma_min = min(ma7, ma10, ma20)
     spread = (ma_max - ma_min) / ma_min * 100 if ma_min > 0 else 0
@@ -364,17 +408,23 @@ def evaluate_trend_3d(ma7: float, ma10: float, ma20: float) -> tuple[str, int]:
     if ma7 > ma10 and _approx_equal(ma10, ma20):
         return ("WEAK_BULLISH", 2)
 
+    if ma7 > ma10 and ma10 < ma20:
+        return ("EARLY_BULL", 1)
+
     if ma7 < ma10 and _approx_equal(ma10, ma20):
         return ("WEAK_BEARISH", -2)
 
     if ma7 < ma10 < ma20:
         return ("BEARISH", -3)
 
+    if ma7 < ma10 and ma10 > ma20:
+        return ("EARLY_BEAR", -1)
+
     return ("SIDEWAY", 0)
 
 
 def trend_strength(score: int) -> float:
-    return {3: 1.0, 2: 0.7, 0: 0.0, -2: -0.7, -3: -1.0}.get(score, 0.0)
+    return {3: 1.0, 2: 0.7, 1: 0.35, 0: 0.0, -1: -0.35, -2: -0.7, -3: -1.0}.get(score, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -677,6 +727,10 @@ def evaluate_exit_v6(
     recent_10d_high: float,
     trailing_stop: float | None,
     highest_since_entry: float | None,
+    max_loss_pct: float = 0.06,
+    trailing_pct: float = 0.80,
+    initial_stop_pct: float = 0.80,
+    hard_stop_pct: float = 0.75,
 ) -> tuple[str, float, str, float | None, float | None]:
     """Exit logic v6: trailing stop + trend reversal.
 
@@ -695,29 +749,27 @@ def evaluate_exit_v6(
 
     # Initialise trailing stop if not set (first bar after entry)
     if new_stop is None:
-        new_stop = round(entry_price * (V6_INITIAL_STOP_PCT if is_long else (2 - V6_INITIAL_STOP_PCT)), 2)
+        new_stop = round(entry_price * (initial_stop_pct if is_long else (2 - initial_stop_pct)), 2)
 
     # Update trailing stop as price moves favorably
     if is_long:
         if best_price > (highest_since_entry or entry_price):
-            trail_buffer = best_price * V6_TRAILING_PCT
+            trail_buffer = best_price * trailing_pct
             if trail_buffer > new_stop:
                 new_stop = round(trail_buffer, 2)
     else:
         if best_price < (highest_since_entry or entry_price):
-            trail_buffer = best_price * (2 - V6_TRAILING_PCT)
+            trail_buffer = best_price * (2 - trailing_pct)
             if trail_buffer < new_stop:
                 new_stop = round(trail_buffer, 2)
 
-    # 0. Max loss stop: -8% PnL → exit immediately
-    if pnl_pct <= -V6_MAX_LOSS_PCT * 100:
-        return ("EXIT_ALL", 1.0, f"Max loss -{V6_MAX_LOSS_PCT*100:.0f}% stop at ${current_price:.2f}",
+    # 0. Max loss stop: exit immediately
+    if pnl_pct <= -max_loss_pct * 100:
+        return ("EXIT_ALL", 1.0, f"Max loss -{max_loss_pct*100:.0f}% stop at ${current_price:.2f}",
                 new_stop, best_price)
 
     # 1. Combined stop: whichever is tighter triggers first
-    #    Hard stop = 7% of total capital cap (28% price move)
-    #    Dynamic trail = 15% from best price, tightens as price moves favorably
-    hard_stop_level = round(entry_price * (V6_HARD_STOP_PCT if is_long else (2 - V6_HARD_STOP_PCT)), 2)
+    hard_stop_level = round(entry_price * (hard_stop_pct if is_long else (2 - hard_stop_pct)), 2)
     if is_long:
         effective_stop = max(new_stop or 0, hard_stop_level)
         if current_price <= effective_stop:
@@ -764,9 +816,11 @@ def compute_entry_v6_long(
     trend_ma_slow_1d: float,
     trend_ma_fast_1d: float | None,
     volume_score: float,
+    trend_min: int = 0,
+    vol_min: float = 0.3,
 ) -> bool:
     """Entry signal for LONG: trend_ma_fast > trend_ma_slow (uptrend) + price above MA20."""
-    if trend_score < 1:
+    if trend_score < trend_min:
         return False
     if trend_ma_fast_1d is not None and trend_ma_fast_1d < trend_ma_slow_1d:
         return False
@@ -774,7 +828,7 @@ def compute_entry_v6_long(
         return False
     if close < trend_ma_slow_1d:
         return False
-    if volume_score < 0.3:
+    if volume_score < vol_min:
         return False
     return True
 
@@ -787,9 +841,11 @@ def compute_entry_v6_short(
     trend_ma_slow_1d: float,
     trend_ma_fast_1d: float | None,
     volume_score: float,
+    trend_max: int = -3,
+    vol_min: float = 0.3,
 ) -> bool:
     """Entry signal for SHORT: bear trend (trend_ma_fast < trend_ma_slow 1D) + price below MA20/trend_ma_slow."""
-    if trend_score > -3:
+    if trend_score > trend_max:
         return False
     if trend_ma_fast_1d is not None and trend_ma_fast_1d > trend_ma_slow_1d:
         return False
@@ -797,25 +853,70 @@ def compute_entry_v6_short(
         return False
     if close > trend_ma_slow_1d:
         return False
-    if volume_score < 0.3:
+    if volume_score < vol_min:
         return False
     return True
 
+
+_V6_NEXT_STATE = {
+    "LONG_ENTRY_1": ("LONG_ENTRY_2", "ADD_LONG_ENTRY_2"),
+    "LONG_ENTRY_2": ("LONG_ENTRY_3", "ADD_LONG_ENTRY_3"),
+    "LONG_ENTRY_3": ("LONG_ENTRY_4", "ADD_LONG_ENTRY_4"),
+    "LONG_ENTRY_4": ("LONG_ENTRY_5", "ADD_LONG_ENTRY_5"),
+    "SHORT_ENTRY_1": ("SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"),
+    "SHORT_ENTRY_2": ("SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"),
+    "SHORT_ENTRY_3": ("SHORT_ENTRY_4", "ADD_SHORT_ENTRY_4"),
+    "SHORT_ENTRY_4": ("SHORT_ENTRY_5", "ADD_SHORT_ENTRY_5"),
+}
 
 def resolve_action_v6(
     trend_score: int,
     entry_long: bool,
     entry_short: bool,
     prev_pos_state: str,
+    current_price: float | None = None,
+    entry_price: float | None = None,
+    leverage: float = 3.0,
+    deployed_margin_pct: float = 0.0,
 ) -> tuple[str, str]:
-    """State machine v6 — single position, no pyramiding."""
+    """State machine v6 — snowball pyramiding into winning positions.
+
+    - FLAT → ENTRY_1 on signal (3% margin)
+    - ENTRY_N → ENTRY_N+1: if PnL > 0, within 50% cap, max 5 entries
+    """
     if prev_pos_state == "FLAT":
         if entry_long:
             return ("LONG_ENTRY_1", "OPEN_LONG_ENTRY_1")
         if entry_short:
             return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
         return ("FLAT", "NO_TRADE")
-    return (prev_pos_state, "HOLD")
+
+    is_long = prev_pos_state.startswith("LONG")
+    entry_signal = entry_long if is_long else entry_short
+
+    if not entry_signal:
+        return (prev_pos_state, "HOLD")
+
+    # PnL check: only snowball if winning (≥1%)
+    pnl_pct = 0.0
+    if current_price and entry_price and entry_price > 0:
+        pnl_pct = ((current_price - entry_price) / entry_price * 100) if is_long \
+                  else ((entry_price - current_price) / entry_price * 100)
+    if pnl_pct <= 1.0:
+        return (prev_pos_state, "HOLD")
+
+    # Cap check: total exposure (margin × leverage) ≤ 50% of equity
+    next_margin = deployed_margin_pct + POSITION_SIZE_SNOWBALL
+    if next_margin * leverage > MAX_MARGIN_PER_COIN_PCT:
+        return (prev_pos_state, "HOLD")
+
+    # Max entries check
+    entry_num = int(prev_pos_state.split("_")[-1])
+    if entry_num >= MAX_SNOWBALL_ENTRIES:
+        return (prev_pos_state, "HOLD")
+
+    # Next state
+    return _V6_NEXT_STATE.get(prev_pos_state, (prev_pos_state, "HOLD"))
 
 
 # ---------------------------------------------------------------------------
@@ -1069,6 +1170,7 @@ def analyse_coin(
     in_event_window: bool = False,
 ) -> dict:
     ts = _now_vnt().isoformat()
+    profile = get_coin_profile(coin)
 
     # --- Trend Engine (3D) ---
     closes_3d = [c["close"] for c in candles_3d]
@@ -1133,13 +1235,15 @@ def analyse_coin(
 
     volume_score = compute_volume_score(last_volume, vol_ma20_1d)
 
-    # v6 entry signals
+    # v6 entry signals (per-coin profile)
     entry_long = compute_entry_v6_long(
         trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+        trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
     )
     entry_short = (
         compute_entry_v6_short(
             trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+            trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
         ) if coin in SHORT_ALLOWED else False
     )
 
@@ -1163,7 +1267,7 @@ def analyse_coin(
             "entry3_prob": 0.0,
             "position_state": "FLAT",
             "action": "KILL_SWITCH",
-            "leverage": LEVERAGE,
+            "leverage": profile["leverage"],
             "entry_zone": {"current_price": last_close},
             "volume_score": volume_score,
             "reaction_score": 0.0,
@@ -1214,14 +1318,21 @@ def analyse_coin(
             if not btc_bull and trend_score > 0:
                 pos_state, action = "FLAT", "NO_TRADE"
             else:
+                # Tight mode: khi >50% vốn đã dùng, chỉ vào với tín hiệu mạnh
+                tight_mode = active_count / max_positions >= POSITION_RATE_TIGHT_THRESHOLD
+                _trend_min = profile["trend_min_long_tight"] if tight_mode else profile["trend_min_long"]
                 entry_long = compute_entry_v6_long(
                     trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                    trend_min=_trend_min, vol_min=profile["vol_min"],
                 )
                 entry_short = (
                     compute_entry_v6_short(
                         trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                        trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
                     ) if coin in SHORT_ALLOWED else False
                 )
+                if tight_mode and (entry_long or entry_short):
+                    print(f"  [{coin}] TIGHT mode active ({active_count}/{max_positions} positions) — strong signal required", file=sys.stderr)
                 # Direction-specific cooldowns
                 if entry_short and _short_cooldown_until:
                     _cd_dt = datetime.fromisoformat(_short_cooldown_until)
@@ -1237,9 +1348,11 @@ def analyse_coin(
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
-                remaining_size = 1.0
+                remaining_size = POSITION_SIZE_BASE  # 3% of equity
                 trailing_stop = None
                 highest_since_entry = None
+            elif action.startswith("ADD_"):
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
 
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
@@ -1260,13 +1373,31 @@ def analyse_coin(
             ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
             recent_10d_low, recent_10d_high,
             trailing_stop, highest_since_entry,
+            max_loss_pct=profile["max_loss_pct"],
+            trailing_pct=profile["trailing_pct"],
+            initial_stop_pct=profile["initial_stop_pct"],
+            hard_stop_pct=profile["hard_stop_pct"],
         )
         trailing_stop = new_trailing_stop
         highest_since_entry = new_highest
 
         if exit_action == "HOLD":
-            pos_state, action = prev_pos_state, "HOLD"
-            next_rules = compute_next_rules(pos_state)
+            # Snowball: try to pyramid into winning position
+            snowball_state, snowball_action = resolve_action_v6(
+                trend_score, entry_long, entry_short, prev_pos_state,
+                current_price=last_close, entry_price=entry_price,
+                leverage=profile["leverage"],
+                deployed_margin_pct=remaining_size,
+            )
+            if snowball_action.startswith("ADD_"):
+                pos_state, action = snowball_state, snowball_action
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
+                next_rules = [f"Snowball: {action} (PnL={pnl_pct:+.1f}%)"]
+                print(f"  [{coin}] SNOWBALL {action} at {pnl_pct:+.1f}% PnL "
+                      f"(total margin={remaining_size:.0%})", file=sys.stderr)
+            else:
+                pos_state, action = prev_pos_state, "HOLD"
+                next_rules = compute_next_rules(pos_state)
         else:
             next_rules = [exit_reason]
             if exit_action == "EXIT_ALL":
@@ -1312,7 +1443,7 @@ def analyse_coin(
         "entry3_prob": 0.0,
         "position_state": pos_state,
         "action": action,
-        "leverage": LEVERAGE,
+        "leverage": profile["leverage"],
         "entry_zone": {"current_price": last_close},
         "volume_score": volume_score,
         "reaction_score": 0.0,
@@ -1353,7 +1484,8 @@ def _ensure_okx_setup(instrument_map: dict) -> None:
     for coin in COINS:
         inst_id = OKX_INSTRUMENTS.get(coin)
         if inst_id and inst_id in instrument_map:
-            okx_set_leverage(inst_id, LEVERAGE)
+            profile = get_coin_profile(coin)
+            okx_set_leverage(inst_id, profile["leverage"])
     _OKX_SETUP_DONE = True
 
 
@@ -1380,7 +1512,8 @@ def _exec_action_on_okx(
     try:
         if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             pos_side = "long" if action == "OPEN_LONG_ENTRY_1" else "short"
-            sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, LEVERAGE, instrument_map)
+            lev = result.get("leverage", 2.5)
+            sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, lev, instrument_map)
             side = "buy" if pos_side == "long" else "sell"
             resp = okx_place_order(inst_id, "cross", side, sz)
             exec_status.update({"status": "open", "detail": f"{pos_side} market {sz}ct", "sz": sz})
@@ -1390,7 +1523,7 @@ def _exec_action_on_okx(
                         "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
             pos_side = "long" if "LONG" in action else "short"
             add_pct = 0.10  # additional 10% of equity
-            sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, LEVERAGE, instrument_map)
+            sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, lev, instrument_map)
             side = "buy" if pos_side == "long" else "sell"
             resp = okx_place_order(inst_id, "cross", side, sz)
             exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct", "sz": sz})
