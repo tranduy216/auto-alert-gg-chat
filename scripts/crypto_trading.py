@@ -22,7 +22,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 import requests
 
@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     OKX_INSTRUMENTS, calc_contract_size, get_instrument_map,
+    OKXMetadataError,
     get_okx_position_for_coin, okx_close_position, okx_get_account,
     okx_get_positions, okx_place_order, okx_set_leverage, OKXError,
 )
@@ -1351,7 +1352,7 @@ def _ensure_okx_setup(instrument_map: dict) -> None:
         return
     for coin in COINS:
         inst_id = OKX_INSTRUMENTS.get(coin)
-        if inst_id:
+        if inst_id and inst_id in instrument_map:
             okx_set_leverage(inst_id, LEVERAGE)
     _OKX_SETUP_DONE = True
 
@@ -1359,6 +1360,7 @@ def _ensure_okx_setup(instrument_map: dict) -> None:
 def _exec_action_on_okx(
     result: dict,
     instrument_map: dict,
+    skipped_instruments: dict,
     positions: list,
     equity_usd: float,
 ) -> dict:
@@ -1368,6 +1370,10 @@ def _exec_action_on_okx(
     inst_id = OKX_INSTRUMENTS.get(coin)
     if not inst_id:
         return {"coin": coin, "status": "skip", "detail": "no instrument"}
+    if inst_id in skipped_instruments:
+        detail = f"cannot trade {inst_id}: {skipped_instruments[inst_id]}"
+        print(f"  [OKX] {coin} SKIP: {detail}", file=sys.stderr)
+        return {"coin": coin, "action": action, "status": "skip", "detail": detail}
 
     exec_status = {"coin": coin, "action": action, "status": "none", "detail": ""}
 
@@ -1425,6 +1431,10 @@ def _exec_action_on_okx(
                     exec_status["detail"] = f"{kind} reduce {pos_side} {sz}ct"
                     print(f"  [OKX] {coin} {kind} {pos_side} {sz}ct")
 
+    except OKXMetadataError as exc:
+        exec_status["status"] = "skip"
+        exec_status["detail"] = str(exc)
+        print(f"  [OKX] {coin} SKIP: {exc}", file=sys.stderr)
     except OKXError as exc:
         exec_status["status"] = "error"
         exec_status["detail"] = str(exc)
@@ -1433,7 +1443,7 @@ def _exec_action_on_okx(
     return exec_status
 
 
-def execute_trading_actions(results: list, instrument_map: dict) -> list:
+def execute_trading_actions(results: list, instrument_map: dict, skipped_instruments: dict) -> list:
     """Execute all non-trivial actions on OKX. Returns execution log."""
     try:
         account = okx_get_account()
@@ -1449,7 +1459,7 @@ def execute_trading_actions(results: list, instrument_map: dict) -> list:
     exec_log = []
     for r in results:
         if r["action"] not in ("NO_TRADE", "HOLD"):
-            log = _exec_action_on_okx(r, instrument_map, positions, equity_usd)
+            log = _exec_action_on_okx(r, instrument_map, skipped_instruments, positions, equity_usd)
             exec_log.append(log)
     return exec_log
 
@@ -1539,8 +1549,23 @@ def _format_exec_for_notif(exec_log: list) -> str:
         elif status == "error":
             lines.append(f"## ERROR {coin}: {detail}")
         elif status == "skip":
-            pass
+            lines.append(f"## SKIP {coin}: {detail}")
     return "\n".join(lines)
+
+
+def _build_metadata_alerts(skipped_instruments: dict) -> Dict[str, str]:
+    alerts: Dict[str, str] = {}
+    tracked_instruments = {
+        inst_id: coin for coin, inst_id in OKX_INSTRUMENTS.items() if coin in COINS
+    }
+    for inst_id, reason in skipped_instruments.items():
+        coin = tracked_instruments.get(inst_id)
+        if not coin:
+            continue
+        alert = f"## SKIP {coin}: cannot trade {inst_id} because {reason}"
+        print(f"[crypto_trading] {alert}", file=sys.stderr)
+        alerts[coin] = alert
+    return alerts
 
 
 def build_action_message(
@@ -1598,7 +1623,8 @@ def main() -> None:
     print(f"[crypto_trading] OKX mode: {'EXECUTION' if okx_enabled else 'SIGNAL-ONLY'}")
 
     # Instrument map for contract size calculations
-    instrument_map = get_instrument_map() if okx_enabled else {}
+    instrument_map, skipped_instruments = get_instrument_map() if okx_enabled else ({}, {})
+    metadata_alerts = _build_metadata_alerts(skipped_instruments) if okx_enabled else {}
 
     # Kill-switch check (BTC default 1d)
     print("[crypto_trading] Fetching BTC data for kill-switch\u2026")
@@ -1673,14 +1699,14 @@ def main() -> None:
     scheduled_hours = {5, 10, 15, 21}
     is_scheduled = now_vnt.hour in scheduled_hours
 
-    if all_wait and not is_scheduled:
+    if all_wait and not is_scheduled and not metadata_alerts:
         print("[crypto_trading] No action needed \u2013 done.")
         return
 
     # Execute on OKX
     exec_log: list = []
     if okx_enabled:
-        exec_log = execute_trading_actions(results, instrument_map)
+        exec_log = execute_trading_actions(results, instrument_map, skipped_instruments)
 
     vnt_hour = now_vnt.hour + now_vnt.minute / 60.0
     is_silent = vnt_hour >= 22.5 or vnt_hour < 5.5
@@ -1691,8 +1717,14 @@ def main() -> None:
     else:
         message = build_action_message(results, exec_log, kill_switch, now_vnt)
 
+    exec_skip_coins = {e["coin"] for e in exec_log if e.get("status") == "skip"}
+    extra_metadata_alerts = [text for coin, text in metadata_alerts.items() if coin not in exec_skip_coins]
+    if extra_metadata_alerts:
+        message = f"{message}\n\n### Instrument Warnings\n" + "\n".join(extra_metadata_alerts)
+
     has_error = any(e.get("status") == "error" for e in exec_log)
-    force_send = has_error  # errors bypass silent hours
+    has_skip = any(e.get("status") == "skip" for e in exec_log) or bool(extra_metadata_alerts)
+    force_send = has_error or has_skip  # safety alerts bypass silent hours
 
     if is_silent and not force_send:
         if not all_wait:
@@ -1702,7 +1734,7 @@ def main() -> None:
             print("[crypto_trading] Silent hours \u2013 skipped.")
     else:
         print("[crypto_trading] Sending to Discord\u2026")
-        send_message(webhook_url, message)
+        send_message(webhook_url, message, force=force_send)
 
     # Flush queue at 6AM VNT (only once, within first 30 min)
     if 6.0 <= vnt_hour < 6.5:
