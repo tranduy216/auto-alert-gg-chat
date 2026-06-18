@@ -21,7 +21,7 @@ async function trigger(pat, webhook) {
     body: JSON.stringify({ event_type: 'trigger-trading' }),
   })
   if (resp.status === 204) {
-    await sendDiscord(webhook, '✅ Trading workflow triggered')
+    console.log('✅ Trading workflow triggered')
   } else {
     const text = await resp.text()
     await sendDiscord(webhook, `⚠️ Trigger fail: HTTP ${resp.status}\n\`\`\`${text.slice(0, 200)}\`\`\``)
