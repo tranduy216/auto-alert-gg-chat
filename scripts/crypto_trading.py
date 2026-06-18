@@ -85,7 +85,7 @@ POSITION_SIZE_BASE = 0.034      # base entry: 3.4%
 POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4%
 MAX_SNOWBALL_ENTRIES = 5        # 5 entries × 3.4% = 17% × 3x = 51%
 MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3% × 5 = 15% × 3x = 45%)
-MAX_MARGIN_PER_COIN_PCT = 0.45  # max total position value (incl leverage) per coin
+MAX_MARGIN_PER_COIN_PCT = 0.51  # 5 × 3.4% × 3x = 51% max exposure per coin
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
