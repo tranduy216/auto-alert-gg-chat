@@ -9,6 +9,8 @@ import requests
 
 from .retry_utils import call_with_retry
 
+DEEPSEEK_MODEL = "deepseek-chat"
+DEEPSEEK_BASE = "https://api.deepseek.com"
 OPENROUTER_MODEL = "openai/gpt-oss-120b"
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -67,16 +69,67 @@ def _call_gemini(
         raise AIError(str(exc)) from exc
 
 
+def _call_deepseek(
+    system_prompt: str,
+    user_prompt: str,
+    response_format: str | None = None,
+) -> str:
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise AIError("DEEPSEEK_API_KEY is not set")
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    body: dict = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+    }
+    if response_format:
+        body["response_format"] = {"type": response_format}
+
+    def _do_request() -> str:
+        resp = requests.post(
+            f"{DEEPSEEK_BASE}/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        if not text:
+            raise AIError("Empty response from DeepSeek")
+        return text
+
+    try:
+        return call_with_retry(
+            _do_request,
+            resource_name="DeepSeek",
+            retry_exceptions=(requests.RequestException, AIError),
+        )
+    except Exception as exc:
+        raise AIError(str(exc)) from exc
+
+
 def _call_ai(
     system_prompt: str,
     user_prompt: str,
     response_format: str | None = None,
 ) -> str:
     try:
-        return _call_openrouter(system_prompt, user_prompt, response_format)
+        return _call_deepseek(system_prompt, user_prompt, response_format)
     except AIError as exc:
-        print(f"[gemini_utils] OpenRouter failed: {exc}. Falling back to Gemini.", file=sys.stderr)
-        return _call_gemini(system_prompt, user_prompt, response_format)
+        print(f"[gemini_utils] DeepSeek failed: {exc}. Falling back to OpenRouter.", file=sys.stderr)
+        try:
+            return _call_openrouter(system_prompt, user_prompt, response_format)
+        except AIError as exc2:
+            print(f"[gemini_utils] OpenRouter failed: {exc2}. Falling back to Gemini.", file=sys.stderr)
+            return _call_gemini(system_prompt, user_prompt, response_format)
 
 
 def _call_openrouter(
