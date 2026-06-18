@@ -187,15 +187,25 @@ def okx_get_candles(inst_id: str, bar: str = "1D", limit: int = 30) -> Optional[
         return None
 
 
+def _safe_float(value: Any, default: float = 1.0) -> float:
+    """Safely convert a value to float, returning default on None, '', or errors."""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def get_instrument_map() -> Dict[str, dict]:
     """Return {instId: {ctVal, ctMult, lotSz}} for all SWAP instruments."""
     instruments = okx_get_instruments("SWAP")
     m: Dict[str, dict] = {}
     for inst in instruments:
         m[inst["instId"]] = {
-            "ctVal": float(inst.get("ctVal", 1)),
-            "ctMult": float(inst.get("ctMult", 1)),
-            "lotSz": float(inst.get("lotSz", 1)),
+            "ctVal": _safe_float(inst.get("ctVal"), 1.0),
+            "ctMult": _safe_float(inst.get("ctMult"), 1.0),
+            "lotSz": _safe_float(inst.get("lotSz"), 1.0),
         }
     return m
 
