@@ -1317,45 +1317,46 @@ def analyse_coin(
             entry_price = prev.get("entry_price")
             remaining_size = prev.get("remaining_size", 1.0)
         else:
-            # BTC regime filter: in bear, only enter LONG on strong trend (≥2)
-            if _bear_mode and trend_score < 2:
-                pos_state, action = "FLAT", "NO_TRADE"
-            else:
-                # Tight mode: khi >50% vốn đã dùng, chỉ vào với tín hiệu mạnh
-                tight_mode = active_count / max_positions >= POSITION_RATE_TIGHT_THRESHOLD
-                _trend_min = profile["trend_min_long_tight"] if tight_mode else profile["trend_min_long"]
-                entry_long = compute_entry_v6_long(
+            # Tight mode: khi >50% vốn đã dùng, chỉ vào với tín hiệu mạnh
+            tight_mode = active_count / max_positions >= POSITION_RATE_TIGHT_THRESHOLD
+            _trend_min = profile["trend_min_long_tight"] if tight_mode else profile["trend_min_long"]
+            entry_long = compute_entry_v6_long(
+                trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                trend_min=_trend_min, vol_min=profile["vol_min"],
+            )
+            entry_short = (
+                compute_entry_v6_short(
                     trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
-                    trend_min=_trend_min, vol_min=profile["vol_min"],
-                )
-                entry_short = (
-                    compute_entry_v6_short(
-                        trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
-                        trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
-                    ) if coin in SHORT_ALLOWED else False
-                )
-                if tight_mode and (entry_long or entry_short):
-                    print(f"  [{coin}] TIGHT mode active ({active_count}/{max_positions} positions) — strong signal required", file=sys.stderr)
-                # Direction-specific cooldowns
-                if entry_short and _short_cooldown_until:
-                    _cd_dt = datetime.fromisoformat(_short_cooldown_until)
-                    if _cd_dt > _now_vnt():
-                        entry_short = False
-                if entry_long and _long_cooldown_until:
-                    _cd_dt = datetime.fromisoformat(_long_cooldown_until)
-                    if _cd_dt > _now_vnt():
-                        entry_long = False
-                pos_state, action = resolve_action_v6(
-                    trend_score, entry_long, entry_short, prev_pos_state,
-                )
+                    trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+                ) if coin in SHORT_ALLOWED else False
+            )
+            if tight_mode and (entry_long or entry_short):
+                print(f"  [{coin}] TIGHT mode active ({active_count}/{max_positions} positions) — strong signal required", file=sys.stderr)
+            # Direction-specific cooldowns
+            if entry_short and _short_cooldown_until:
+                _cd_dt = datetime.fromisoformat(_short_cooldown_until)
+                if _cd_dt > _now_vnt():
+                    entry_short = False
+            if entry_long and _long_cooldown_until:
+                _cd_dt = datetime.fromisoformat(_long_cooldown_until)
+                if _cd_dt > _now_vnt():
+                    entry_long = False
+            pos_state, action = resolve_action_v6(
+                trend_score, entry_long, entry_short, prev_pos_state,
+            )
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
-                remaining_size = POSITION_SIZE_BASE * (0.5 if _bear_mode else 1.0)
+                # Directional sizing: long nhỏ khi bear, short nhỏ khi bull
+                _is_long_action = "LONG" in action
+                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_action else (1.0 if _bear_mode else 0.5)
+                remaining_size = POSITION_SIZE_BASE * _size_mult
                 trailing_stop = None
                 highest_since_entry = None
             elif action.startswith("ADD_"):
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * (0.5 if _bear_mode else 1.0)
+                _is_long_add = "LONG" in action
+                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_add else (1.0 if _bear_mode else 0.5)
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * _size_mult
 
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
@@ -1394,7 +1395,9 @@ def analyse_coin(
             )
             if snowball_action.startswith("ADD_"):
                 pos_state, action = snowball_state, snowball_action
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * (0.5 if _bear_mode else 1.0)
+                _is_long_add = "LONG" in snowball_action
+                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_add else (1.0 if _bear_mode else 0.5)
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * _size_mult
                 next_rules = [f"Snowball: {action} (PnL={pnl_pct:+.1f}%)"]
                 print(f"  [{coin}] SNOWBALL {action} at {pnl_pct:+.1f}% PnL "
                       f"(total margin={remaining_size:.0%})", file=sys.stderr)
