@@ -1,0 +1,6 @@
+name = "auto-alert-gg-trigger"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-01-01"
+
+[triggers]
+crons = ["*/30 * * * *"]
