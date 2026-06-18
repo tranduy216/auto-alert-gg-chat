@@ -1172,6 +1172,9 @@ def analyse_coin(
     ts = _now_vnt().isoformat()
     profile = get_coin_profile(coin)
 
+    # BTC regime filter: bear → smaller positions, stricter entries
+    _bear_mode = not btc_bull
+
     # --- Trend Engine (3D) ---
     closes_3d = [c["close"] for c in candles_3d]
 
@@ -1314,8 +1317,8 @@ def analyse_coin(
             entry_price = prev.get("entry_price")
             remaining_size = prev.get("remaining_size", 1.0)
         else:
-            # BTC regime filter: in bear, only SHORT (no LONG)
-            if not btc_bull and trend_score > 0:
+            # BTC regime filter: in bear, only enter LONG on strong trend (≥2)
+            if _bear_mode and trend_score < 2:
                 pos_state, action = "FLAT", "NO_TRADE"
             else:
                 # Tight mode: khi >50% vốn đã dùng, chỉ vào với tín hiệu mạnh
@@ -1348,11 +1351,11 @@ def analyse_coin(
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
-                remaining_size = POSITION_SIZE_BASE  # 3% of equity
+                remaining_size = POSITION_SIZE_BASE * (0.5 if _bear_mode else 1.0)
                 trailing_stop = None
                 highest_since_entry = None
             elif action.startswith("ADD_"):
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * (0.5 if _bear_mode else 1.0)
 
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
@@ -1391,7 +1394,7 @@ def analyse_coin(
             )
             if snowball_action.startswith("ADD_"):
                 pos_state, action = snowball_state, snowball_action
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * (0.5 if _bear_mode else 1.0)
                 next_rules = [f"Snowball: {action} (PnL={pnl_pct:+.1f}%)"]
                 print(f"  [{coin}] SNOWBALL {action} at {pnl_pct:+.1f}% PnL "
                       f"(total margin={remaining_size:.0%})", file=sys.stderr)
