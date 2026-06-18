@@ -9,7 +9,7 @@ import requests
 
 from .retry_utils import call_with_retry
 
-DEEPSEEK_MODEL = "deepseek-v4-flash
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 DEEPSEEK_BASE = "https://api.deepseek.com"
 OPENROUTER_MODEL = "openai/gpt-oss-120b"
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
