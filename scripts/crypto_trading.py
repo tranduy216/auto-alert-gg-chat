@@ -81,8 +81,9 @@ POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
 
 # Position sizing decay per position tier
 POSITION_SIZES = [0.10, 0.10, 0.10]  # pos 1→3: 10% each
-POSITION_SIZE_BASE = 0.03       # base entry: 3% of equity
-POSITION_SIZE_SNOWBALL = 0.03   # snowball add: 3% of equity
+POSITION_SIZE_BASE = 0.034      # base entry: 3.4%
+POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4%
+MAX_SNOWBALL_ENTRIES = 5        # 5 entries × 3.4% = 17% × 3x = 51%
 MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3% × 5 = 15% × 3x = 45%)
 MAX_MARGIN_PER_COIN_PCT = 0.45  # max total position value (incl leverage) per coin
 
@@ -1347,16 +1348,11 @@ def analyse_coin(
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
-                # Directional sizing: long nhỏ khi bear, short nhỏ khi bull
-                _is_long_action = "LONG" in action
-                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_action else (1.0 if _bear_mode else 0.5)
-                remaining_size = POSITION_SIZE_BASE * _size_mult
+                remaining_size = POSITION_SIZE_BASE
                 trailing_stop = None
                 highest_since_entry = None
             elif action.startswith("ADD_"):
-                _is_long_add = "LONG" in action
-                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_add else (1.0 if _bear_mode else 0.5)
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * _size_mult
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
 
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
@@ -1395,9 +1391,7 @@ def analyse_coin(
             )
             if snowball_action.startswith("ADD_"):
                 pos_state, action = snowball_state, snowball_action
-                _is_long_add = "LONG" in snowball_action
-                _size_mult = (0.5 if _bear_mode else 1.0) if _is_long_add else (1.0 if _bear_mode else 0.5)
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL * _size_mult
+                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
                 next_rules = [f"Snowball: {action} (PnL={pnl_pct:+.1f}%)"]
                 print(f"  [{coin}] SNOWBALL {action} at {pnl_pct:+.1f}% PnL "
                       f"(total margin={remaining_size:.0%})", file=sys.stderr)
