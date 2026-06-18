@@ -34,6 +34,7 @@ from utils.okx_utils import (
     OKXMetadataError,
     get_okx_position_for_coin, okx_close_position, okx_get_account,
     okx_get_positions, okx_place_order, okx_set_leverage, OKXError,
+    okx_get_algo_orders, okx_cancel_algo,
 )
 from utils.retry_utils import call_with_retry
 from utils.firebase_utils import (
@@ -1508,16 +1509,32 @@ def _exec_action_on_okx(
         return {"coin": coin, "action": action, "status": "skip", "detail": detail}
 
     exec_status = {"coin": coin, "action": action, "status": "none", "detail": ""}
+    lev = result.get("leverage", 2.5)
+    prof = get_coin_profile(coin)
+
+    # Helper: cancel old stop + place new stop at current price
+    def _update_stoploss(inst_id, pos_side, ref_price, lev, prof):
+        try:
+            old_stops = okx_get_algo_orders(inst_id, "conditional")
+            old_ids = [o["algoId"] for o in old_stops if o.get("algoId")]
+            if old_ids:
+                okx_cancel_algo(inst_id, old_ids)
+                print(f"  [OKX] {coin} cancelled {len(old_ids)} old stop(s)", file=sys.stderr)
+        except Exception:
+            pass
+        if ref_price and ref_price > 0 and prof["max_loss_pct"] > 0:
+            factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
+            sl = f"{ref_price * factor:.2f}"
+            okx_place_order(inst_id, "cross", "buy" if pos_side == "long" else "sell", "1",
+                            sl_trigger_px=sl, pos_side=pos_side)
+            print(f"  [OKX] {coin} new stoploss @ ${sl}", file=sys.stderr)
 
     try:
         if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             pos_side = "long" if action == "OPEN_LONG_ENTRY_1" else "short"
-            lev = result.get("leverage", 2.5)
             sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, lev, instrument_map)
             side = "buy" if pos_side == "long" else "sell"
-            # Hard stoploss on OKX: exit at -max_loss_pct immediately
             entry_px = result.get("entry_zone", {}).get("current_price")
-            prof = get_coin_profile(coin)
             sl_px = None
             if entry_px and entry_px > 0 and prof["max_loss_pct"] > 0:
                 sl_factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
@@ -1529,12 +1546,14 @@ def _exec_action_on_okx(
         elif action in ("ADD_LONG_ENTRY_2", "ADD_SHORT_ENTRY_2",
                         "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
             pos_side = "long" if "LONG" in action else "short"
-            add_pct = 0.10  # additional 10% of equity
+            add_pct = 0.10
             sz, _, pos_val = calc_contract_size(coin, equity_usd, add_pct, lev, instrument_map)
             side = "buy" if pos_side == "long" else "sell"
             resp = okx_place_order(inst_id, "cross", side, sz)
             exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct", "sz": sz})
             print(f"  [OKX] {coin} ADD {pos_side} {sz}ct market")
+            # Update stoploss to current price after ADD
+            _update_stoploss(inst_id, pos_side, result.get("entry_zone", {}).get("current_price"), lev, prof)
 
         elif action in ("EXIT_LONG", "EXIT_SHORT", "REDUCE_LONG", "REDUCE_SHORT"):
             pos_side = "long" if "LONG" in action else "short"
@@ -1543,6 +1562,14 @@ def _exec_action_on_okx(
                 exec_status["status"] = "exit"
                 exec_status["detail"] = f"close {pos_side}"
                 print(f"  [OKX] {coin} EXIT {pos_side}")
+                # Cancel remaining stoploss
+                try:
+                    old_stops = okx_get_algo_orders(inst_id, "conditional")
+                    old_ids = [o["algoId"] for o in old_stops if o.get("algoId")]
+                    if old_ids:
+                        okx_cancel_algo(inst_id, old_ids)
+                except Exception:
+                    pass
             else:
                 # REDUCE — sell 50% via market
                 pos = get_okx_position_for_coin(positions, coin)

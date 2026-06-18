@@ -168,6 +168,20 @@ def okx_cancel_order(inst_id: str, ord_id: str) -> dict:
     })
 
 
+def okx_get_algo_orders(inst_id: str, ord_type: str = "conditional") -> List[dict]:
+    """Get algo/stop orders. ord_type: conditional, move_order_stop, etc."""
+    data = _okx_request("GET", f"/api/v5/trade/orders-algo-pending?instId={inst_id}&ordType={ord_type}")
+    return data.get("data", [])
+
+
+def okx_cancel_algo(inst_id: str, algo_ids: List[str]) -> dict:
+    """Cancel algo/stop orders."""
+    return _okx_request("POST", "/api/v5/trade/cancel-algos", {
+        "instId": inst_id,
+        "algoIds": algo_ids,
+    })
+
+
 def okx_get_instruments(inst_type: str = "SWAP") -> List[dict]:
     """Get instrument details (ctVal, lot size, etc.)."""
     data = _okx_request("GET", f"/api/v5/public/instruments?instType={inst_type}")
