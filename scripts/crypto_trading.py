@@ -22,7 +22,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 import requests
 
@@ -1553,8 +1553,8 @@ def _format_exec_for_notif(exec_log: list) -> str:
     return "\n".join(lines)
 
 
-def _build_metadata_alerts(skipped_instruments: dict) -> dict[str, str]:
-    alerts: dict[str, str] = {}
+def _build_metadata_alerts(skipped_instruments: dict) -> Dict[str, str]:
+    alerts: Dict[str, str] = {}
     tracked_instruments = {
         inst_id: coin for coin, inst_id in OKX_INSTRUMENTS.items() if coin in COINS
     }
