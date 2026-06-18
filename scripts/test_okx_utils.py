@@ -14,6 +14,7 @@ class OkxUtilsTest(unittest.TestCase):
     def test_get_instrument_map_skips_missing_required_metadata(self, mock_get_instruments):
         mock_get_instruments.return_value = [
             {"instId": "ETH-USDT-SWAP", "ctVal": "0.01", "ctMult": "", "lotSz": "1"},
+            {"instId": "BNB-USDT-SWAP", "ctVal": "0.1", "ctMult": "2", "lotSz": "1"},
             {"instId": "SOL-USDT-SWAP", "ctVal": "", "ctMult": "1", "lotSz": "1"},
             {"instId": "TRX-USDT-SWAP", "ctVal": "1", "ctMult": "1", "lotSz": ""},
         ]
@@ -22,6 +23,7 @@ class OkxUtilsTest(unittest.TestCase):
 
         self.assertIn("ETH-USDT-SWAP", instrument_map)
         self.assertEqual(instrument_map["ETH-USDT-SWAP"]["ctMult"], 1.0)
+        self.assertEqual(instrument_map["BNB-USDT-SWAP"]["ctMult"], 2.0)
         self.assertEqual(skipped["SOL-USDT-SWAP"], "missing ctVal")
         self.assertEqual(skipped["TRX-USDT-SWAP"], "missing lotSz")
 

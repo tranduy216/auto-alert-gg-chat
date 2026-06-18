@@ -191,7 +191,7 @@ def okx_get_candles(inst_id: str, bar: str = "1D", limit: int = 30) -> Optional[
         return None
 
 
-def _parse_required_positive_float(inst: dict, field: str, inst_id: str) -> float:
+def _parse_required_positive_float(inst: dict, field: str) -> float:
     raw_value = inst.get(field)
     if raw_value in (None, ""):
         raise OKXMetadataError(f"missing {field}")
@@ -200,7 +200,7 @@ def _parse_required_positive_float(inst: dict, field: str, inst_id: str) -> floa
     except (TypeError, ValueError) as exc:
         raise OKXMetadataError(f"invalid {field}={raw_value!r}") from exc
     if value <= 0:
-        raise OKXMetadataError(f"invalid {field}={raw_value!r}")
+        raise OKXMetadataError(f"invalid {field}={value}")
     return value
 
 
@@ -222,9 +222,9 @@ def get_instrument_map() -> Tuple[Dict[str, dict], Dict[str, str]]:
             continue
         try:
             m[inst_id] = {
-                "ctVal": _parse_required_positive_float(inst, "ctVal", inst_id),
+                "ctVal": _parse_required_positive_float(inst, "ctVal"),
                 "ctMult": _parse_optional_float(inst, "ctMult", 1.0),
-                "lotSz": _parse_required_positive_float(inst, "lotSz", inst_id),
+                "lotSz": _parse_required_positive_float(inst, "lotSz"),
             }
         except (OKXMetadataError, ValueError) as exc:
             skipped[inst_id] = str(exc)
