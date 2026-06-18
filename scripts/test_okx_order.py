@@ -26,10 +26,13 @@ lev_r = okx("POST", "/api/v5/account/set-leverage", {
 })
 print(f"[test] Leverage: code={lev_r.get('code')}")
 
-# === STEP 1: SHORT 4 ct (~2 USD at $5) with stoploss ===
-# SHORT stoploss: entry × (1 + 6%/1x) = entry × 1.06
-entry_px = 5.0
+# === STEP 1: Get current price, then SHORT with stoploss ===
+ticker = okx("GET", "/api/v5/market/ticker?instId=LINK-USDT")
+tdata = ticker.get("data", [{}])
+entry_px = float(tdata[0].get("last", 5.0))
 sl_px = f"{entry_px * 1.06:.2f}"
+print(f"[test] Current price: ${entry_px}, stoploss @ ${sl_px}")
+
 print(f"[test] SHORT 4 ct @ market, stoploss @ ${sl_px}...")
 open_r = okx("POST", "/api/v5/trade/order", {
     "instId": "LINK-USDT-SWAP",
@@ -81,7 +84,7 @@ time.sleep(3)
 
 # === STEP 4: Amend stoploss to current price × 1.06 ===
 if algo_id:
-    # Get current market price
+    # Get current market price for amended stop
     ticker = okx("GET", "/api/v5/market/ticker?instId=LINK-USDT")
     tdata = ticker.get("data", [{}])
     cur_px = float(tdata[0].get("last", entry_px))
