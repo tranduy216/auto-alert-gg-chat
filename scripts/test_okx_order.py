@@ -23,7 +23,6 @@ open_r = okx("POST", "/api/v5/trade/order", {
     "instId": "LINK-USDT-SWAP",
     "tdMode": "cross",
     "side": "sell",
-    "posSide": "short",
     "ordType": "market",
     "sz": "1",
 })
@@ -39,12 +38,14 @@ time.sleep(3)  # wait for fill
 print("[test] Waiting 10s...")
 time.sleep(10)
 
-# === STEP 3: Close position ===
-print("[test] Closing SHORT (buy back 1 ct)...")
-close_r = okx("POST", "/api/v5/trade/close-position", {
+# === STEP 3: Close position (buy back) ===
+print("[test] Closing SHORT (buy back 1 ct @ market)...")
+close_r = okx("POST", "/api/v5/trade/order", {
     "instId": "LINK-USDT-SWAP",
-    "mgnMode": "cross",
-    "posSide": "short",
+    "tdMode": "cross",
+    "side": "buy",
+    "ordType": "market",
+    "sz": "1",
 })
 print(f"[test] Close result: {json.dumps(close_r)}")
 
