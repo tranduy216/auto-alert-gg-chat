@@ -74,17 +74,17 @@ CANDLE_COUNT = 30
 BTC_CANDLE_COUNT = 220  # enough for MA200 + buffer
 
 # ── Risk Management ─────────────────────────────────────────────────
-MAX_CONCURRENT_POSITIONS = 4     # max positions open at the same time
+MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
 CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position (2.5x → 25% exposure)
 CAPITAL_USAGE_HIGH_WATERMARK = 0.75  # total position capital ≤ 75% of total capital
 POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
 
 # Position sizing decay per position tier
 POSITION_SIZES = [0.10, 0.10, 0.10]  # pos 1→3: 10% each
-POSITION_SIZE_BASE = 0.034      # base entry: 3.4% of equity
-POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4% of equity
-MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3.4% × 5 = 17% × 3x = 51%)
-MAX_MARGIN_PER_COIN_PCT = 0.51  # max total position value (incl leverage) per coin
+POSITION_SIZE_BASE = 0.03       # base entry: 3% of equity
+POSITION_SIZE_SNOWBALL = 0.03   # snowball add: 3% of equity
+MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3% × 5 = 15% × 3x = 45%)
+MAX_MARGIN_PER_COIN_PCT = 0.45  # max total position value (incl leverage) per coin
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
