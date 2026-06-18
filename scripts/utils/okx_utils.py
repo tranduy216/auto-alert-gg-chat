@@ -187,6 +187,24 @@ def okx_cancel_algo(inst_id: str, algo_ids: List[str]) -> dict:
     })
 
 
+def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:
+    """Amend an existing algo/stop order trigger price."""
+    return _okx_request("POST", "/api/v5/trade/amend-algo-order", {
+        "instId": inst_id,
+        "algoId": algo_id,
+        "newSlTriggerPx": new_sl_trigger_px,
+    })
+
+
+def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:
+    """Amend an existing algo/stop order trigger price."""
+    return _okx_request("POST", "/api/v5/trade/amend-algo-order", {
+        "instId": inst_id,
+        "algoId": algo_id,
+        "newSlTriggerPx": new_sl_trigger_px,
+    })
+
+
 def okx_get_instruments(inst_type: str = "SWAP") -> List[dict]:
     """Get instrument details (ctVal, lot size, etc.)."""
     data = _okx_request("GET", f"/api/v5/public/instruments?instType={inst_type}")

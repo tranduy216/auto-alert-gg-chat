@@ -34,6 +34,7 @@ from utils.okx_utils import (
     OKXMetadataError,
     get_okx_position_for_coin, okx_close_position, okx_get_account,
     okx_get_positions, okx_place_order, okx_set_leverage, OKXError,
+    okx_get_algo_orders, okx_amend_algo,
 )
 from utils.retry_utils import call_with_retry
 from utils.firebase_utils import (
@@ -1533,6 +1534,18 @@ def _exec_action_on_okx(
             resp = okx_place_order(inst_id, "cross", side, sz)
             exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct", "sz": sz})
             print(f"  [OKX] {coin} ADD {pos_side} {sz}ct market")
+            # Amend stoploss to current price (protect avg entry)
+            try:
+                cur_px = result.get("entry_zone", {}).get("current_price")
+                if cur_px and cur_px > 0:
+                    new_sl = f"{cur_px * 0.98:.2f}" if pos_side == "long" else f"{cur_px * 1.02:.2f}"
+                    algos = okx_get_algo_orders(inst_id, "conditional")
+                    algo_id = algos[0]["algoId"] if algos else None
+                    if algo_id:
+                        okx_amend_algo(inst_id, algo_id, new_sl)
+                        print(f"  [OKX] {coin} stoploss amended to ${new_sl}", file=sys.stderr)
+            except Exception as e:
+                print(f"  [OKX] {coin} amend stoploss failed: {e}", file=sys.stderr)
 
         elif action in ("EXIT_LONG", "EXIT_SHORT", "REDUCE_LONG", "REDUCE_SHORT"):
             pos_side = "long" if "LONG" in action else "short"
