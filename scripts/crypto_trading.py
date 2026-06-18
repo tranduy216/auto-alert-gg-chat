@@ -1534,16 +1534,21 @@ def _exec_action_on_okx(
             resp = okx_place_order(inst_id, "cross", side, sz)
             exec_status.update({"status": "add", "detail": f"add {pos_side} {sz}ct", "sz": sz})
             print(f"  [OKX] {coin} ADD {pos_side} {sz}ct market")
-            # Amend stoploss to current price (protect avg entry)
+            # Amend stoploss based on avg entry price (6% max loss rule)
             try:
-                cur_px = result.get("entry_zone", {}).get("current_price")
-                if cur_px and cur_px > 0:
-                    new_sl = f"{cur_px * 0.98:.2f}" if pos_side == "long" else f"{cur_px * 1.02:.2f}"
-                    algos = okx_get_algo_orders(inst_id, "conditional")
-                    algo_id = algos[0]["algoId"] if algos else None
-                    if algo_id:
-                        okx_amend_algo(inst_id, algo_id, new_sl)
-                        print(f"  [OKX] {coin} stoploss amended to ${new_sl}", file=sys.stderr)
+                time.sleep(1)  # wait for position update
+                positions = okx_get_positions("SWAP")
+                pos = next((p for p in positions if p.get("instId") == inst_id), None)
+                if pos:
+                    avg_px = float(pos.get("avgPx", 0))
+                    if avg_px > 0:
+                        factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
+                        new_sl = f"{avg_px * factor:.2f}"
+                        algos = okx_get_algo_orders(inst_id, "conditional")
+                        algo_id = algos[0]["algoId"] if algos else None
+                        if algo_id:
+                            okx_amend_algo(inst_id, algo_id, new_sl)
+                            print(f"  [OKX] {coin} stoploss amended to ${new_sl} (avgPx=${avg_px:.2f})", file=sys.stderr)
             except Exception as e:
                 print(f"  [OKX] {coin} amend stoploss failed: {e}", file=sys.stderr)
 
