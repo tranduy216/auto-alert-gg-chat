@@ -114,6 +114,7 @@ def okx_place_order(
     sz: str,
     px: Optional[str] = None,
     pos_side: Optional[str] = None,
+    sl_trigger_px: Optional[str] = None,
 ) -> dict:
     """Place an order.
     
@@ -122,6 +123,7 @@ def okx_place_order(
     - sz: size in contracts
     - px: limit price (None = market order)
     - pos_side: 'long' or 'short' (required for SWAP reduce)
+    - sl_trigger_px: stop-loss trigger price (e.g. entry * 0.98 for LONG)
     """
     body: dict = {
         "instId": inst_id,
@@ -134,6 +136,9 @@ def okx_place_order(
         body["px"] = px
     if pos_side:
         body["posSide"] = pos_side
+    if sl_trigger_px:
+        body["slTriggerPx"] = sl_trigger_px
+        body["slOrdPx"] = "-1"  # market order when triggered
     return _okx_request("POST", "/api/v5/trade/order", body)
 
 

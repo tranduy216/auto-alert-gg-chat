@@ -1515,9 +1515,16 @@ def _exec_action_on_okx(
             lev = result.get("leverage", 2.5)
             sz, _, pos_val = calc_contract_size(coin, equity_usd, CAPITAL_PER_POSITION, lev, instrument_map)
             side = "buy" if pos_side == "long" else "sell"
-            resp = okx_place_order(inst_id, "cross", side, sz)
-            exec_status.update({"status": "open", "detail": f"{pos_side} market {sz}ct", "sz": sz})
-            print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct market")
+            # Hard stoploss on OKX: exit at -max_loss_pct immediately
+            entry_px = result.get("entry_zone", {}).get("current_price")
+            prof = get_coin_profile(coin)
+            sl_px = None
+            if entry_px and entry_px > 0 and prof["max_loss_pct"] > 0:
+                sl_factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
+                sl_px = f"{entry_px * sl_factor:.2f}"
+            resp = okx_place_order(inst_id, "cross", side, sz, sl_trigger_px=sl_px)
+            exec_status.update({"status": "open", "detail": f"{pos_side} market {sz}ct SL@{sl_px}" if sl_px else f"{pos_side} market {sz}ct"})
+            print(f"  [OKX] {coin} OPEN {pos_side} {sz}ct{' SL@'+sl_px if sl_px else ''}")
 
         elif action in ("ADD_LONG_ENTRY_2", "ADD_SHORT_ENTRY_2",
                         "ADD_LONG_ENTRY_3", "ADD_SHORT_ENTRY_3"):
