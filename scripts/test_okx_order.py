@@ -1,4 +1,4 @@
-"""Test: OPEN LONG LINK → place stoploss → update stoploss → close."""
+"""Test: OPEN LONG LINK → amend stoploss → close."""
 import json, os, sys, time, hmac, base64, requests
 from datetime import datetime
 
@@ -17,10 +17,8 @@ def okx(method, path, body=None):
         data=json.dumps(body) if body else None, timeout=10)
     return r.json()
 
-# === STEP 1: OPEN LONG 1 ct LINK with stoploss ===
-entry_px = 5.0  # LINK ≈ $5
-sl_px = f"{entry_px * 0.98:.2f}"  # 6%/3x = 2% below
-print(f"[test] OPEN LONG 1 ct @ market, stoploss @ ${sl_px}...")
+# === STEP 1: OPEN LONG with stoploss ===
+print("[test] OPEN LONG 1 ct @ market with stoploss...")
 open_r = okx("POST", "/api/v5/trade/order", {
     "instId": "LINK-USDT-SWAP",
     "tdMode": "cross",
@@ -28,7 +26,7 @@ open_r = okx("POST", "/api/v5/trade/order", {
     "ordType": "market",
     "sz": "1",
     "attachAlgoOrds": [{
-        "slTriggerPx": sl_px,
+        "slTriggerPx": "4.90",
         "slOrdPx": "-1",
         "sz": "1",
         "ordType": "conditional",
@@ -42,52 +40,40 @@ print(f"[test] ✅ OPENED: {oid}")
 
 time.sleep(5)
 
-# === STEP 2: Check existing algo stops ===
+# === STEP 2: Get algo order and amend ===
 print("[test] Fetching algo stops...")
 algos = okx("GET", "/api/v5/trade/orders-algo-pending?instId=LINK-USDT-SWAP&ordType=conditional")
-print(f"[test] Algo stops: {len(algos.get('data',[]))} found")
-old_ids = [o["algoId"] for o in algos.get("data",[]) if o.get("algoId")]
-print(f"[test] IDs: {old_ids}")
-
-# === STEP 3: Cancel old stop, place new one ===
-if old_ids:
-    print(f"[test] Cancelling old stop(s): {old_ids}...")
-    cancel_r = okx("POST", "/api/v5/trade/cancel-algos", {
+data = algos.get("data", [])
+print(f"[test] Algo stops: {len(data)} found")
+if data:
+    algo_id = data[0]["algoId"]
+    old_sl = data[0].get("slTriggerPx", "?")
+    print(f"[test] Current stoploss: ${old_sl} (algoId: {algo_id})")
+    
+    print("[test] Amending stoploss to $4.95...")
+    amend_r = okx("POST", "/api/v5/trade/amend-algo-order", {
         "instId": "LINK-USDT-SWAP",
-        "algoIds": old_ids,
+        "algoId": algo_id,
+        "newSlTriggerPx": "4.95",
     })
-    print(f"[test] Cancel result: code={cancel_r.get('code')}")
-
-new_sl = f"{entry_px * 0.97:.2f}"  # tighter: 9%/3x = 3% below
-print(f"[test] Placing new stoploss @ ${new_sl}...")
-new_algo = okx("POST", "/api/v5/trade/order-algo", {
-    "instId": "LINK-USDT-SWAP",
-    "tdMode": "cross",
-    "side": "sell",
-    "sz": "1",
-    "ordType": "conditional",
-    "triggerPx": new_sl,
-    "triggerPxType": "last",
-    "tpTriggerPxType": "last",
-})
-print(f"[test] New algo: code={new_algo.get('code')} {json.dumps(new_algo.get('data',[{}])[0])}")
+    print(f"[test] Amend result: code={amend_r.get('code')} msg={amend_r.get('msg')}")
+    
+    if amend_r.get("code") == "0":
+        print("[test] ✅ Stoploss amended successfully!")
+    else:
+        print(f"[test] ⚠️ Amend failed: {json.dumps(amend_r)}")
+else:
+    print("[test] ⚠️ No algo stops found")
 
 time.sleep(5)
 
-# === STEP 4: Close everything ===
-print("[test] Closing LONG (sell 1 ct @ market)...")
+# === STEP 3: Close ===
+print("[test] Closing LONG...")
 close_r = okx("POST", "/api/v5/trade/close-position", {
     "instId": "LINK-USDT-SWAP",
     "mgnMode": "cross",
 })
-print(f"[test] Close: code={close_r.get('code')}")
 if close_r.get("code") == "0":
-    print("[test] ✅ ALL OK: OPEN → STOPLOSS → UPDATE STOP → CLOSE")
+    print("[test] ✅ ALL OK: OPEN → AMEND STOP → CLOSE")
 else:
-    print(f"[test] Close full: {json.dumps(close_r)}")
-PYEOF
-
-if close_r.get("code") == "0":
-    print("[test] ✅ OKX API OK - SHORT opened & closed")
-else:
-    print(f"[test] Close may have failed: {close_r}")
+    print(f"[test] Close: {json.dumps(close_r)}")
