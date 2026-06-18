@@ -28,6 +28,10 @@ class OKXError(Exception):
     pass
 
 
+class OKXMetadataError(OKXError):
+    pass
+
+
 def _okx_sign(
     method: str, path: str, body: Any, api_key: str, api_secret: str, passphrase: str
 ) -> Tuple[str, str, str]:
@@ -187,17 +191,45 @@ def okx_get_candles(inst_id: str, bar: str = "1D", limit: int = 30) -> Optional[
         return None
 
 
-def get_instrument_map() -> Dict[str, dict]:
-    """Return {instId: {ctVal, ctMult, lotSz}} for all SWAP instruments."""
+def _parse_required_positive_float(inst: dict, field: str, inst_id: str) -> float:
+    raw_value = inst.get(field)
+    if raw_value in (None, ""):
+        raise OKXMetadataError(f"missing {field}")
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise OKXMetadataError(f"invalid {field}={raw_value!r}") from exc
+    if value <= 0:
+        raise OKXMetadataError(f"invalid {field}={raw_value!r}")
+    return value
+
+
+def _parse_optional_float(inst: dict, field: str, default: float) -> float:
+    raw_value = inst.get(field)
+    if raw_value in (None, ""):
+        return default
+    return float(raw_value)
+
+
+def get_instrument_map() -> Tuple[Dict[str, dict], Dict[str, str]]:
+    """Return ({instId: {ctVal, ctMult, lotSz}}, {instId: skip_reason}) for SWAP instruments."""
     instruments = okx_get_instruments("SWAP")
     m: Dict[str, dict] = {}
+    skipped: Dict[str, str] = {}
     for inst in instruments:
-        m[inst["instId"]] = {
-            "ctVal": float(inst.get("ctVal", 1)),
-            "ctMult": float(inst.get("ctMult", 1)),
-            "lotSz": float(inst.get("lotSz", 1)),
-        }
-    return m
+        inst_id = inst.get("instId", "")
+        if not inst_id:
+            continue
+        try:
+            m[inst_id] = {
+                "ctVal": _parse_required_positive_float(inst, "ctVal", inst_id),
+                "ctMult": _parse_optional_float(inst, "ctMult", 1.0),
+                "lotSz": _parse_required_positive_float(inst, "lotSz", inst_id),
+            }
+        except (OKXMetadataError, ValueError) as exc:
+            skipped[inst_id] = str(exc)
+            print(f"[okx_utils] Skipping {inst_id}: {exc}", file=sys.stderr)
+    return m, skipped
 
 
 def calc_contract_size(coin: str, equity_usd: float, capital_pct: float,
@@ -207,9 +239,16 @@ def calc_contract_size(coin: str, equity_usd: float, capital_pct: float,
     Returns (sz, price, position_value_usd).
     """
     inst_id = OKX_INSTRUMENTS[coin]
-    info = instrument_map.get(inst_id, {"ctVal": 1, "lotSz": 1})
-    ct_val = info["ctVal"]
-    lot_sz = info["lotSz"]
+    info = instrument_map.get(inst_id)
+    if not info:
+        raise OKXMetadataError(f"missing instrument metadata for {inst_id}")
+
+    ct_val = info.get("ctVal")
+    lot_sz = info.get("lotSz")
+    if not isinstance(ct_val, (int, float)) or ct_val <= 0:
+        raise OKXMetadataError(f"invalid ctVal for {inst_id}")
+    if not isinstance(lot_sz, (int, float)) or lot_sz <= 0:
+        raise OKXMetadataError(f"invalid lotSz for {inst_id}")
 
     position_value = equity_usd * capital_pct * leverage
     contracts = int(position_value / ct_val / lot_sz) * lot_sz
