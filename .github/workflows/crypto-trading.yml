@@ -1,9 +1,9 @@
 name: Crypto Trading System
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch: {}
+  repository_dispatch:
+    types: [trigger-trading]
 
 jobs:
   crypto-trading:
