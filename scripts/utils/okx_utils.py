@@ -137,8 +137,13 @@ def okx_place_order(
     if pos_side:
         body["posSide"] = pos_side
     if sl_trigger_px:
-        body["slTriggerPx"] = sl_trigger_px
-        body["slOrdPx"] = "-1"  # market order when triggered
+        body["attachAlgoOrds"] = [{
+            "slTriggerPx": sl_trigger_px,
+            "slOrdPx": "-1",
+            "sz": sz,
+            "ordType": "conditional",
+            "side": "sell" if side == "buy" else "buy",
+        }]
     return _okx_request("POST", "/api/v5/trade/order", body)
 
 

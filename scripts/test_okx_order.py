@@ -27,8 +27,13 @@ open_r = okx("POST", "/api/v5/trade/order", {
     "side": "buy",
     "ordType": "market",
     "sz": "1",
-    "slTriggerPx": sl_px,
-    "slOrdPx": "-1",
+    "attachAlgoOrds": [{
+        "slTriggerPx": sl_px,
+        "slOrdPx": "-1",
+        "sz": "1",
+        "ordType": "conditional",
+        "side": "sell",
+    }],
 })
 oid = open_r.get("data", [{}])[0].get("ordId", "")
 if not oid:
