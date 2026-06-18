@@ -90,7 +90,7 @@ if algo_id:
     cur_px = float(tdata[0].get("last", entry_px))
     new_sl = f"{cur_px * 1.06:.2f}"
     print(f"[test] Current price: ${cur_px}, amending stoploss to ${new_sl}...")
-    amend_r = okx("POST", "/api/v5/trade/amend-algo-order", {
+    amend_r = okx("POST", "/api/v5/trade/amend-algos", {
         "instId": "LINK-USDT-SWAP",
         "algoId": algo_id,
         "newSlTriggerPx": new_sl,
@@ -103,12 +103,14 @@ if algo_id:
 
 time.sleep(5)
 
-# === STEP 5: Close ===
-print("[test] Closing SHORT...")
-close_r = okx("POST", "/api/v5/trade/close-position", {
+# === STEP 5: Close (market buy to cover short) ===
+print("[test] Closing SHORT (buy 6 ct @ market)...")
+close_r = okx("POST", "/api/v5/trade/order", {
     "instId": "LINK-USDT-SWAP",
-    "mgnMode": "cross",
-    "posSide": "short",
+    "tdMode": "cross",
+    "side": "buy",
+    "ordType": "market",
+    "sz": "6",
 })
 if close_r.get("code") == "0":
     print("[test] ✅ ALL OK: SHORT → ADD → AMEND STOP → CLOSE")

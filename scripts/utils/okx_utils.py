@@ -189,7 +189,7 @@ def okx_cancel_algo(inst_id: str, algo_ids: List[str]) -> dict:
 
 def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:
     """Amend an existing algo/stop order trigger price."""
-    return _okx_request("POST", "/api/v5/trade/amend-algo-order", {
+    return _okx_request("POST", "/api/v5/trade/amend-algos", {
         "instId": inst_id,
         "algoId": algo_id,
         "newSlTriggerPx": new_sl_trigger_px,
@@ -198,7 +198,7 @@ def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:
 
 def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:
     """Amend an existing algo/stop order trigger price."""
-    return _okx_request("POST", "/api/v5/trade/amend-algo-order", {
+    return _okx_request("POST", "/api/v5/trade/amend-algos", {
         "instId": inst_id,
         "algoId": algo_id,
         "newSlTriggerPx": new_sl_trigger_px,
