@@ -188,24 +188,47 @@ def okx_get_candles(inst_id: str, bar: str = "1D", limit: int = 30) -> Optional[
 
 
 def _safe_float(value: Any, default: float = 1.0) -> float:
-    """Safely convert a value to float, returning default on None, '', or errors."""
+    """Safely convert a value to float, returning default on None, '', or errors.
+
+    A default of 1.0 is used so that missing contract metadata does not zero-out
+    position sizing (multiplying by 1 is a neutral operation). Callers should
+    verify that instrument data is valid before relying on these defaults for
+    live trading decisions.
+    """
     if value is None or value == "":
         return default
     try:
         return float(value)
     except (TypeError, ValueError):
+        print(f"[okx_utils] _safe_float: could not parse {value!r}, using default {default}", file=sys.stderr)
         return default
 
 
 def get_instrument_map() -> Dict[str, dict]:
-    """Return {instId: {ctVal, ctMult, lotSz}} for all SWAP instruments."""
+    """Return {instId: {ctVal, ctMult, lotSz}} for all SWAP instruments.
+
+    Fields that are missing, empty, or non-numeric in the OKX response are
+    replaced with 1.0 (neutral multiplier) via _safe_float(). A warning is
+    printed to stderr for any instrument with incomplete metadata.
+    """
     instruments = okx_get_instruments("SWAP")
     m: Dict[str, dict] = {}
     for inst in instruments:
-        m[inst["instId"]] = {
-            "ctVal": _safe_float(inst.get("ctVal"), 1.0),
-            "ctMult": _safe_float(inst.get("ctMult"), 1.0),
-            "lotSz": _safe_float(inst.get("lotSz"), 1.0),
+        inst_id = inst["instId"]
+        ct_val_raw = inst.get("ctVal")
+        ct_mult_raw = inst.get("ctMult")
+        lot_sz_raw = inst.get("lotSz")
+        if ct_val_raw in (None, "") or ct_mult_raw in (None, "") or lot_sz_raw in (None, ""):
+            print(
+                f"[okx_utils] {inst_id}: incomplete metadata "
+                f"(ctVal={ct_val_raw!r}, ctMult={ct_mult_raw!r}, lotSz={lot_sz_raw!r}), "
+                "using defaults",
+                file=sys.stderr,
+            )
+        m[inst_id] = {
+            "ctVal": _safe_float(ct_val_raw, 1.0),
+            "ctMult": _safe_float(ct_mult_raw, 1.0),
+            "lotSz": _safe_float(lot_sz_raw, 1.0),
         }
     return m
 
