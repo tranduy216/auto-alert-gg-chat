@@ -59,9 +59,9 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["BTC", "ETH", "BNB", "TRX", "ADA"]
+COINS = ["ETH", "BNB", "TRX"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED = {"ETH", "TRX"}
+SHORT_ALLOWED = {"ETH"}
 BTC_SYMBOL = "BTCUSDT"
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
@@ -71,8 +71,10 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
     (18, 21), # ECB/BOE rate decisions (~1-2pm GMT → 8-9pm VNT) — wider window
 ]
 
-CANDLE_COUNT = 30
-BTC_CANDLE_COUNT = 220  # enough for MA200 + buffer
+CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
+BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
+
+SF = 1.5                     # scale factor: 12h → 1d equivalent (winner: +26.8% CAGR)
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
@@ -112,16 +114,19 @@ def get_allocation_multiplier(entry_score: float, bull_regime: bool = True) -> f
     return mul
 
 
-def get_position_size(trend_score: int) -> float:
-    """Dynamic position sizing: scale by trend quality.
-
-    TS3 (BULLISH):    1.5x = 5.1% capital → strong conviction
-    TS2 (WEAK_BULL):  1.0x = 3.4% → standard
-    TS1 (EARLY_BULL): 0.5x = 1.7% → small bet
-    TS0 or negative:  0.3x = 1.0% → minimal probe
+def get_position_size(trend_score: int, coin: str = "") -> float:
+    """Dynamic position sizing: scale by trend quality and per-coin allocation.
+    
+    Per-coin POSITION_SIZE_BASE multipliers:
+    BTC/ETH: 1.0 (base, DD thấp)
+    BNB/TRX: 0.67 (DD cao)
     """
     scale = {3: 1.5, 2: 1.0, 1: 0.5}.get(trend_score, 0.3)
-    return round(POSITION_SIZE_BASE * scale, 4)
+    base = POSITION_SIZE_BASE
+    if coin:
+        profile = get_coin_profile(coin)
+        base = profile.get("position_size_base", POSITION_SIZE_BASE)
+    return round(base * scale, 4)
 
 
 def get_trailing_multiplier(trend_score: int) -> float:
@@ -154,9 +159,8 @@ MAX_MARGIN_PER_COIN_PCT = 0.20   # 20% margin cap (= 60% exposure at 3x)
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
-    "ETH": ["BTC", "BNB"],
-    "BNB": ["BTC", "ETH"],
-    "BTC": ["ETH", "BNB"],
+    "ETH": ["BNB"],
+    "BNB": ["ETH"],
 }
 
 # Loss streak
@@ -167,9 +171,33 @@ SHORT_COOLDOWN_DAYS = 14     # pause duration (increased from 12)
 LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
 LONG_COOLDOWN_DAYS = 14      # pause duration (increased from 12)
 
-# Short trend filter MA pair (fast MA vs slow MA)
-SHORT_TREND_FAST = 12        # fast MA period for trend filter (both long & short)
-SHORT_TREND_SLOW = 25        # slow MA period (also used as price filter)
+# Trend engine MA periods on 36h candles (aggregated 3×12h)
+TREND_MA_FAST = 10
+TREND_MA_MID = 15
+TREND_MA_SLOW = 30
+
+# Execution engine MA periods on 12h (scaled 1.5× from 1D baseline: MA12, MA25, MA20)
+EXEC_MA_FAST = 18
+EXEC_MA_MID = 37
+EXEC_MA_SLOW = 30
+
+# ── Sideway & Staged Reversal Exit ──────────────────────────────────
+# Gradual exit schedule: (sideway_bars, additional_exit_pct)
+SIDEWAY_EXIT_SCHEDULE = [(4, 0.10), (6, 0.10), (8, 0.10), (10, 0.10)]
+SIDEWAY_EXIT_BASE_STRONG = 0.10   # price > MA20 → exit 10%
+SIDEWAY_EXIT_BASE_WEAK = 0.15     # price < MA20 → exit 15%
+SIDEWAY_EXIT_OVERBOUGHT = 0.25    # RSI > 60 → exit 25%
+SIDEWAY_RSI_OVERBOUGHT = 60
+SIDEWAY_RSI_OVERSOLD = 40
+SIDEWAY_ATR_DROP_PCT = 0.30       # ATR must drop >30% vs 20-bar avg
+SIDEWAY_PRICE_RANGE = 0.05        # ±5% oscillation range
+REVERSAL_STAGE_EXIT_PCT = 0.50    # exit 50% of remaining on each reversal
+MAX_REVERSAL_STAGES = 5           # stage 5 = exit all
+REVERSAL_RSI_MAX = 50             # RSI must be < 50 for reversal
+REVERSAL_VOL_MULT = 1.2           # volume > 1.2× 5-bar avg for reversal
+PULLBACK_RECOVERY_PCT = 0.05      # price recovery >5% cancels reversal tracking
+SIDEWAY_EXTEND_TRAIL_REDUCE = 0.35  # tighten trailing by 35% after 5+ sideway bars
+SIDEWAY_EXTEND_THRESHOLD = 5      # sideway >5 bars = extended
 
 # Volatility filter
 VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
@@ -206,14 +234,14 @@ FIRESTORE_COLLECTION = "crypto_trading_states"
 #   snowball_pnl_min:      min PnL% for snowball add (0.005 = 0.5%)
 #   snowball_fast_min:     if score >= this, snowball even at 0% PnL
 DEFAULT_PROFILE = {
-    "leverage": 3.0,
-    "trend_min_long": 0,        # allow all trends — size scaled by quality
+    "leverage": 2.5,
+    "trend_min_long": 2,        # only strong long (WEAK_BULLISH+)
     "trend_min_long_tight": 2,
-    "trend_max_short": -3,
+    "trend_max_short": -2,      # only strong short (WEAK_BEARISH-)
     "vol_min": 0.3,
     "rsi_max_long": 90,
     "rsi_min_short": 10,
-    "max_loss_pct": 0.06,
+    "max_loss_pct": 0.07,
     "trailing_pct": 0.80,
     "initial_stop_pct": 0.80,
     "hard_stop_pct": 0.75,
@@ -221,14 +249,14 @@ DEFAULT_PROFILE = {
     "use_ma200_filter": False,
     "use_pullback_filter": False,
     "use_volume_expan": False,
-    "min_entry_score": 45,        # filter bottom entries, keep quality
+    "min_entry_score": 50,        # stricter signal quality
     # v7 ATR trailing (disabled — use percentage trail for stability)
     "trail_atr_mult": 0,
     "use_profit_locking": False,
     # v7 snowball (conservative — only on proven winners)
     "snowball_pnl_min": 0.10,     # 10% PnL — effectively disabled, protects value
     # v7 short (tighter risk, smaller size)
-    "short_max_loss_pct": 0.04,
+    "short_max_loss_pct": 0.07,
     "short_trailing_pct": 0.82,
     "short_size_mult": 0.5,       # ½ size of long
     # v7 re-entry
@@ -236,27 +264,22 @@ DEFAULT_PROFILE = {
 }
 
 COIN_PROFILES: dict[str, dict] = {
-    "BTC": {
-        "leverage": 3.0,
-        "max_loss_pct": 0.05,
-        "trailing_pct": 0.82,
-        "vol_min": 0.25,
-        "short_max_loss_pct": 0.04,
-        "short_trailing_pct": 0.85,
-    },
     "ETH": {
-        "max_loss_pct": 0.05,
-        "short_max_loss_pct": 0.04,
+        "max_loss_pct": 0.07,
+        "short_max_loss_pct": 0.07,
+        "position_size_base": 0.18,
+        "trend_min_long": 2,
+    },
+    "BNB": {
+        "position_size_base": 0.16,
+        "trend_min_long": 3,
     },
     "TRX": {
         "max_loss_pct": 0.07,
-        "short_max_loss_pct": 0.05,
+        "short_max_loss_pct": 0.07,
         "short_trailing_pct": 0.78,
-    },
-    "ADA": {
-        "leverage": 2.5,
-        "max_loss_pct": 0.05,       # tightened from 6% → reduce loss
-        "short_max_loss_pct": 0.04,
+        "position_size_base": 0.16,
+        "trend_min_long": 3,
     },
 }
 
@@ -951,15 +974,210 @@ def evaluate_exit_v6(
                 f"Trend reversal: MA7 ({ma7_3d:.2f}) > MA20 ({ma20_3d:.2f})",
                 new_stop, best_price)
 
-    # 3. Emergency exit: trend completely gone
+    # 3. Trend collapse: exit 25% first, wait 5 bars, exit rest if still collapsed
     if is_long and ts_val < -0.3:
-        return ("EXIT_ALL", 1.0, f"Score collapse: {ts_val:.1f} < -0.3",
+        return ("EXIT_COLLAPSE_25", 0.25, f"Score collapse: {ts_val:.1f} < -0.3",
                 new_stop, best_price)
     if not is_long and ts_val > 0.3:
-        return ("EXIT_ALL", 1.0, f"Score collapse: {ts_val:.1f} > +0.3",
+        return ("EXIT_COLLAPSE_25", 0.25, f"Score collapse: {ts_val:.1f} > +0.3",
                 new_stop, best_price)
 
     return ("HOLD", 0.0, "", new_stop, best_price)
+
+
+# ---------------------------------------------------------------------------
+# Sideway detection & staged reversal exit
+# ---------------------------------------------------------------------------
+
+def _detect_sideway(candles_12h: list[dict], atr_ma20: float, atr_current: float) -> tuple[bool, int, float, float]:
+    """Detect if recent candles are in sideway mode.
+
+    Returns (is_sideway, sideway_bars, high, low).
+    """
+    first_threshold = SIDEWAY_EXIT_SCHEDULE[0][0]
+    lookback = min(first_threshold + 8, len(candles_12h) - 1)
+    if lookback < first_threshold:
+        return (False, 0, 0, 0)
+
+    segment = candles_12h[-lookback:]
+    highs = [c["high"] for c in segment]
+    lows = [c["low"] for c in segment]
+    seg_high = max(highs)
+    seg_low = min(lows)
+    mid = (seg_high + seg_low) / 2
+    range_pct = (seg_high - seg_low) / mid if mid > 0 else 0
+
+    atr_dropped = atr_current < atr_ma20 * (1 - SIDEWAY_ATR_DROP_PCT)
+    is_sideway = range_pct <= SIDEWAY_PRICE_RANGE * 2 and atr_dropped
+
+    if not is_sideway:
+        return (False, 0, 0, 0)
+
+    count = 0
+    for c in reversed(segment):
+        if abs(c["close"] - mid) / mid <= SIDEWAY_PRICE_RANGE:
+            count += 1
+        else:
+            break
+    return (count >= first_threshold, count, seg_high, seg_low)
+
+
+def _check_reversal(ts_val: float, close: float, exec_s_ma: float, rsi_val: float,
+                     vol_current: float, vol_5d_avg: float, is_long: bool = True) -> bool:
+    """True reversal: price breaks MA20 + RSI confirmation + volume increasing."""
+    vol_ok = vol_5d_avg <= 0 or vol_current >= vol_5d_avg * REVERSAL_VOL_MULT
+    if is_long:
+        if close >= exec_s_ma: return False
+        if rsi_val >= REVERSAL_RSI_MAX: return False
+    else:
+        if close <= exec_s_ma: return False
+        if rsi_val <= 100 - REVERSAL_RSI_MAX: return False
+    if not vol_ok: return False
+    return True
+
+
+def evaluate_sideway_exit(
+    sideway_phase: str,
+    sideway_bars: int,
+    sideway_milestone: int,
+    reversal_count: int,
+    rev_low: float,
+    close: float,
+    high: float,
+    low: float,
+    ts_val: float,
+    rsi: float,
+    exec_s_ma: float,
+    vol_current: float,
+    vol_5d_avg: float,
+    candles_12h: list[dict],
+    atr_ma20: float,
+    atr_current: float,
+    trailing_pct: float,
+    is_long: bool = True,
+) -> dict:
+    """Graduated sideway exit + RSI/MA conditions + staged reversal.
+
+    Schedule: 4b≈10-25%, 6b=+10%, 8b=+10%, 10b=+10%.
+    First exit depends on RSI/MA: oversold→skip, overbought→25%, <MA20→15%, >MA20→10%.
+    """
+    result = {
+        "action": "HOLD", "reduce_pct": 0.0, "reason": "",
+        "new_trailing_pct": trailing_pct,
+        "sideway_phase": sideway_phase, "sideway_bars": sideway_bars,
+        "sideway_milestone": sideway_milestone,
+        "reversal_count": reversal_count, "rev_low": rev_low,
+    }
+
+    is_sideway, sw_bars, sw_high, sw_low = _detect_sideway(candles_12h, atr_ma20, atr_current)
+
+    # ── Phase: NONE/COUNTING → enter sideway with RSI/MA-gated first exit ──
+    if sideway_phase in ("none", "", None, "counting"):
+        if is_sideway and sw_bars >= SIDEWAY_EXIT_SCHEDULE[0][0]:
+            first_pct = _get_first_sideway_exit_pct(rsi, close, exec_s_ma)
+            if first_pct > 0:
+                result["sideway_phase"] = "exited"
+                result["sideway_bars"] = sw_bars
+                result["sideway_milestone"] = SIDEWAY_EXIT_SCHEDULE[0][0]
+                result["reversal_count"] = 0
+                result["rev_low"] = close
+                result["action"] = "EXIT_SIDEWAY"
+                result["reduce_pct"] = first_pct
+                result["reason"] = f"Sideway {sw_bars}b (ATR↓, RSI={rsi:.0f}) — exit {first_pct*100:.0f}%"
+            else:
+                result["sideway_phase"] = "counting_skip"
+                result["sideway_bars"] = sw_bars
+        elif is_sideway:
+            result["sideway_phase"] = "counting"
+            result["sideway_bars"] = sw_bars
+        return result
+
+    # ── Phase: counting_skip → first exit skipped at 4b, try next milestones ──
+    if sideway_phase == "counting_skip":
+        for threshold, add_pct in SIDEWAY_EXIT_SCHEDULE:
+            if sw_bars >= threshold and sideway_milestone < threshold:
+                result["sideway_phase"] = "exited"
+                result["sideway_bars"] = sw_bars
+                result["sideway_milestone"] = threshold
+                result["reversal_count"] = 0
+                result["rev_low"] = close
+                result["action"] = "EXIT_SIDEWAY"
+                result["reduce_pct"] = add_pct
+                result["reason"] = f"Sideway {sw_bars}b (was oversold at 4b) — exit +{add_pct*100:.0f}%"
+                return result
+        if not is_sideway:
+            result["sideway_phase"] = "none"
+        return result
+
+    # ── Graduated exit: check next milestones (6b, 8b, 10b) ──
+    if sideway_phase in ("exited", "reversal") and is_sideway:
+        for threshold, add_pct in SIDEWAY_EXIT_SCHEDULE:
+            if sw_bars >= threshold and sideway_milestone < threshold:
+                result["sideway_bars"] = sw_bars
+                result["sideway_milestone"] = threshold
+                result["action"] = "EXIT_SIDEWAY"
+                result["reduce_pct"] = add_pct
+                result["reason"] = f"Sideway extended to {sw_bars}b — exit +{add_pct*100:.0f}%"
+                return result
+
+    # ── Sideway >5 bars: tighten trailing 35% ──
+    if sideway_phase in ("exited", "reversal") and is_sideway and sw_bars > SIDEWAY_EXTEND_THRESHOLD:
+        result["new_trailing_pct"] = trailing_pct + (1.0 - trailing_pct) * SIDEWAY_EXTEND_TRAIL_REDUCE
+        result["sideway_bars"] = sw_bars
+
+    # ── Sideway breakout against position → exit all ──
+    if sideway_phase in ("exited", "reversal") and is_sideway:
+        if (is_long and close < sw_low) or (not is_long and close > sw_high):
+            result["action"] = "EXIT_ALL"
+            result["reduce_pct"] = 1.0
+            result["reason"] = "Sideway breakout against position — exit all"
+            result["sideway_phase"] = "none"
+            return result
+
+    # ── Sideway breakout in favor → resume normal ──
+    if sideway_phase in ("exited", "reversal") and \
+       ((is_long and close > sw_high) or (not is_long and close < sw_low)) and not is_sideway:
+        result["sideway_phase"] = "none"
+        result["sideway_bars"] = 0
+        result["sideway_milestone"] = 0
+        result["reversal_count"] = 0
+        result["reason"] = "Sideway breakout in favor — resume normal"
+        return result
+
+    # ── Reversal signals (after sideway exit) ──
+    if sideway_phase in ("exited", "reversal"):
+        is_reversal = _check_reversal(ts_val, close, exec_s_ma, rsi, vol_current, vol_5d_avg, is_long)
+        if is_reversal:
+            result["reversal_count"] = reversal_count + 1
+            result["rev_low"] = min(rev_low, close) if rev_low > 0 else close
+            result["sideway_phase"] = "reversal"
+            if result["reversal_count"] >= MAX_REVERSAL_STAGES:
+                result["action"] = "EXIT_ALL"
+                result["reduce_pct"] = 1.0
+                result["reason"] = f"Reversal #{result['reversal_count']} — exit all"
+                result["sideway_phase"] = "none"
+            else:
+                result["action"] = "EXIT_REVERSAL"
+                result["reduce_pct"] = REVERSAL_STAGE_EXIT_PCT
+                result["reason"] = f"Reversal #{result['reversal_count']}: MA20 break + RSI confirmation"
+        elif rev_low > 0 and close > rev_low * (1 + PULLBACK_RECOVERY_PCT):
+            result["sideway_phase"] = "none"
+            result["sideway_bars"] = 0
+            result["sideway_milestone"] = 0
+            result["reversal_count"] = 0
+            result["reason"] = "Recovered >5% from reversal low — resume normal"
+
+    return result
+
+
+def _get_first_sideway_exit_pct(rsi: float, close: float, exec_s_ma: float) -> float:
+    if rsi < SIDEWAY_RSI_OVERSOLD:
+        return 0.0
+    if rsi > SIDEWAY_RSI_OVERBOUGHT:
+        return SIDEWAY_EXIT_OVERBOUGHT
+    if close < exec_s_ma:
+        return SIDEWAY_EXIT_BASE_WEAK
+    return SIDEWAY_EXIT_BASE_STRONG
 
 
 # ---------------------------------------------------------------------------
@@ -1269,6 +1487,12 @@ def save_state(
     short_cooldown_until: str = "",
     long_loss_streak: int = 0,
     long_cooldown_until: str = "",
+    collapse_bar_count: int = 0,
+    sideway_phase: str = "",
+    sideway_bars: int = 0,
+    sideway_milestone: int = 0,
+    reversal_count: int = 0,
+    rev_low: float = 0.0,
 ) -> None:
     """Persist position state to Firestore."""
     db = _get_db()
@@ -1303,6 +1527,18 @@ def save_state(
             data["long_loss_streak"] = long_loss_streak
         if long_cooldown_until:
             data["long_cooldown_until"] = long_cooldown_until
+        if collapse_bar_count:
+            data["collapse_bar_count"] = collapse_bar_count
+        if sideway_phase:
+            data["sideway_phase"] = sideway_phase
+        if sideway_bars:
+            data["sideway_bars"] = sideway_bars
+        if sideway_milestone:
+            data["sideway_milestone"] = sideway_milestone
+        if reversal_count:
+            data["reversal_count"] = reversal_count
+        if rev_low:
+            data["rev_low"] = rev_low
         call_with_retry(
             lambda: doc_ref.set(data),
             resource_name=f"Firestore save {coin} state",
@@ -1433,8 +1669,7 @@ def format_detail(result: dict) -> str:
 
 def analyse_coin(
     coin: str,
-    candles_3d: list[dict],
-    candles_1d: list[dict],
+    candles_12h: list[dict],
     kill_switch_active: bool,
     active_count: int = 0,
     max_positions: int = MAX_CONCURRENT_POSITIONS,
@@ -1447,79 +1682,90 @@ def analyse_coin(
     # BTC regime filter: bear → smaller positions, stricter entries
     _bear_mode = not btc_bull
 
-    # --- Trend Engine (3D) ---
-    closes_3d = [c["close"] for c in candles_3d]
+    # Aggregate 3×12h → 36h candles for trend engine
+    candles_36h = []
+    for i in range(0, len(candles_12h) - 2, 3):
+        b = candles_12h[i:i + 3]
+        candles_36h.append({
+            "open_time": b[0]["open_time"], "open": b[0]["open"],
+            "high": max(d["high"] for d in b),
+            "low": min(d["low"] for d in b),
+            "close": b[-1]["close"],
+            "volume": sum(d["volume"] for d in b),
+        })
 
-    ma3_3d_all = sma(closes_3d, 3)
-    ma7_3d_all = sma(closes_3d, 7)
-    ma10_3d_all = sma(closes_3d, 10)
-    ma20_3d_all = sma(closes_3d, 20)
+    # --- Trend Engine (36h) ---
+    closes_36h = [c["close"] for c in candles_36h]
 
-    ma3_3d = ma3_3d_all[-1] if ma3_3d_all[-1] is not None else closes_3d[-1]
-    ma7_3d = ma7_3d_all[-1] if ma7_3d_all[-1] is not None else closes_3d[-1]
-    ma10_3d = ma10_3d_all[-1] if ma10_3d_all[-1] is not None else closes_3d[-1]
-    ma20_3d = ma20_3d_all[-1] if ma20_3d_all[-1] is not None else closes_3d[-1]
+    ma_f_36h_all = sma(closes_36h, TREND_MA_FAST)
+    ma_m_36h_all = sma(closes_36h, TREND_MA_MID)
+    ma_s_36h_all = sma(closes_36h, TREND_MA_SLOW)
 
-    trend_label, trend_score = evaluate_trend_3d(ma7_3d, ma10_3d, ma20_3d)
+    ma_f_36h = ma_f_36h_all[-1] if ma_f_36h_all[-1] is not None else closes_36h[-1]
+    ma_m_36h = ma_m_36h_all[-1] if ma_m_36h_all[-1] is not None else closes_36h[-1]
+    ma_s_36h = ma_s_36h_all[-1] if ma_s_36h_all[-1] is not None else closes_36h[-1]
+
+    trend_label, trend_score = evaluate_trend_3d(ma_f_36h, ma_m_36h, ma_s_36h)
     ts_val = trend_strength(trend_score)
 
-    # 3D RSI for exit system
-    rsi_3d = compute_rsi(closes_3d, 14)
+    # 36h RSI for exit system
+    rsi_36h = compute_rsi(closes_36h, 14)
 
-    # --- Execution Engine (1D) ---
-    closes_1d = [c["close"] for c in candles_1d]
-    highs_1d = [c["high"] for c in candles_1d]
-    lows_1d = [c["low"] for c in candles_1d]
-    volumes_1d = [c["volume"] for c in candles_1d]
+    # --- Execution Engine (12h) ---
+    closes_12h = [c["close"] for c in candles_12h]
+    highs_12h = [c["high"] for c in candles_12h]
+    lows_12h = [c["low"] for c in candles_12h]
+    volumes_12h = [c["volume"] for c in candles_12h]
 
-    ma3_1d_all = sma(closes_1d, 3)
-    ma5_1d_all = sma(closes_1d, 5)
-    ma7_1d_all = sma(closes_1d, 7)
-    ma10_1d_all = sma(closes_1d, 10)
-    vol_ma20_1d_all = sma(volumes_1d, 20)
+    # MA periods: SF-scaled for 12h equivalents
+    ma3_12h_all = sma(closes_12h, 3 * SF)
+    ma5_12h_all = sma(closes_12h, 5 * SF)
+    ma7_12h_all = sma(closes_12h, 7 * SF)
+    ma10_12h_all = sma(closes_12h, 10 * SF)
+    vol_ma20_12h_all = sma(volumes_12h, 20 * SF)
 
-    ma3_1d = ma3_1d_all[-1] if ma3_1d_all[-1] is not None else closes_1d[-1]
-    ma5_1d = ma5_1d_all[-1] if ma5_1d_all[-1] is not None else closes_1d[-1]
-    ma7_1d = ma7_1d_all[-1] if ma7_1d_all[-1] is not None else closes_1d[-1]
-    ma10_1d = ma10_1d_all[-1] if ma10_1d_all[-1] is not None else closes_1d[-1]
-    vol_ma20_1d = vol_ma20_1d_all[-1] if vol_ma20_1d_all[-1] is not None else volumes_1d[-1]
+    ma3_12h = ma3_12h_all[-1] if ma3_12h_all[-1] is not None else closes_12h[-1]
+    ma5_12h = ma5_12h_all[-1] if ma5_12h_all[-1] is not None else closes_12h[-1]
+    ma7_12h = ma7_12h_all[-1] if ma7_12h_all[-1] is not None else closes_12h[-1]
+    ma10_12h = ma10_12h_all[-1] if ma10_12h_all[-1] is not None else closes_12h[-1]
+    vol_ma20_12h = vol_ma20_12h_all[-1] if vol_ma20_12h_all[-1] is not None else volumes_12h[-1]
 
-    last_close = closes_1d[-1]
-    last_low = lows_1d[-1]
-    last_high = highs_1d[-1]
-    last_volume = volumes_1d[-1]
+    last_close = closes_12h[-1]
+    last_low = lows_12h[-1]
+    last_high = highs_12h[-1]
+    last_volume = volumes_12h[-1]
 
     # v7 indicators
-    rsi_1d = compute_rsi(closes_1d, 14)
-    ma20_1d_all = sma(closes_1d, 20)
-    ma50_1d_all = sma(closes_1d, 50)
-    ma20_1d = ma20_1d_all[-1] if ma20_1d_all[-1] is not None else last_close
-    ma50_1d_all = sma(closes_1d, 50)
-    ma50_1d = ma50_1d_all[-1] if ma50_1d_all[-1] is not None else last_close
-    trend_ma_fast_1d = (sma(closes_1d, SHORT_TREND_FAST)[-1] or None)
-    trend_ma_slow_1d = sma(closes_1d, SHORT_TREND_SLOW)[-1] or ma50_1d
-    ma200_1d_all = sma(closes_1d, 200)
-    ma200_1d = ma200_1d_all[-1] if ma200_1d_all[-1] is not None else None
-    recent_10d_low = min(lows_1d[-10:]) if len(lows_1d) >= 10 else last_close * 0.95
-    recent_10d_high = max(highs_1d[-10:]) if len(highs_1d) >= 10 else last_close * 1.05
+    rsi_12h = compute_rsi(closes_12h, 14 * SF)
+    ma20_12h_all = sma(closes_12h, 20 * SF)
+    ma50_12h_all = sma(closes_12h, 50 * SF)
+    ma20_12h = ma20_12h_all[-1] if ma20_12h_all[-1] is not None else last_close
+    ma50_12h = ma50_12h_all[-1] if ma50_12h_all[-1] is not None else last_close
+    exec_f = (sma(closes_12h, EXEC_MA_FAST)[-1] or None)
+    exec_m = (sma(closes_12h, EXEC_MA_MID)[-1] or ma50_12h)
+    exec_s = (sma(closes_12h, EXEC_MA_SLOW)[-1] or ma50_12h)
+    ma200_12h_all = sma(closes_12h, 200 * SF)
+    ma200_12h = ma200_12h_all[-1] if ma200_12h_all[-1] is not None else None
+    recent_10d_low = min(lows_12h[-(10 * SF):]) if len(lows_12h) >= 10 * SF else last_close * 0.95
+    recent_10d_high = max(highs_12h[-(10 * SF):]) if len(highs_12h) >= 10 * SF else last_close * 1.05
 
-    atr_1d = compute_atr(candles_1d, 14)
-    atrs_1d = [compute_atr(candles_1d[:i+1], 14) for i in range(13, len(candles_1d))]
-    atr_ma20_1d_all = sma(atrs_1d, 20)
-    atr_ma20_1d = atr_ma20_1d_all[-1] if atr_ma20_1d_all[-1] is not None else atr_1d
+    atr_12h = compute_atr(candles_12h, 14 * SF)
+    atrs_12h = [compute_atr(candles_12h[:i + 1], 14 * SF) for i in range(14 * SF, len(candles_12h))]
+    atr_ma20_12h_all = sma(atrs_12h, 20 * SF)
+    atr_ma20_12h = atr_ma20_12h_all[-1] if atr_ma20_12h_all[-1] is not None else atr_12h
 
-    volume_score = compute_volume_score(last_volume, vol_ma20_1d)
+    volume_score = compute_volume_score(last_volume, vol_ma20_12h)
 
     # v7: volume 5d average for expansion filter
-    vol_5d_avg = sum(volumes_1d[-6:-1]) / 5 if len(volumes_1d) >= 6 else last_volume
+    vol_5d_avg = sum(volumes_12h[-(6 * SF):-1]) / (5 * SF) if len(volumes_12h) >= 6 * SF else last_volume
 
     # v6 entry signals (per-coin profile)
     entry_long = compute_entry_v6_long(
-        trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+        trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
         trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
         rsi_max=profile.get("rsi_max_long", 55),
         # v7 enhanced
-        ma7_1d=ma7_1d, ma200_1d=ma200_1d,
+        ma7_1d=ma7_12h, ma200_1d=ma200_12h,
         last_volume=last_volume, vol_5d_avg=vol_5d_avg,
         use_ma200_filter=profile.get("use_ma200_filter", False),
         use_pullback_filter=profile.get("use_pullback_filter", False),
@@ -1528,7 +1774,7 @@ def analyse_coin(
     )
     entry_short = (
         compute_entry_v6_short(
-            trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+            trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
             trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
             rsi_min=profile.get("rsi_min_short", 45),
         ) if coin in SHORT_ALLOWED else False
@@ -1572,6 +1818,12 @@ def analyse_coin(
     _short_cooldown_until = prev.get("short_cooldown_until", "")
     _long_loss_streak = prev.get("long_loss_streak", 0)
     _long_cooldown_until = prev.get("long_cooldown_until", "")
+    _collapse_bars = prev.get("collapse_bar_count", 0)
+    _sw_phase = prev.get("sideway_phase", "none")
+    _sw_bars = prev.get("sideway_bars", 0)
+    _sw_milestone = prev.get("sideway_milestone", 0)
+    _rev_count = prev.get("reversal_count", 0)
+    _rev_low = prev.get("rev_low", 0.0)
 
     if prev_pos_state == "FLAT":
         # ── Filter chain ─────────────────────────────────────────────
@@ -1582,8 +1834,8 @@ def analyse_coin(
             _skip_reason = f"Max positions ({max_positions})"
 
         # 2. Volatility filter
-        if not _skip_reason and atr_1d > atr_ma20_1d * VOLATILITY_ATR_MULTIPLIER:
-            _skip_reason = f"ATR {atr_1d:.2f} > {VOLATILITY_ATR_MULTIPLIER}× ATR_MA20({atr_ma20_1d:.2f})"
+        if not _skip_reason and atr_12h > atr_ma20_12h * VOLATILITY_ATR_MULTIPLIER:
+            _skip_reason = f"ATR {atr_12h:.2f} > {VOLATILITY_ATR_MULTIPLIER}× ATR_MA20({atr_ma20_12h:.2f})"
 
         # 3. Time filter
         if not _skip_reason and in_event_window:
@@ -1605,10 +1857,10 @@ def analyse_coin(
             tight_mode = active_count / max_positions >= POSITION_RATE_TIGHT_THRESHOLD
             _trend_min = profile["trend_min_long_tight"] if tight_mode else profile["trend_min_long"]
             entry_long = compute_entry_v6_long(
-                trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
                 trend_min=_trend_min, vol_min=profile["vol_min"],
                 rsi_max=profile.get("rsi_max_long", 55),
-                ma7_1d=ma7_1d, ma200_1d=ma200_1d,
+                ma7_1d=ma7_12h, ma200_1d=ma200_12h,
                 last_volume=last_volume, vol_5d_avg=vol_5d_avg,
                 use_ma200_filter=profile.get("use_ma200_filter", False),
                 use_pullback_filter=profile.get("use_pullback_filter", False),
@@ -1617,7 +1869,7 @@ def analyse_coin(
             )
             entry_short = (
                 compute_entry_v6_short(
-                    trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
+                    trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
                     trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
                     rsi_min=profile.get("rsi_min_short", 45),
                 ) if coin in SHORT_ALLOWED else False
@@ -1641,20 +1893,17 @@ def analyse_coin(
                 is_short = action.startswith("OPEN_SHORT")
                 # Compute entry score for allocation
                 _sc = _entry_score_v7_long(
-                    trend_score, last_close, ma7_1d, ma10_1d, ma20_1d, ma200_1d,
-                    trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
-                    last_volume, vol_5d_avg, rsi_1d,
+                    trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                    exec_f, exec_m, volume_score,
+                    last_volume, vol_5d_avg, rsi_12h,
                 )
                 alloc_mul = get_allocation_multiplier(_sc, True)
-                remaining_size = get_position_size(trend_score) * alloc_mul
+                remaining_size = get_position_size(trend_score, coin) * alloc_mul
                 if is_short:
                     remaining_size *= profile.get("short_size_mult", 0.5)
                 entry_price = last_close
                 trailing_stop = None
                 highest_since_entry = None
-            elif action.startswith("ADD_"):
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
-
             # Loss streak breaker
             if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
                 remaining_size *= LOSS_STREAK_REDUCE
@@ -1665,49 +1914,99 @@ def analyse_coin(
         is_short_pos = prev_pos_state.startswith("SHORT")
         is_long_pos = not is_short_pos
 
+        # ── Collapse tracking: if in collapse mode, increment bar count ──
+        if _collapse_bars > 0:
+            _collapse_bars += 1
+
         # Short-specific exit params
         eff_max_loss = profile.get("short_max_loss_pct", profile["max_loss_pct"]) if is_short_pos else profile["max_loss_pct"]
         eff_trail = (profile.get("short_trailing_pct", profile["trailing_pct"]) if is_short_pos else profile["trailing_pct"])
         eff_trail = eff_trail * get_trailing_multiplier(trend_score)
 
-        exit_action, reduce_pct, exit_reason, new_trailing_stop, new_highest = evaluate_exit_v6(
-            prev_pos_state, entry_price, last_close, remaining_size,
-            ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
-            recent_10d_low, recent_10d_high,
-            trailing_stop, highest_since_entry,
-            max_loss_pct=eff_max_loss,
-            trailing_pct=eff_trail,
-            initial_stop_pct=profile["initial_stop_pct"],
-            hard_stop_pct=profile["hard_stop_pct"],
-            atr_1d=atr_1d,
-            trail_atr_mult=profile.get("trail_atr_mult", 0),
-            use_profit_locking=profile.get("use_profit_locking", False),
+        # ── Sideway & staged reversal exit (runs before normal exit) ──
+        sw_result = evaluate_sideway_exit(
+            _sw_phase, _sw_bars, _sw_milestone, _rev_count, _rev_low,
+            last_close, last_high, last_low,
+            ts_val, rsi_12h, exec_s, last_volume, vol_5d_avg,
+            candles_12h, atr_ma20_12h, atr_12h, eff_trail,
+            is_long=is_long_pos,
         )
+        _sw_phase = sw_result["sideway_phase"]
+        _sw_bars = sw_result["sideway_bars"]
+        _sw_milestone = sw_result["sideway_milestone"]
+        _rev_count = sw_result["reversal_count"]
+        _rev_low = sw_result["rev_low"]
+
+        if sw_result["action"] != "HOLD":
+            exit_action = sw_result["action"]
+            reduce_pct = sw_result["reduce_pct"]
+            exit_reason = sw_result["reason"]
+            new_trailing_stop = trailing_stop
+            new_highest = highest_since_entry
+            eff_trail = sw_result["new_trailing_pct"]
+        else:
+            eff_trail = sw_result["new_trailing_pct"]
+
+            exit_action, reduce_pct, exit_reason, new_trailing_stop, new_highest = evaluate_exit_v6(
+                prev_pos_state, entry_price, last_close, remaining_size,
+                ma_f_36h, ma_s_36h, trend_score, ts_val, rsi_36h,
+                recent_10d_low, recent_10d_high,
+                trailing_stop, highest_since_entry,
+                max_loss_pct=eff_max_loss,
+                trailing_pct=eff_trail,
+                initial_stop_pct=profile["initial_stop_pct"],
+                hard_stop_pct=profile["hard_stop_pct"],
+                atr_1d=atr_12h,
+                trail_atr_mult=profile.get("trail_atr_mult", 0),
+                use_profit_locking=profile.get("use_profit_locking", False),
+            )
         trailing_stop = new_trailing_stop
         highest_since_entry = new_highest
 
-        if exit_action == "HOLD":
-            # Snowball: try to pyramid into winning position
-            snowball_state, snowball_action = resolve_action_v6(
-                trend_score, entry_long, entry_short, prev_pos_state,
-                current_price=last_close, entry_price=entry_price,
-                leverage=profile["leverage"],
-                deployed_margin_pct=remaining_size,
-                snowball_pnl_min=profile.get("snowball_pnl_min", 0.02),
-            )
-            if snowball_action.startswith("ADD_"):
-                pos_state, action = snowball_state, snowball_action
-                add_sz = get_snowball_size(pnl_pct)
-                remaining_size = (remaining_size or 0) + add_sz
-                next_rules = [f"Snowball: {action} +{add_sz:.1%} (PnL={pnl_pct:+.1f}%)"]
-                print(f"  [{coin}] SNOWBALL {action} +{add_sz:.1%} at {pnl_pct:+.1f}% PnL "
-                      f"(total margin={remaining_size:.0%})", file=sys.stderr)
+        # ── Staged collapse exit: after 5 bars, exit remaining 75% if still collapsed ──
+        if _collapse_bars >= 5 and exit_action in ("HOLD", "EXIT_COLLAPSE_25"):
+            if is_long_pos and ts_val < -0.3:
+                exit_action = "EXIT_ALL"
+                reduce_pct = 1.0
+                exit_reason = f"Collapse persisted {_collapse_bars-1} bars: {ts_val:.1f} < -0.3"
+            elif is_short_pos and ts_val > 0.3:
+                exit_action = "EXIT_ALL"
+                reduce_pct = 1.0
+                exit_reason = f"Collapse persisted {_collapse_bars-1} bars: {ts_val:.1f} > +0.3"
             else:
-                pos_state, action = prev_pos_state, "HOLD"
-                next_rules = compute_next_rules(pos_state)
+                _collapse_bars = 0  # trend recovered, cancel collapse tracking
+
+        # Suppress re-triggered collapse during wait (bars 2-4)
+        if exit_action == "EXIT_COLLAPSE_25" and _collapse_bars > 1:
+            exit_action = "HOLD"
+
+        if exit_action == "HOLD" and _collapse_bars > 0:
+            # In collapse mode but waiting: keep counting
+            pos_state, action = prev_pos_state, "HOLD_COLLAPSE_WAIT"
+            next_rules = [f"Collapse wait: bar {_collapse_bars}/5"]
+        elif exit_action == "HOLD":
+            pos_state, action = prev_pos_state, "HOLD"
+            next_rules = compute_next_rules(pos_state)
         else:
             next_rules = [exit_reason]
-            if exit_action == "EXIT_ALL":
+            if exit_action == "EXIT_COLLAPSE_25":
+                # First collapse hit: reduce 25%, start counting bars
+                remaining_size = remaining_size * (1 - reduce_pct)
+                pos_state = prev_pos_state
+                action = "EXIT_COLLAPSE_25"
+                _collapse_bars = 1
+                next_rules = [exit_reason, f"Collapse wait: bar 1/5 — remaining {remaining_size*100:.0f}%"]
+            elif exit_action == "EXIT_SIDEWAY":
+                remaining_size = remaining_size * (1 - reduce_pct)
+                pos_state = prev_pos_state
+                action = "EXIT_SIDEWAY"
+                next_rules = [exit_reason, f"Remaining {remaining_size*100:.0f}% — watching for reversal"]
+            elif exit_action == "EXIT_REVERSAL":
+                remaining_size = remaining_size * (1 - reduce_pct)
+                pos_state = prev_pos_state
+                action = f"EXIT_REVERSAL_{_rev_count}"
+                next_rules = [exit_reason, f"Reversal #{_rev_count} — {remaining_size*100:.0f}% remaining"]
+            elif exit_action == "EXIT_ALL":
                 _loss_streak = 0 if pnl_pct > 0 else _loss_streak + 1
                 if is_long:
                     if pnl_pct > 0:
@@ -1736,6 +2035,10 @@ def analyse_coin(
                 pos_state = "FLAT"
                 remaining_size = 0.0
                 action = "EXIT_LONG" if is_long else "EXIT_SHORT"
+                _sw_phase = "none"
+                _sw_bars = 0
+                _sw_milestone = 0
+                _rev_count = 0
 
             if remaining_size < 0.01 and pos_state != "FLAT":
                 pos_state = "FLAT"
@@ -1772,6 +2075,12 @@ def analyse_coin(
         short_cooldown_until=_short_cooldown_until,
         long_loss_streak=_long_loss_streak,
         long_cooldown_until=_long_cooldown_until,
+        collapse_bar_count=_collapse_bars if _collapse_bars > 0 else 0,
+        sideway_phase=_sw_phase if _sw_phase and _sw_phase != "none" else "",
+        sideway_bars=_sw_bars,
+        sideway_milestone=_sw_milestone,
+        reversal_count=_rev_count,
+        rev_low=_rev_low,
     )
 
     return output
@@ -2132,10 +2441,9 @@ def main() -> None:
     results: list[dict[str, Any]] = []
     for coin in COINS:
         symbol = SYMBOL_MAP[coin]
-        print(f"[crypto_trading] Fetching {symbol} (3D + 1D)\u2026")
+        print(f"[crypto_trading] Fetching {symbol} (12h)\u2026")
         try:
-            candles_3d = fetch_klines(symbol, "3d")
-            candles_1d = fetch_klines(symbol, "1d")
+            candles_12h = fetch_klines(symbol, "12h")
         except requests.RequestException as exc:
             print(f"[crypto_trading] Warning: cannot fetch {symbol}: {exc}",
                   file=sys.stderr)
@@ -2143,7 +2451,7 @@ def main() -> None:
 
         print(f"[crypto_trading] Analysing {coin}\u2026")
         result = analyse_coin(
-            coin, candles_3d, candles_1d, kill_switch,
+            coin, candles_12h, kill_switch,
             active_count=_active_positions,
             btc_bull=_btc_bull,
             in_event_window=_in_event_window,

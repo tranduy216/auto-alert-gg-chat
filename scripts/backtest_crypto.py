@@ -54,6 +54,11 @@ PERIODS = {
         "start_time": int(datetime(2024, 1, 1).timestamp() * 1000),
         "limit": BINANCE_MAX_LIMIT,
     },
+    "2021_2026": {
+        "label": "2021–2026 (full period)",
+        "start_time": int(datetime(2021, 1, 1).timestamp() * 1000),
+        "limit": 2000,
+    },
 }
 
 
@@ -111,9 +116,11 @@ def backtest_coin(coin: str, start_time: int | None = None,
     state = {"position_state": "FLAT", "entry_price": None, "margin_pct": 0.0,
              "trailing_stop": None, "highest_since_entry": None,
              "short_loss_streak": 0, "short_cooldown_until": None,
-             "long_loss_streak": 0, "long_cooldown_until": None}
+             "long_loss_streak": 0, "long_cooldown_until": None,
+             "remaining_size": 1.0, "tp_stage": 0}
     trades = []
     equity_curve = [1.0]
+    equity = 1.0
 
     INITIAL_DAYS = MIN_3D_PERIODS * 3
 
@@ -223,12 +230,13 @@ def backtest_coin(coin: str, start_time: int | None = None,
                                            trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
                                            volumes_1d[-1], vol_5d_avg, rsi_1d)
                 alloc_mul = get_allocation_multiplier(_sc, bull_regime)
-                sz = get_position_size(trend_score) * alloc_mul
+                sz = get_position_size(trend_score, coin) * alloc_mul
                 entry_price = current_close
                 state.update({"position_state": pos_state, "entry_price": entry_price,
                               "margin_pct": sz, "entry_trend": trend_score,
                               "trailing_stop": None, "highest_since_entry": current_close,
-                              "is_short": False, "entry_score": _sc})
+                              "is_short": False, "entry_score": _sc,
+                              "remaining_size": 1.0, "tp_stage": 0})
                 trades.append({"date": date_str, "type": "LONG_OPEN", "price": current_close,
                                "size": sz, "reason": f"TS{trend_score} S{_sc:.0f}"})
             elif action == "OPEN_SHORT_ENTRY_1":
@@ -236,12 +244,13 @@ def backtest_coin(coin: str, start_time: int | None = None,
                                            trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
                                            volumes_1d[-1], vol_5d_avg, rsi_1d)
                 alloc_mul = get_allocation_multiplier(_sc, bull_regime)
-                sz = get_position_size(trend_score) * alloc_mul * profile.get("short_size_mult", 0.5)
+                sz = get_position_size(trend_score, coin) * alloc_mul * profile.get("short_size_mult", 0.5)
                 entry_price = current_close
                 state.update({"position_state": pos_state, "entry_price": entry_price,
                               "margin_pct": sz, "entry_trend": trend_score,
                               "trailing_stop": None, "highest_since_entry": current_close,
-                              "is_short": True, "entry_score": _sc})
+                              "is_short": True, "entry_score": _sc,
+                              "remaining_size": 1.0, "tp_stage": 0})
                 trades.append({"date": date_str, "type": "SHORT_OPEN", "price": current_close,
                                "size": sz, "reason": f"TS{trend_score} S{_sc:.0f}"})
         else:
@@ -259,8 +268,36 @@ def backtest_coin(coin: str, start_time: int | None = None,
             else:
                 pnl_pct = 0.0
 
+            # ── Partial Take Profit ──
+            remaining_size = state.get("remaining_size", 1.0)
+            tp_stage = state.get("tp_stage", 0)
+            max_loss = profile["max_loss_pct"] * 100  # 9% → 9
+            tp_schedule = [
+                (0.5, 0.15),   # PnL >= 4.5% → close 15%
+                (1.0, 0.15),   # PnL >= 9.0% → close 15%
+                (1.5, 0.15),   # PnL >= 13.5% → close 15%
+                (2.0, 0.25),   # PnL >= 18.0% → close 25%
+            ]
+            for stage_idx, (mult, close_pct) in enumerate(tp_schedule):
+                if tp_stage <= stage_idx and pnl_pct >= max_loss * mult:
+                    close_fraction = close_pct * remaining_size
+                    pnl_realized = pnl_pct * close_fraction * margin_pct * profile["leverage"] / 100
+                    equity *= (1 + pnl_realized)
+                    trades.append({"date": date_str, "type": "PARTIAL_EXIT",
+                                   "price": current_close, "size": close_fraction * margin_pct,
+                                   "pnl_pct": round(pnl_pct, 2),
+                                   "reason": f"TP{stage_idx+1} ({pnl_pct:+.1f}%)"})
+                    remaining_size -= close_fraction
+                    state["remaining_size"] = remaining_size
+                    state["tp_stage"] = stage_idx + 1
+                    break
+
+            # ── Main exit evaluation ──
+            # For remaining 30% (after stage 4): use 3% trailback or trend break
+            if state.get("tp_stage", 0) >= 4:
+                eff_trail = 0.97  # 3% trailback
             exit_action, reduce_pct, exit_reason, new_ts, new_he = evaluate_exit_v6(
-                prev_pos_state, entry_price, current_close, 1.0,
+                prev_pos_state, entry_price, current_close, remaining_size,
                 ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
                 recent_10d_low, recent_10d_high,
                 trailing_stop, highest_since_entry,
@@ -281,7 +318,11 @@ def backtest_coin(coin: str, start_time: int | None = None,
             else:
                 if exit_action == "EXIT_ALL":
                     pnl = pnl_pct
-                    trades.append({"date": date_str, "type": "CLOSE", "price": current_close, "size": margin_pct, "pnl_pct": round(pnl, 2), "reason": exit_reason})
+                    remaining_size = state.get("remaining_size", 1.0)
+                    equity *= (1 + pnl * margin_pct * remaining_size * profile["leverage"] / 100)
+                    trades.append({"date": date_str, "type": "CLOSE", "price": current_close,
+                                   "size": margin_pct * remaining_size, "pnl_pct": round(pnl, 2),
+                                   "reason": exit_reason})
                     # Direction-specific cooldown tracking
                     if "SHORT" in prev_pos_state:
                         _sls = state.get("short_loss_streak", 0)
@@ -316,9 +357,10 @@ def backtest_coin(coin: str, start_time: int | None = None,
         if state["position_state"] != "FLAT" and state.get("entry_price"):
             is_long = not state.get("is_short", False)
             upnl = ((current_close - state["entry_price"]) / state["entry_price"] * 100) if is_long else ((state["entry_price"] - current_close) / state["entry_price"] * 100)
-            equity_curve.append(1.0 + upnl / 100 * state.get("margin_pct", 0.034) * profile["leverage"])
+            remaining_size = state.get("remaining_size", 1.0)
+            equity_curve.append(equity * (1 + upnl / 100 * state.get("margin_pct", 0.034) * remaining_size * profile["leverage"]))
         else:
-            equity_curve.append(1.0)
+            equity_curve.append(equity)
 
     return {"coin": coin, "trades": trades, "equity_curve": equity_curve,
             "period": f"{first_date} → {last_date}"}
@@ -361,6 +403,12 @@ def compute_metrics(result: dict) -> dict:
     if len(returns) > 1 and stdev(returns) > 0:
         sharpe = (mean(returns) / stdev(returns)) * (365 ** 0.5)
 
+    cagr = 0
+    if len(eq) > 1 and eq[0] > 0 and eq[-1] > 0:
+        years = len(eq) / 365
+        if years > 0:
+            cagr = ((eq[-1] / eq[0]) ** (1 / years) - 1) * 100
+
     # Count direction bias
     long_trades = len([t for t in closes if "LONG" in str(t.get("reason", "")) or t["price"] > 0])
     short_trades = len([t for t in closes if "SHORT" in str(t.get("reason", "")) or t["price"] < 0])
@@ -376,6 +424,7 @@ def compute_metrics(result: dict) -> dict:
         "profit_factor": round(profit_factor, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "sharpe_ratio": round(sharpe, 2),
+        "cagr_pct": round(cagr, 2),
         "period": result["period"],
         "message": None,
     }
@@ -388,6 +437,7 @@ def print_report(metrics: dict):
     dd_str = f"DD={metrics['max_drawdown_pct']:.1f}%"
     sharpe_str = f"S={metrics['sharpe_ratio']:.2f}"
     w_str = f"W={metrics.get('weighted_pnl_pct', 0):+.1f}%"
+    cagr_str = f"CAGR={metrics.get('cagr_pct', 0):.1f}%"
     print(f"  {metrics['coin']:6s} | "
           f"Trades={metrics['total_trades']:2d} | "
           f"PnL={metrics['total_pnl_pct']:+6.2f}% | "
@@ -395,7 +445,7 @@ def print_report(metrics: dict):
           f"AvgW={metrics['avg_win_pct']:+5.2f}% | "
           f"AvgL={metrics['avg_loss_pct']:+5.2f}% | "
           f"PF={metrics['profit_factor']:<5.2f} | "
-          f"{dd_str:>8s} | {w_str:>10s}")
+          f"{dd_str:>8s} | {w_str:>10s} | {cagr_str:>10s}")
 
 
 def main():
