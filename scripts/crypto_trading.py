@@ -1638,12 +1638,19 @@ def analyse_coin(
             )
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
+                is_short = action.startswith("OPEN_SHORT")
+                # Compute entry score for allocation
+                _sc = _entry_score_v7_long(
+                    trend_score, last_close, ma7_1d, ma10_1d, ma20_1d, ma200_1d,
+                    trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
+                    last_volume, vol_5d_avg, rsi_1d,
+                )
+                alloc_mul = get_allocation_multiplier(_sc, True)
+                remaining_size = get_position_size(trend_score) * alloc_mul
+                if is_short:
+                    remaining_size *= profile.get("short_size_mult", 0.5)
                 entry_price = last_close
-                remaining_size = get_position_size(trend_score)
                 trailing_stop = None
-                highest_since_entry = None
-                # Store entry trend for trail adjustment
-                _entry_trend = trend_score
                 highest_since_entry = None
             elif action.startswith("ADD_"):
                 remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
@@ -1655,20 +1662,21 @@ def analyse_coin(
 
     else:
         # Exit evaluation for active positions
-        is_long = prev_pos_state.startswith("LONG")
-        if entry_price and entry_price > 0:
-            pnl_pct = ((last_close - entry_price) / entry_price * 100
-                       ) if is_long else ((entry_price - last_close) / entry_price * 100)
-        else:
-            pnl_pct = 0.0
+        is_short_pos = prev_pos_state.startswith("SHORT")
+        is_long_pos = not is_short_pos
+
+        # Short-specific exit params
+        eff_max_loss = profile.get("short_max_loss_pct", profile["max_loss_pct"]) if is_short_pos else profile["max_loss_pct"]
+        eff_trail = (profile.get("short_trailing_pct", profile["trailing_pct"]) if is_short_pos else profile["trailing_pct"])
+        eff_trail = eff_trail * get_trailing_multiplier(trend_score)
 
         exit_action, reduce_pct, exit_reason, new_trailing_stop, new_highest = evaluate_exit_v6(
             prev_pos_state, entry_price, last_close, remaining_size,
             ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
             recent_10d_low, recent_10d_high,
             trailing_stop, highest_since_entry,
-            max_loss_pct=profile["max_loss_pct"],
-            trailing_pct=profile["trailing_pct"] * get_trailing_multiplier(trend_score),
+            max_loss_pct=eff_max_loss,
+            trailing_pct=eff_trail,
             initial_stop_pct=profile["initial_stop_pct"],
             hard_stop_pct=profile["hard_stop_pct"],
             atr_1d=atr_1d,
