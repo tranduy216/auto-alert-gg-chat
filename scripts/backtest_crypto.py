@@ -16,11 +16,16 @@ from crypto_trading import (
     compute_volume_score,
     compute_entry_v6_long, compute_entry_v6_short,
     resolve_action_v6, evaluate_exit_v6, _aggregate_daily_to_3d,
+    compute_atr,
     COINS, SYMBOL_MAP, SHORT_ALLOWED,
     SHORT_TREND_FAST, SHORT_TREND_SLOW,
     SHORT_COOLDOWN_LOSSES, SHORT_COOLDOWN_DAYS,
     LONG_COOLDOWN_LOSSES, LONG_COOLDOWN_DAYS,
     get_coin_profile,
+    get_position_size, get_allocation_multiplier, get_trailing_multiplier,
+    _entry_score_v7_long,
+    POSITION_SIZE_BASE, POSITION_SIZE_SNOWBALL, MAX_SNOWBALL_ENTRIES, MAX_MARGIN_PER_COIN_PCT,
+    get_snowball_size, SNOWBALL_PNL_THRESHOLD,
 )
 
 LOOKBACK_DAYS = 400
@@ -90,7 +95,8 @@ def _fetch_all_klines(symbol: str, limit: int = 1000,
 
 
 def backtest_coin(coin: str, start_time: int | None = None,
-                  limit: int = LOOKBACK_DAYS) -> dict:
+                  limit: int = LOOKBACK_DAYS,
+                  btc_daily: list[dict] | None = None) -> dict:
     profile = get_coin_profile(coin)
     symbol = SYMBOL_MAP[coin]
     daily_all = _fetch_all_klines(symbol, limit, start_time)
@@ -102,7 +108,7 @@ def backtest_coin(coin: str, start_time: int | None = None,
     first_date = datetime.utcfromtimestamp(daily_all[0]["open_time"] / 1000).strftime("%Y-%m-%d")
     last_date = datetime.utcfromtimestamp(daily_all[-1]["open_time"] / 1000).strftime("%Y-%m-%d")
 
-    state = {"position_state": "FLAT", "entry_price": None, "remaining_size": 1.0,
+    state = {"position_state": "FLAT", "entry_price": None, "margin_pct": 0.0,
              "trailing_stop": None, "highest_since_entry": None,
              "short_loss_streak": 0, "short_cooldown_until": None,
              "long_loss_streak": 0, "long_cooldown_until": None}
@@ -137,13 +143,19 @@ def backtest_coin(coin: str, start_time: int | None = None,
 
         ma20_1d_all = sma(closes_1d, 20)
         ma50_1d_all = sma(closes_1d, 50)
+        ma200_1d_all = sma(closes_1d, 200)
         ma20_1d = ma20_1d_all[-1] if ma20_1d_all[-1] is not None else closes_1d[-1]
+        ma7_1d = (sma(closes_1d, 7)[-1] or closes_1d[-1])
+        ma10_1d = (sma(closes_1d, 10)[-1] or closes_1d[-1])
         ma50_1d = ma50_1d_all[-1] if ma50_1d_all[-1] is not None else closes_1d[-1]
+        ma200_1d = ma200_1d_all[-1] if ma200_1d_all[-1] is not None else None
         trend_ma_fast_1d = (sma(closes_1d, SHORT_TREND_FAST)[-1] or None)
         trend_ma_slow_1d = sma(closes_1d, SHORT_TREND_SLOW)[-1] or ma50_1d
         vol_ma20 = (sma(volumes_1d, 20)[-1] or volumes_1d[-1])
+        vol_5d_avg = sum(volumes_1d[-6:-1]) / 5 if len(volumes_1d) >= 6 else volumes_1d[-1]
         volume_score = compute_volume_score(volumes_1d[-1], vol_ma20)
         rsi_1d = compute_rsi(closes_1d, 14)
+        atr_1d = compute_atr(daily_slice, 14) if len(daily_slice) >= 15 else 0
         recent_10d_low = min(lows_1d[-10:]) if len(lows_1d) >= 10 else current_close * 0.95
         recent_10d_high = max(highs_1d[-10:]) if len(highs_1d) >= 10 else current_close * 1.05
 
@@ -155,9 +167,12 @@ def backtest_coin(coin: str, start_time: int | None = None,
 
         prev_pos_state = state["position_state"]
         entry_price = state["entry_price"]
-        remaining_size = state["remaining_size"]
+        remaining_size = state.get("remaining_size", 1.0)
         trailing_stop = state.get("trailing_stop")
         highest_since_entry = state.get("highest_since_entry")
+
+        # BTC regime check (disabled — score filter is sufficient)
+        bull_regime = True
 
         if prev_pos_state == "FLAT":
             # Long cooldown check
@@ -174,6 +189,13 @@ def backtest_coin(coin: str, start_time: int | None = None,
             entry_long = compute_entry_v6_long(
                 trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
                 trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
+                rsi_max=profile.get("rsi_max_long", 90),
+                ma7_1d=ma7_1d, ma200_1d=ma200_1d,
+                last_volume=volumes_1d[-1], vol_5d_avg=vol_5d_avg,
+                use_ma200_filter=profile.get("use_ma200_filter", False),
+                use_pullback_filter=profile.get("use_pullback_filter", False),
+                use_volume_expan=profile.get("use_volume_expan", False),
+                min_entry_score=profile.get("min_entry_score", 45),
             ) if _long_allowed else False
             # Short cooldown check
             _short_allowed = coin in SHORT_ALLOWED
@@ -190,41 +212,65 @@ def backtest_coin(coin: str, start_time: int | None = None,
                 compute_entry_v6_short(
                     trend_score, rsi_1d, current_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
                     trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+                    rsi_min=profile.get("rsi_min_short", 10),
                 ) if _short_allowed else False
             )
             pos_state, action = resolve_action_v6(
                 trend_score, entry_long, entry_short, prev_pos_state,
             )
             if action == "OPEN_LONG_ENTRY_1":
+                _sc = _entry_score_v7_long(trend_score, current_close, ma7_1d, ma10_1d, ma20_1d, ma200_1d,
+                                           trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
+                                           volumes_1d[-1], vol_5d_avg, rsi_1d)
+                alloc_mul = get_allocation_multiplier(_sc, bull_regime)
+                sz = get_position_size(trend_score) * alloc_mul
                 entry_price = current_close
-                remaining_size = 1.0
-                trailing_stop = None
-                highest_since_entry = None
-                trades.append({"date": date_str, "type": "LONG_OPEN", "price": current_close, "size": 1.0, "reason": f"TrendScore={trend_score}"})
+                state.update({"position_state": pos_state, "entry_price": entry_price,
+                              "margin_pct": sz, "entry_trend": trend_score,
+                              "trailing_stop": None, "highest_since_entry": current_close,
+                              "is_short": False, "entry_score": _sc})
+                trades.append({"date": date_str, "type": "LONG_OPEN", "price": current_close,
+                               "size": sz, "reason": f"TS{trend_score} S{_sc:.0f}"})
             elif action == "OPEN_SHORT_ENTRY_1":
+                _sc = _entry_score_v7_long(trend_score, current_close, ma7_1d, ma10_1d, ma20_1d, ma200_1d,
+                                           trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
+                                           volumes_1d[-1], vol_5d_avg, rsi_1d)
+                alloc_mul = get_allocation_multiplier(_sc, bull_regime)
+                sz = get_position_size(trend_score) * alloc_mul * profile.get("short_size_mult", 0.5)
                 entry_price = current_close
-                remaining_size = 1.0
-                trailing_stop = None
-                highest_since_entry = None
-                trades.append({"date": date_str, "type": "SHORT_OPEN", "price": current_close, "size": 1.0, "reason": f"TrendScore={trend_score}"})
-            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size,
-                          "trailing_stop": trailing_stop, "highest_since_entry": highest_since_entry})
+                state.update({"position_state": pos_state, "entry_price": entry_price,
+                              "margin_pct": sz, "entry_trend": trend_score,
+                              "trailing_stop": None, "highest_since_entry": current_close,
+                              "is_short": True, "entry_score": _sc})
+                trades.append({"date": date_str, "type": "SHORT_OPEN", "price": current_close,
+                               "size": sz, "reason": f"TS{trend_score} S{_sc:.0f}"})
         else:
-            is_long = prev_pos_state.startswith("LONG")
+            is_short_pos = state.get("is_short", False)
+            is_long_pos = not is_short_pos
+            margin_pct = state.get("margin_pct", 0.034)
+            entry_trend = state.get("entry_trend", 0)
+            # Short-specific exit params
+            eff_max_loss = profile.get("short_max_loss_pct", profile["max_loss_pct"]) if is_short_pos else profile["max_loss_pct"]
+            trail_mult = get_trailing_multiplier(entry_trend)
+            eff_trail = (profile.get("short_trailing_pct", profile["trailing_pct"]) if is_short_pos else profile["trailing_pct"]) * trail_mult
+
             if entry_price and entry_price > 0:
-                pnl_pct = ((current_close - entry_price) / entry_price * 100) if is_long else ((entry_price - current_close) / entry_price * 100)
+                pnl_pct = ((current_close - entry_price) / entry_price * 100) if is_long_pos else ((entry_price - current_close) / entry_price * 100)
             else:
                 pnl_pct = 0.0
 
             exit_action, reduce_pct, exit_reason, new_ts, new_he = evaluate_exit_v6(
-                prev_pos_state, entry_price, current_close, remaining_size,
+                prev_pos_state, entry_price, current_close, 1.0,
                 ma7_3d, ma20_3d, trend_score, ts_val, rsi_3d,
                 recent_10d_low, recent_10d_high,
                 trailing_stop, highest_since_entry,
-                max_loss_pct=profile["max_loss_pct"],
-                trailing_pct=profile["trailing_pct"],
+                max_loss_pct=eff_max_loss,
+                trailing_pct=eff_trail,
                 initial_stop_pct=profile["initial_stop_pct"],
                 hard_stop_pct=profile["hard_stop_pct"],
+                atr_1d=atr_1d,
+                trail_atr_mult=profile.get("trail_atr_mult", 0),
+                use_profit_locking=profile.get("use_profit_locking", False),
             )
             trailing_stop = new_ts
             highest_since_entry = new_he
@@ -235,7 +281,7 @@ def backtest_coin(coin: str, start_time: int | None = None,
             else:
                 if exit_action == "EXIT_ALL":
                     pnl = pnl_pct
-                    trades.append({"date": date_str, "type": "CLOSE", "price": current_close, "size": remaining_size, "pnl_pct": round(pnl, 2), "reason": exit_reason})
+                    trades.append({"date": date_str, "type": "CLOSE", "price": current_close, "size": margin_pct, "pnl_pct": round(pnl, 2), "reason": exit_reason})
                     # Direction-specific cooldown tracking
                     if "SHORT" in prev_pos_state:
                         _sls = state.get("short_loss_streak", 0)
@@ -262,21 +308,15 @@ def backtest_coin(coin: str, start_time: int | None = None,
                                 _cd = datetime.utcfromtimestamp(dt / 1000) + timedelta(days=LONG_COOLDOWN_DAYS)
                                 state["long_cooldown_until"] = _cd.isoformat()
                     pos_state = "FLAT"
-                    remaining_size = 0.0
                     entry_price = None
 
-                if remaining_size < 0.01 and pos_state != "FLAT":
-                    pos_state = "FLAT"
-                    remaining_size = 0.0
-                    entry_price = None
+            state.update({"position_state": pos_state, "entry_price": entry_price,
+                          "trailing_stop": new_ts, "highest_since_entry": new_he})
 
-            state.update({"position_state": pos_state, "entry_price": entry_price, "remaining_size": remaining_size,
-                          "trailing_stop": trailing_stop, "highest_since_entry": highest_since_entry})
-
-        if state["position_state"] != "FLAT" and state["entry_price"] and state["remaining_size"] > 0:
-            is_long = state["position_state"].startswith("LONG")
+        if state["position_state"] != "FLAT" and state.get("entry_price"):
+            is_long = not state.get("is_short", False)
             upnl = ((current_close - state["entry_price"]) / state["entry_price"] * 100) if is_long else ((state["entry_price"] - current_close) / state["entry_price"] * 100)
-            equity_curve.append(1.0 + upnl / 100 * state["remaining_size"] * profile["leverage"])
+            equity_curve.append(1.0 + upnl / 100 * state.get("margin_pct", 0.034) * profile["leverage"])
         else:
             equity_curve.append(1.0)
 
@@ -297,6 +337,10 @@ def compute_metrics(result: dict) -> dict:
     losses = [p for p in pnls if p <= 0]
 
     total_pnl = sum(pnls)
+    weighted_pnl = sum(
+        t["pnl_pct"] * (t.get("size", POSITION_SIZE_BASE) / POSITION_SIZE_BASE)
+        for t in closes
+    )
     win_rate = len(wins) / len(closes) * 100 if closes else 0
     avg_win = mean(wins) if wins else 0
     avg_loss = mean(losses) if losses else 0
@@ -325,6 +369,7 @@ def compute_metrics(result: dict) -> dict:
         "coin": result["coin"],
         "total_trades": len(closes),
         "total_pnl_pct": round(total_pnl, 2),
+        "weighted_pnl_pct": round(weighted_pnl, 2),
         "win_rate_pct": round(win_rate, 1),
         "avg_win_pct": round(avg_win, 2),
         "avg_loss_pct": round(avg_loss, 2),
@@ -342,6 +387,7 @@ def print_report(metrics: dict):
         return
     dd_str = f"DD={metrics['max_drawdown_pct']:.1f}%"
     sharpe_str = f"S={metrics['sharpe_ratio']:.2f}"
+    w_str = f"W={metrics.get('weighted_pnl_pct', 0):+.1f}%"
     print(f"  {metrics['coin']:6s} | "
           f"Trades={metrics['total_trades']:2d} | "
           f"PnL={metrics['total_pnl_pct']:+6.2f}% | "
@@ -349,7 +395,7 @@ def print_report(metrics: dict):
           f"AvgW={metrics['avg_win_pct']:+5.2f}% | "
           f"AvgL={metrics['avg_loss_pct']:+5.2f}% | "
           f"PF={metrics['profit_factor']:<5.2f} | "
-          f"{dd_str:>8s} | {sharpe_str}")
+          f"{dd_str:>8s} | {w_str:>10s}")
 
 
 def main():
@@ -362,10 +408,16 @@ def main():
         print(f"{'='*70}")
 
         all_metrics = []
+        btc_daily = []
+        try:
+            btc_daily = _fetch_all_klines("BTCUSDT", period_info.get("limit", LOOKBACK_DAYS), period_info["start_time"])
+        except Exception:
+            pass
         for coin in COINS:
             try:
                 result = backtest_coin(coin, period_info["start_time"],
-                                       period_info.get("limit", LOOKBACK_DAYS))
+                                        period_info.get("limit", LOOKBACK_DAYS),
+                                        btc_daily)
                 metrics = compute_metrics(result)
                 all_metrics.append(metrics)
                 print_report(metrics)
@@ -375,10 +427,11 @@ def main():
         # Period summary
         print(f"  {'─'*68}")
         total_pnl_all = sum(m["total_pnl_pct"] for m in all_metrics if not m.get("message"))
+        total_w_all = sum(m.get("weighted_pnl_pct", 0) for m in all_metrics if not m.get("message"))
         n_active = sum(1 for m in all_metrics if not m.get("message"))
         avg_pnl = total_pnl_all / n_active if n_active else 0
         avg_pf = mean([m["profit_factor"] for m in all_metrics if not m.get("message") and m.get("profit_factor", 0) != float("inf")]) if n_active else 0
-        print(f"  TOTAL   | Coins={n_active} | Sum PnL={total_pnl_all:+7.2f}% | Avg PnL={avg_pnl:+6.2f}% | Avg PF={avg_pf:.2f}")
+        print(f"  TOTAL   | Coins={n_active} | Sum PnL={total_pnl_all:+7.2f}% | Sum W={total_w_all:+7.2f}% | Avg PnL={avg_pnl:+6.2f}% | Avg PF={avg_pf:.2f}")
 
     # Cross-period comparison
     print(f"\n{'='*70}")

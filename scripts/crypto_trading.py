@@ -59,16 +59,16 @@ except ImportError:
 # Configuration
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "PAXG", "TRX", "ADA"]
+COINS = ["BTC", "ETH", "BNB", "TRX", "ADA"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED = {"ETH", "PAXG"}
+SHORT_ALLOWED = {"ETH", "TRX"}
 BTC_SYMBOL = "BTCUSDT"
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
 ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
-    (1, 3),   # FOMC minutes / fed speeches (~2am VNT)
-    (7, 9),   # US non-farm payroll / CPI (~7:30pm ET → 7:30am VNT+1)
-    (18, 20), # ECB / BOE rate decisions (~1-2pm GMT → 8-9pm VNT)
+    (1, 4),   # FOMC minutes / fed speeches (~2am VNT) — wider window
+    (7, 10),  # US NFP/CPI (~7:30pm ET → 7:30am VNT+1) — wider window
+    (18, 21), # ECB/BOE rate decisions (~1-2pm GMT → 8-9pm VNT) — wider window
 ]
 
 CANDLE_COUNT = 30
@@ -76,31 +76,96 @@ BTC_CANDLE_COUNT = 220  # enough for MA200 + buffer
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
-CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position (2.5x → 25% exposure)
-CAPITAL_USAGE_HIGH_WATERMARK = 0.75  # total position capital ≤ 75% of total capital
-POSITION_RATE_TIGHT_THRESHOLD = 0.55  # when >55% deployed, tighten entry
+CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position
+CAPITAL_USAGE_HIGH_WATERMARK = 0.70  # total position capital ≤ 70% of total capital
+POSITION_RATE_TIGHT_THRESHOLD = 0.50  # when >50% deployed, tighten entry
 
 # Position sizing decay per position tier
-POSITION_SIZES = [0.10, 0.10, 0.10]  # pos 1→3: 10% each
+POSITION_SIZES = [0.10, 0.10, 0.10]
 POSITION_SIZE_BASE = 0.034      # base entry: 3.4%
 POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4%
-MAX_SNOWBALL_ENTRIES = 5        # 5 entries × 3.4% = 17% × 3x = 51%
-MAX_SNOWBALL_ENTRIES = 5        # max 5 entries per coin (3% × 5 = 15% × 3x = 45%)
-MAX_MARGIN_PER_COIN_PCT = 0.51  # 5 × 3.4% × 3x = 51% max exposure per coin
+MAX_SNOWBALL_ENTRIES = 2
+SNOWBALL_PNL_THRESHOLD = 0.10   # effectively disabled
+
+
+def get_allocation_multiplier(entry_score: float, bull_regime: bool = True) -> float:
+    """Dynamic allocation: scale position size by signal quality + market regime.
+
+    Entry score → capital multiplier:
+      Score ≥ 80: 2.0x = 20% capital → 60% exposure
+      Score ≥ 65: 1.5x = 15% capital → 45% exposure
+      Score ≥ 50: 1.0x = 10% capital → 30% exposure (standard)
+      Score ≥ 35: 0.75x = 7.5% capital
+      Score  < 35: 0.5x = 5% capital → 15% exposure
+
+    Bear regime: halve all allocations (↓ 50% exposure).
+    """
+    if entry_score >= 80: mul = 2.0
+    elif entry_score >= 65: mul = 1.5
+    elif entry_score >= 50: mul = 1.0
+    elif entry_score >= 35: mul = 0.75
+    else: mul = 0.5
+
+    if not bull_regime:
+        mul *= 0.5  # halve in bear
+
+    return mul
+
+
+def get_position_size(trend_score: int) -> float:
+    """Dynamic position sizing: scale by trend quality.
+
+    TS3 (BULLISH):    1.5x = 5.1% capital → strong conviction
+    TS2 (WEAK_BULL):  1.0x = 3.4% → standard
+    TS1 (EARLY_BULL): 0.5x = 1.7% → small bet
+    TS0 or negative:  0.3x = 1.0% → minimal probe
+    """
+    scale = {3: 1.5, 2: 1.0, 1: 0.5}.get(trend_score, 0.3)
+    return round(POSITION_SIZE_BASE * scale, 4)
+
+
+def get_trailing_multiplier(trend_score: int) -> float:
+    """Scale trailing stop looseness by trend quality.
+
+    TS3 (confirmed trend): keep tight trail
+    TS1 (early trend):     wider trail → give room to develop
+    """
+    # Lower trailing_pct = tighter trail
+    if trend_score >= 3:  return 1.0   # use default trailing_pct
+    elif trend_score >= 2: return 0.95  # slightly wider
+    elif trend_score >= 1: return 0.88  # wider for TS1
+    else: return 0.85                     # widest for probe entries
+
+
+def get_snowball_size(entry_num: int, entry_score: float) -> float:
+    """Snowball sizing rules:
+    Entry 2: same as entry 1
+    Entry 3: ½ of entry 1 if moderate (score < 65), full if strong (score ≥ 65)
+    """
+    if entry_num == 2:
+        return POSITION_SIZE_SNOWBALL  # same as base
+    elif entry_num == 3:
+        if entry_score >= 65:
+            return POSITION_SIZE_SNOWBALL  # strong signal → full size
+        else:
+            return round(POSITION_SIZE_SNOWBALL * 0.5, 4)  # moderate → half
+    return 0
+MAX_MARGIN_PER_COIN_PCT = 0.20   # 20% margin cap (= 60% exposure at 3x)
 
 # Correlation groups: skip entry if correlated coin already has a position
 CORRELATION_GROUPS: dict[str, list[str]] = {
-    "ETH": ["MATIC"],
-    "MATIC": ["ETH"],
+    "ETH": ["BTC", "BNB"],
+    "BNB": ["BTC", "ETH"],
+    "BTC": ["ETH", "BNB"],
 }
 
 # Loss streak
 LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
 LOSS_STREAK_REDUCE = 0.5     # size multiplier
 SHORT_COOLDOWN_LOSSES = 2    # consecutive short losses → pause short on this coin
-SHORT_COOLDOWN_DAYS = 12     # pause duration
+SHORT_COOLDOWN_DAYS = 14     # pause duration (increased from 12)
 LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
-LONG_COOLDOWN_DAYS = 12      # pause duration
+LONG_COOLDOWN_DAYS = 14      # pause duration (increased from 12)
 
 # Short trend filter MA pair (fast MA vs slow MA)
 SHORT_TREND_FAST = 12        # fast MA period for trend filter (both long & short)
@@ -109,11 +174,16 @@ SHORT_TREND_SLOW = 25        # slow MA period (also used as price filter)
 # Volatility filter
 VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
 
-# v6 trailing stop
-V6_TRAILING_PCT = 0.80       # trail 20% from high (tighter trailing → better PF)
-V6_INITIAL_STOP_PCT = 0.80   # initial stop at 80% of entry (20% price trail)
-V6_HARD_STOP_PCT = 0.75      # hard cap: 25% price move = 6.25% of total capital @ 10% alloc × 2.5x
-V6_MAX_LOSS_PCT = 0.06       # max loss per trade: -6% PnL → exit immediately
+# v7 trailing stop — ATR-based adaptive
+TRAIL_ATR_BASE_MULT = 2.0        # distance from high: 2x ATR14
+TRAIL_ATR_TIGHT_MULT = 1.5       # tighten when PnL >= 5%
+TRAIL_ATR_LOCK_MULT = 1.0        # lock profits when PnL >= 10%
+TRAIL_ATR_RUN_MULT = 0.75        # runner mode when PnL >= 20%
+TRAIL_ATR_PROFIT_MILESTONES = [  # (PnL%, atr_mult)
+    (5.0, 1.5),
+    (10.0, 1.0),
+    (20.0, 0.75),
+]
 
 LEVERAGE = 2.5
 MAX_MARGIN_PER_COIN = 0.15
@@ -123,26 +193,70 @@ BTC_FLASH_CRASH_PCT = -5.0
 
 FIRESTORE_COLLECTION = "crypto_trading_states"
 
-# ── Per-coin Profiles ──────────────────────────────────────────────────
+# ── Per-coin Profiles (v7) ─────────────────────────────────────────────
+# Entry quality filters:
+#   use_ma200_filter:     block long if price < MA200
+#   use_pullback_filter:  block entry if >3% away from MA7
+#   use_volume_expan:     require last volume > 5d avg
+#   min_entry_score:      0-100 quality gate (0=disabled)
+# ATR trailing:
+#   trail_atr_mult:        ATR multiplier for trailing distance
+#   use_profit_locking:    tighten trail at 5/10/20% PnL milestones
+# Snowball:
+#   snowball_pnl_min:      min PnL% for snowball add (0.005 = 0.5%)
+#   snowball_fast_min:     if score >= this, snowball even at 0% PnL
 DEFAULT_PROFILE = {
     "leverage": 3.0,
-    "trend_min_long": 0,        # T0: allow entries in sideways trend
-    "trend_min_long_tight": 2,  # T2 when >50% deployed: need WEAK_BULLISH
-    "trend_max_short": -3,      # Strong bear only for short
+    "trend_min_long": 0,        # allow all trends — size scaled by quality
+    "trend_min_long_tight": 2,
+    "trend_max_short": -3,
     "vol_min": 0.3,
+    "rsi_max_long": 90,
+    "rsi_min_short": 10,
     "max_loss_pct": 0.06,
     "trailing_pct": 0.80,
     "initial_stop_pct": 0.80,
     "hard_stop_pct": 0.75,
+    # v7 entry quality (score-based, no hard gates)
+    "use_ma200_filter": False,
+    "use_pullback_filter": False,
+    "use_volume_expan": False,
+    "min_entry_score": 45,        # filter bottom entries, keep quality
+    # v7 ATR trailing (disabled — use percentage trail for stability)
+    "trail_atr_mult": 0,
+    "use_profit_locking": False,
+    # v7 snowball (conservative — only on proven winners)
+    "snowball_pnl_min": 0.10,     # 10% PnL — effectively disabled, protects value
+    # v7 short (tighter risk, smaller size)
+    "short_max_loss_pct": 0.04,
+    "short_trailing_pct": 0.82,
+    "short_size_mult": 0.5,       # ½ size of long
+    # v7 re-entry
+    "reentry_cooldown_bars": 5,
 }
 
 COIN_PROFILES: dict[str, dict] = {
-    "PAXG": {
-        "max_loss_pct": 0.04,   # Tighter stop, PAXG less volatile
+    "BTC": {
+        "leverage": 3.0,
+        "max_loss_pct": 0.05,
+        "trailing_pct": 0.82,
+        "vol_min": 0.25,
+        "short_max_loss_pct": 0.04,
+        "short_trailing_pct": 0.85,
+    },
+    "ETH": {
+        "max_loss_pct": 0.05,
+        "short_max_loss_pct": 0.04,
+    },
+    "TRX": {
+        "max_loss_pct": 0.07,
+        "short_max_loss_pct": 0.05,
+        "short_trailing_pct": 0.78,
     },
     "ADA": {
-        "max_loss_pct": 0.06,
-        "leverage": 3.0,
+        "leverage": 2.5,
+        "max_loss_pct": 0.05,       # tightened from 6% → reduce loss
+        "short_max_loss_pct": 0.04,
     },
 }
 
@@ -733,8 +847,14 @@ def evaluate_exit_v6(
     trailing_pct: float = 0.80,
     initial_stop_pct: float = 0.80,
     hard_stop_pct: float = 0.75,
+    # ── v7 ATR-based trailing ──
+    atr_1d: float = 0,
+    trail_atr_mult: float = 0,
+    use_profit_locking: bool = False,
 ) -> tuple[str, float, str, float | None, float | None]:
-    """Exit logic v6: trailing stop + trend reversal.
+    """Exit logic v6/v7: trailing stop + trend reversal.
+
+    v7: optionally uses ATR-based trailing with profit-locking milestones.
 
     Returns (exit_action, reduce_pct, reason, new_trailing_stop, new_highest).
     """
@@ -744,23 +864,49 @@ def evaluate_exit_v6(
     is_long = position_state.startswith("LONG")
     pnl_pct = ((current_price - entry_price) / entry_price * 100) if is_long else ((entry_price - current_price) / entry_price * 100)
 
-    # Best price since entry: highest for long, lowest for short
     best_price = max(highest_since_entry or entry_price, current_price) if is_long \
                  else min(highest_since_entry or entry_price, current_price)
     new_stop = trailing_stop
 
+    # ── Determine trail distance ──
+    if trail_atr_mult > 0 and atr_1d > 0:
+        # ATR-based trail (v7)
+        _mult = trail_atr_mult
+        if use_profit_locking and pnl_pct > 0:
+            for milestone, tighter_mult in TRAIL_ATR_PROFIT_MILESTONES:
+                if pnl_pct >= milestone:
+                    _mult = tighter_mult
+                else:
+                    break
+        _trail_dist = _mult * atr_1d
+        _use_atr = True
+    else:
+        _use_atr = False
+        _trail_dist = 0
+
     # Initialise trailing stop if not set (first bar after entry)
     if new_stop is None:
-        new_stop = round(entry_price * (initial_stop_pct if is_long else (2 - initial_stop_pct)), 2)
+        if _use_atr:
+            new_stop = round(entry_price - _trail_dist, 2) if is_long else round(entry_price + _trail_dist, 2)
+        else:
+            new_stop = round(entry_price * (initial_stop_pct if is_long else (2 - initial_stop_pct)), 2)
 
     # Update trailing stop as price moves favorably
-    if is_long:
-        if best_price > (highest_since_entry or entry_price):
+    if is_long and best_price > (highest_since_entry or entry_price):
+        if _use_atr:
+            trail_level = round(best_price - _trail_dist, 2)
+            if trail_level > (new_stop or 0):
+                new_stop = trail_level
+        else:
             trail_buffer = best_price * trailing_pct
             if trail_buffer > new_stop:
                 new_stop = round(trail_buffer, 2)
-    else:
-        if best_price < (highest_since_entry or entry_price):
+    elif not is_long and best_price < (highest_since_entry or entry_price):
+        if _use_atr:
+            trail_level = round(best_price + _trail_dist, 2)
+            if trail_level < (new_stop or 999999):
+                new_stop = trail_level
+        else:
             trail_buffer = best_price * (2 - trailing_pct)
             if trail_buffer < new_stop:
                 new_stop = round(trail_buffer, 2)
@@ -771,19 +917,29 @@ def evaluate_exit_v6(
                 new_stop, best_price)
 
     # 1. Combined stop: whichever is tighter triggers first
-    hard_stop_level = round(entry_price * (hard_stop_pct if is_long else (2 - hard_stop_pct)), 2)
-    if is_long:
-        effective_stop = max(new_stop or 0, hard_stop_level)
-        if current_price <= effective_stop:
-            trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
-            return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
-                    new_stop, best_price)
+    if _use_atr:
+        if is_long:
+            if current_price <= (new_stop or 0):
+                return ("EXIT_ALL", 1.0, f"Trailing stop at ${new_stop:.2f} (ATR {_mult:.1f}x)",
+                        new_stop, best_price)
+        else:
+            if current_price >= (new_stop or 999999):
+                return ("EXIT_ALL", 1.0, f"Trailing stop at ${new_stop:.2f} (ATR {_mult:.1f}x)",
+                        new_stop, best_price)
     else:
-        effective_stop = min(new_stop or 999999, hard_stop_level)
-        if current_price >= effective_stop:
-            trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
-            return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
-                    new_stop, best_price)
+        hard_stop_level = round(entry_price * (hard_stop_pct if is_long else (2 - hard_stop_pct)), 2)
+        if is_long:
+            effective_stop = max(new_stop or 0, hard_stop_level)
+            if current_price <= effective_stop:
+                trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
+                return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
+                        new_stop, best_price)
+        else:
+            effective_stop = min(new_stop or 999999, hard_stop_level)
+            if current_price >= effective_stop:
+                trigger = "Hard stop" if effective_stop == hard_stop_level else "Trailing stop"
+                return ("EXIT_ALL", 1.0, f"{trigger} at ${effective_stop:.2f}",
+                        new_stop, best_price)
 
     # 2. Trend reversal exit (3D chart)
     if is_long and ma7_3d < ma20_3d:
@@ -807,6 +963,78 @@ def evaluate_exit_v6(
 
 
 # ---------------------------------------------------------------------------
+# Entry system (v7) — multi-factor quality scoring
+# ---------------------------------------------------------------------------
+
+def _entry_score_v7_long(
+    trend_score: int,
+    close: float,
+    ma7_1d: float,
+    ma10_1d: float,
+    ma20_1d: float,
+    ma200_1d: float | None,
+    trend_ma_fast_1d: float | None,
+    trend_ma_slow_1d: float,
+    volume_score: float,
+    last_volume: float,
+    vol_5d_avg: float,
+    rsi_1d: float,
+) -> float:
+    """Composite entry quality score 0-100. Higher = stronger signal.
+
+    Designed to give partial credit for every condition so the score degrades
+    gracefully instead of zeroing out. Only truly bad setups fall below 25.
+    """
+    sc = 0.0
+
+    # Trend strength (40 pts) — dominant signal, largest factor
+    sc += {3: 40, 2: 28, 1: 14, 0: 6}.get(trend_score, 0)
+
+    # MA alignment: fast > slow (12 pts)
+    if trend_ma_fast_1d and trend_ma_fast_1d > trend_ma_slow_1d:
+        sc += 12
+    elif trend_ma_fast_1d:
+        sc += 4
+
+    # MA200 direction (12 pts)
+    if ma200_1d and close > ma200_1d:
+        sc += 12
+    elif ma200_1d and close > ma200_1d * 0.92:
+        sc += 7
+    elif ma200_1d:
+        sc += 2
+    else:
+        sc += 6
+
+    # Pullback proximity (16 pts)
+    if ma7_1d > 0:
+        dist = abs(close - ma7_1d) / ma7_1d
+        if dist <= 0.02:   sc += 16
+        elif dist <= 0.04: sc += 12
+        elif dist <= 0.06: sc += 8
+        elif dist <= 0.10: sc += 4
+        else:              sc += 1
+
+    # Volume composite (12 pts)
+    if vol_5d_avg > 0 and last_volume > vol_5d_avg:
+        sc += 7
+    elif vol_5d_avg > 0 and last_volume > vol_5d_avg * 0.7:
+        sc += 3
+    elif vol_5d_avg > 0:
+        sc += 1
+    sc += min(volume_score, 1.0) * 5
+
+    # RSI neutral zone (8 pts)
+    if 40 <= rsi_1d <= 55:
+        sc += 8
+    elif 35 <= rsi_1d <= 60:
+        sc += 5
+    elif rsi_1d <= 70:    sc += 2
+
+    return round(sc, 2)
+
+
+# ---------------------------------------------------------------------------
 # Entry system (v6) — RSI pullback within trend
 # ---------------------------------------------------------------------------
 
@@ -820,9 +1048,24 @@ def compute_entry_v6_long(
     volume_score: float,
     trend_min: int = 0,
     vol_min: float = 0.3,
+    rsi_max: float = 55,
+    # ── v7 enhanced params ──
+    ma7_1d: float | None = None,
+    ma200_1d: float | None = None,
+    last_volume: float = 0,
+    vol_5d_avg: float = 0,
+    use_ma200_filter: bool = False,
+    use_pullback_filter: bool = False,
+    use_volume_expan: bool = False,
+    min_entry_score: float = 0,
 ) -> bool:
-    """Entry signal for LONG: trend_ma_fast > trend_ma_slow (uptrend) + price above MA20."""
+    """Entry signal for LONG: uptrend + price above MA20 + RSI not overbought.
+
+    v7: optional MA200 gate, pullback-to-MA7, volume expansion, and quality score.
+    """
     if trend_score < trend_min:
+        return False
+    if rsi_1d > rsi_max:
         return False
     if trend_ma_fast_1d is not None and trend_ma_fast_1d < trend_ma_slow_1d:
         return False
@@ -832,6 +1075,30 @@ def compute_entry_v6_long(
         return False
     if volume_score < vol_min:
         return False
+
+    # ── v7: MA200 direction gate ──
+    if use_ma200_filter and ma200_1d is not None and close < ma200_1d:
+        return False
+
+    # ── v7: Pullback gate (enter within 3% of MA7) ──
+    if use_pullback_filter and ma7_1d and ma7_1d > 0:
+        if abs(close - ma7_1d) / ma7_1d > 0.03:
+            return False
+
+    # ── v7: Volume expansion gate ──
+    if use_volume_expan and vol_5d_avg > 0 and last_volume < vol_5d_avg:
+        return False
+
+    # ── v7: Entry quality score gate ──
+    if min_entry_score > 0 and ma7_1d:
+        sc = _entry_score_v7_long(
+            trend_score, close, ma7_1d, ma20_1d, ma20_1d, ma200_1d,
+            trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
+            last_volume, vol_5d_avg, rsi_1d,
+        )
+        if sc < min_entry_score:
+            return False
+
     return True
 
 
@@ -845,9 +1112,12 @@ def compute_entry_v6_short(
     volume_score: float,
     trend_max: int = -3,
     vol_min: float = 0.3,
+    rsi_min: float = 45,
 ) -> bool:
-    """Entry signal for SHORT: bear trend (trend_ma_fast < trend_ma_slow 1D) + price below MA20/trend_ma_slow."""
+    """Entry signal for SHORT: bear trend + price below MA20 + RSI not oversold."""
     if trend_score > trend_max:
+        return False
+    if rsi_1d < rsi_min:
         return False
     if trend_ma_fast_1d is not None and trend_ma_fast_1d > trend_ma_slow_1d:
         return False
@@ -865,10 +1135,12 @@ _V6_NEXT_STATE = {
     "LONG_ENTRY_2": ("LONG_ENTRY_3", "ADD_LONG_ENTRY_3"),
     "LONG_ENTRY_3": ("LONG_ENTRY_4", "ADD_LONG_ENTRY_4"),
     "LONG_ENTRY_4": ("LONG_ENTRY_5", "ADD_LONG_ENTRY_5"),
+    "LONG_ENTRY_5": ("LONG_ENTRY_5", "HOLD"),
     "SHORT_ENTRY_1": ("SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"),
     "SHORT_ENTRY_2": ("SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"),
     "SHORT_ENTRY_3": ("SHORT_ENTRY_4", "ADD_SHORT_ENTRY_4"),
     "SHORT_ENTRY_4": ("SHORT_ENTRY_5", "ADD_SHORT_ENTRY_5"),
+    "SHORT_ENTRY_5": ("SHORT_ENTRY_5", "HOLD"),
 }
 
 def resolve_action_v6(
@@ -877,14 +1149,16 @@ def resolve_action_v6(
     entry_short: bool,
     prev_pos_state: str,
     current_price: float | None = None,
-    entry_price: float | None = None,
+    last_entry_price: float | None = None,
     leverage: float = 3.0,
     deployed_margin_pct: float = 0.0,
+    snowball_pnl_min: float = 0.03,
 ) -> tuple[str, str]:
-    """State machine v6 — snowball pyramiding into winning positions.
+    """State machine — snowball on winning positions.
 
-    - FLAT → ENTRY_1 on signal (3% margin)
-    - ENTRY_N → ENTRY_N+1: if PnL > 0, within 50% cap, max 5 entries
+    - FLAT → ENTRY_1 on signal
+    - ENTRY_N → ENTRY_N+1 if PnL from LAST entry > snowball_pnl_min (3% price move)
+    - Max 2 snowball adds
     """
     if prev_pos_state == "FLAT":
         if entry_long:
@@ -894,30 +1168,26 @@ def resolve_action_v6(
         return ("FLAT", "NO_TRADE")
 
     is_long = prev_pos_state.startswith("LONG")
-    entry_signal = entry_long if is_long else entry_short
 
-    if not entry_signal:
+    # PnL from LAST entry price (not original)
+    pnl_from_last = 0.0
+    if current_price and last_entry_price and last_entry_price > 0:
+        pnl_from_last = ((current_price - last_entry_price) / last_entry_price * 100) if is_long \
+                        else ((last_entry_price - current_price) / last_entry_price * 100)
+    threshold = snowball_pnl_min * 100  # e.g., 3% → 3
+    if pnl_from_last < threshold:
         return (prev_pos_state, "HOLD")
 
-    # PnL check: only snowball if winning (≥1%)
-    pnl_pct = 0.0
-    if current_price and entry_price and entry_price > 0:
-        pnl_pct = ((current_price - entry_price) / entry_price * 100) if is_long \
-                  else ((entry_price - current_price) / entry_price * 100)
-    if pnl_pct <= 1.0:
+    # Size: get_snowball_size handles the sizing rules
+    entry_num = int(prev_pos_state.split("_")[-1]) + 1  # next entry number
+    if entry_num - 1 >= MAX_SNOWBALL_ENTRIES:
         return (prev_pos_state, "HOLD")
 
-    # Cap check: total exposure (margin × leverage) ≤ 50% of equity
-    next_margin = deployed_margin_pct + POSITION_SIZE_SNOWBALL
-    if next_margin * leverage > MAX_MARGIN_PER_COIN_PCT:
+    # Cap check
+    next_margin = deployed_margin_pct + POSITION_SIZE_SNOWBALL  # approximate
+    if next_margin > MAX_MARGIN_PER_COIN_PCT:
         return (prev_pos_state, "HOLD")
 
-    # Max entries check
-    entry_num = int(prev_pos_state.split("_")[-1])
-    if entry_num >= MAX_SNOWBALL_ENTRIES:
-        return (prev_pos_state, "HOLD")
-
-    # Next state
     return _V6_NEXT_STATE.get(prev_pos_state, (prev_pos_state, "HOLD"))
 
 
@@ -1219,7 +1489,7 @@ def analyse_coin(
     last_high = highs_1d[-1]
     last_volume = volumes_1d[-1]
 
-    # v6 indicators
+    # v7 indicators
     rsi_1d = compute_rsi(closes_1d, 14)
     ma20_1d_all = sma(closes_1d, 20)
     ma50_1d_all = sma(closes_1d, 50)
@@ -1240,15 +1510,27 @@ def analyse_coin(
 
     volume_score = compute_volume_score(last_volume, vol_ma20_1d)
 
+    # v7: volume 5d average for expansion filter
+    vol_5d_avg = sum(volumes_1d[-6:-1]) / 5 if len(volumes_1d) >= 6 else last_volume
+
     # v6 entry signals (per-coin profile)
     entry_long = compute_entry_v6_long(
         trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
         trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
+        rsi_max=profile.get("rsi_max_long", 55),
+        # v7 enhanced
+        ma7_1d=ma7_1d, ma200_1d=ma200_1d,
+        last_volume=last_volume, vol_5d_avg=vol_5d_avg,
+        use_ma200_filter=profile.get("use_ma200_filter", False),
+        use_pullback_filter=profile.get("use_pullback_filter", False),
+        use_volume_expan=profile.get("use_volume_expan", False),
+        min_entry_score=profile.get("min_entry_score", 0),
     )
     entry_short = (
         compute_entry_v6_short(
             trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
             trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+            rsi_min=profile.get("rsi_min_short", 45),
         ) if coin in SHORT_ALLOWED else False
     )
 
@@ -1325,11 +1607,19 @@ def analyse_coin(
             entry_long = compute_entry_v6_long(
                 trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
                 trend_min=_trend_min, vol_min=profile["vol_min"],
+                rsi_max=profile.get("rsi_max_long", 55),
+                ma7_1d=ma7_1d, ma200_1d=ma200_1d,
+                last_volume=last_volume, vol_5d_avg=vol_5d_avg,
+                use_ma200_filter=profile.get("use_ma200_filter", False),
+                use_pullback_filter=profile.get("use_pullback_filter", False),
+                use_volume_expan=profile.get("use_volume_expan", False),
+                min_entry_score=profile.get("min_entry_score", 0),
             )
             entry_short = (
                 compute_entry_v6_short(
                     trend_score, rsi_1d, last_close, ma20_1d, trend_ma_slow_1d, trend_ma_fast_1d, volume_score,
                     trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+                    rsi_min=profile.get("rsi_min_short", 45),
                 ) if coin in SHORT_ALLOWED else False
             )
             if tight_mode and (entry_long or entry_short):
@@ -1349,8 +1639,11 @@ def analyse_coin(
 
             if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
                 entry_price = last_close
-                remaining_size = POSITION_SIZE_BASE
+                remaining_size = get_position_size(trend_score)
                 trailing_stop = None
+                highest_since_entry = None
+                # Store entry trend for trail adjustment
+                _entry_trend = trend_score
                 highest_since_entry = None
             elif action.startswith("ADD_"):
                 remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
@@ -1375,9 +1668,12 @@ def analyse_coin(
             recent_10d_low, recent_10d_high,
             trailing_stop, highest_since_entry,
             max_loss_pct=profile["max_loss_pct"],
-            trailing_pct=profile["trailing_pct"],
+            trailing_pct=profile["trailing_pct"] * get_trailing_multiplier(trend_score),
             initial_stop_pct=profile["initial_stop_pct"],
             hard_stop_pct=profile["hard_stop_pct"],
+            atr_1d=atr_1d,
+            trail_atr_mult=profile.get("trail_atr_mult", 0),
+            use_profit_locking=profile.get("use_profit_locking", False),
         )
         trailing_stop = new_trailing_stop
         highest_since_entry = new_highest
@@ -1389,12 +1685,14 @@ def analyse_coin(
                 current_price=last_close, entry_price=entry_price,
                 leverage=profile["leverage"],
                 deployed_margin_pct=remaining_size,
+                snowball_pnl_min=profile.get("snowball_pnl_min", 0.02),
             )
             if snowball_action.startswith("ADD_"):
                 pos_state, action = snowball_state, snowball_action
-                remaining_size = (remaining_size or 0) + POSITION_SIZE_SNOWBALL
-                next_rules = [f"Snowball: {action} (PnL={pnl_pct:+.1f}%)"]
-                print(f"  [{coin}] SNOWBALL {action} at {pnl_pct:+.1f}% PnL "
+                add_sz = get_snowball_size(pnl_pct)
+                remaining_size = (remaining_size or 0) + add_sz
+                next_rules = [f"Snowball: {action} +{add_sz:.1%} (PnL={pnl_pct:+.1f}%)"]
+                print(f"  [{coin}] SNOWBALL {action} +{add_sz:.1%} at {pnl_pct:+.1f}% PnL "
                       f"(total margin={remaining_size:.0%})", file=sys.stderr)
             else:
                 pos_state, action = prev_pos_state, "HOLD"
