@@ -243,6 +243,143 @@ def _fib_cooldown_bars(consec_losses: int, shift: int = 0) -> int:
         a, b = b, a + b
     return a
 
+def compute_adx(candles: list[dict], period: int = 14) -> float:
+    """Compute Average Directional Index (ADX) from OHLC candles.
+    
+    ADX measures trend strength (not direction).
+    ADX < 25: weak/choppy trend → skip entry
+    ADX >= 25: strong trend → allow entry
+    """
+    period = int(period)
+    if len(candles) < period + 1:
+        return 50.0  # default to strong trend if insufficient data
+    
+    # Calculate True Range, +DM, -DM
+    tr_list = []
+    plus_dm_list = []
+    minus_dm_list = []
+    
+    for i in range(1, len(candles)):
+        high = candles[i]["high"]
+        low = candles[i]["low"]
+        prev_high = candles[i-1]["high"]
+        prev_low = candles[i-1]["low"]
+        prev_close = candles[i-1]["close"]
+        
+        # True Range
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        tr_list.append(tr)
+        
+        # Directional Movement
+        up_move = high - prev_high
+        down_move = prev_low - low
+        
+        plus_dm = up_move if (up_move > down_move and up_move > 0) else 0
+        minus_dm = down_move if (down_move > up_move and down_move > 0) else 0
+        
+        plus_dm_list.append(plus_dm)
+        minus_dm_list.append(minus_dm)
+    
+    # Smooth with Wilder's method
+    atr = sum(tr_list[:period])
+    plus_dm_sum = sum(plus_dm_list[:period])
+    minus_dm_sum = sum(minus_dm_list[:period])
+    
+    dx_list = []
+    
+    for i in range(period, len(tr_list)):
+        atr = atr - (atr / period) + tr_list[i]
+        plus_dm_sum = plus_dm_sum - (plus_dm_sum / period) + plus_dm_list[i]
+        minus_dm_sum = minus_dm_sum - (minus_dm_sum / period) + minus_dm_list[i]
+        
+        if atr == 0:
+            continue
+        
+        plus_di = 100 * plus_dm_sum / atr
+        minus_di = 100 * minus_dm_sum / atr
+        
+        di_sum = plus_di + minus_di
+        if di_sum == 0:
+            dx = 0
+        else:
+            dx = 100 * abs(plus_di - minus_di) / di_sum
+        
+        dx_list.append(dx)
+    
+    if not dx_list:
+        return 50.0
+    
+    # Calculate ADX as average of DX
+    adx = sum(dx_list[-period:]) / min(period, len(dx_list))
+    return adx
+
+
+def compute_sideway_score(candles: list[dict], sf: float = 1.0) -> int:
+    """Compute sideway score (0-4) based on MA convergence, slope, volume, and range.
+    
+    Score interpretation:
+      0-1: Trending market
+      2-3: Sideway / consolidation
+      4:   Strong accumulation (very tight range, low volume)
+    
+    Components:
+      1. MA spread: (abs(MA3-MA20) + abs(MA7-MA20) + abs(MA10-MA20)) / MA20 < 0.05
+      2. MA20 slope: abs((MA20_now - MA20_prev_5bars) / MA20_prev_5bars) < 0.01
+      3. Volume ratio: volume_now / volume_ma20 < 0.8
+      4. Price range: (high20 - low20) / low20 < 0.15
+    """
+    if len(candles) < int(20 * sf) + 5:
+        return 0  # Insufficient data, assume trending
+    
+    closes = [c['close'] for c in candles]
+    highs = [c['high'] for c in candles]
+    lows = [c['low'] for c in candles]
+    volumes = [c['volume'] for c in candles]
+    
+    # MA calculations (scaled by sf)
+    ma3 = sma(closes, int(3 * sf))
+    ma7 = sma(closes, int(7 * sf))
+    ma10 = sma(closes, int(10 * sf))
+    ma20 = sma(closes, int(20 * sf))
+    
+    if not ma3 or not ma7 or not ma10 or not ma20:
+        return 0
+    if ma3[-1] is None or ma7[-1] is None or ma10[-1] is None or ma20[-1] is None:
+        return 0
+    
+    score = 0
+    
+    # 1. MA spread
+    if ma20[-1] > 0:
+        ma_spread = (abs(ma3[-1] - ma20[-1]) + abs(ma7[-1] - ma20[-1]) + abs(ma10[-1] - ma20[-1])) / ma20[-1]
+        if ma_spread < 0.05:
+            score += 1
+    
+    # 2. MA20 slope (current vs 5 bars ago)
+    idx_prev = int(5 * sf)
+    if len(ma20) > idx_prev and ma20[-1 - idx_prev] is not None and ma20[-1 - idx_prev] > 0:
+        slope20 = (ma20[-1] - ma20[-1 - idx_prev]) / ma20[-1 - idx_prev]
+        if abs(slope20) < 0.01:
+            score += 1
+    
+    # 3. Volume ratio
+    vol_ma20 = sma(volumes, int(20 * sf))
+    if vol_ma20 and vol_ma20[-1] is not None and vol_ma20[-1] > 0:
+        vol_ratio = volumes[-1] / vol_ma20[-1]
+        if vol_ratio < 0.8:
+            score += 1
+    
+    # 4. Price range (20-bar high-low range)
+    period = int(20 * sf)
+    high20 = max(highs[-period:]) if len(highs) >= period else highs[-1]
+    low20 = min(lows[-period:]) if len(lows) >= period else lows[-1]
+    if low20 > 0:
+        range_pct = (high20 - low20) / low20
+        if range_pct < 0.15:
+            score += 1
+    
+    return score
+
 # Trend engine MA periods on 36h candles (aggregated 3×12h)
 TREND_MA_FAST = 7
 TREND_MA_MID = 14
@@ -2108,13 +2245,6 @@ def analyse_coin(
     deployed = sum(e.get("margin_pct", 0) for e in entries)
     max_margin = tot_cap * MAX_PER_COIN_PCT
     can_enter_base = (deployed * tot_cap) < max_margin
-
-    # Cooldown between entries (flat cd_bars)
-    if can_enter_base and cd_bars > 0 and last_entry_ts > 0:
-        bar_sec = 12 * 3600
-        bars_passed = (now_ts - last_entry_ts) / bar_sec if now_ts > last_entry_ts else 999
-        if bars_passed < cd_bars:
-            can_enter_base = False
 
     # Direction-specific Fibonacci cooldown: LONG cooldown blocks LONG only, SHORT blocks SHORT only
     can_enter_long = can_enter_base
