@@ -1,0 +1,32 @@
+name: OKX API Test (LINK $1)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  okx-test:
+    name: Test OKX API with LINK-USDT-SWAP $1 long
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run OKX LINK test
+        working-directory: scripts
+        env:
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+        run: python test_okx_link.py
