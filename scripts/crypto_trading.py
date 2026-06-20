@@ -61,7 +61,7 @@ except ImportError:
 
 COINS = ["ETH", "BNB", "TRX"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED = {"ETH"}
+SHORT_ALLOWED: set[str] = set()  # short disabled — needs dedicated scoring function
 BTC_SYMBOL = "BTCUSDT"
 
 # ── v9 Capital & Risk ────────────────────────────────────────────────
