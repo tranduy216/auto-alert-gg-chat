@@ -127,6 +127,7 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
 
 CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
 BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
+BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
 
 SF = 2.0                     # scale factor: 12h → 24h equivalent (AGGR=2)
 
