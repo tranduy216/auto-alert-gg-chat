@@ -61,7 +61,7 @@ except ImportError:
 
 COINS = ["ETH", "BNB", "TRX"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED: set[str] = set()  # short disabled — needs dedicated scoring function
+SHORT_ALLOWED: set[str] = {"ETH"}
 BTC_SYMBOL = "BTCUSDT"
 
 # ── v9 Capital & Risk ────────────────────────────────────────────────
@@ -194,6 +194,8 @@ SHORT_COOLDOWN_LOSSES = 2    # consecutive short losses → pause short on this 
 SHORT_COOLDOWN_DAYS = 14     # pause duration (increased from 12)
 LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
 LONG_COOLDOWN_DAYS = 14      # pause duration (increased from 12)
+LOSS_COOLDOWN_THRESHOLD = 5  # consecutive losses (any type) → pause all entries
+LOSS_COOLDOWN_BARS = 8       # pause duration (8 bars = 4 days)
 
 # Trend engine MA periods on 36h candles (aggregated 3×12h)
 TREND_MA_FAST = 10
@@ -293,10 +295,16 @@ COIN_PROFILES: dict[str, dict] = {
         "short_max_loss_pct": 0.07,
         "position_size_base": 0.18,
         "trend_min_long": 2,
+        "trend_max_short": -3,
+        "rsi_min_short": 45,
+        "short_min_entry_score": 70,
     },
     "BNB": {
         "position_size_base": 0.16,
         "trend_min_long": 3,
+        "trend_max_short": -3,
+        "rsi_min_short": 45,
+        "short_min_entry_score": 70,
     },
     "TRX": {
         "max_loss_pct": 0.07,
@@ -1276,6 +1284,75 @@ def _entry_score_v7_long(
     return round(sc, 2)
 
 
+def _entry_score_v7_short(
+    trend_score: int,
+    close: float,
+    ma7_1d: float,
+    ma10_1d: float,
+    ma20_1d: float,
+    ma200_1d: float | None,
+    trend_ma_fast_1d: float | None,
+    trend_ma_slow_1d: float,
+    volume_score: float,
+    last_volume: float,
+    vol_5d_avg: float,
+    rsi_1d: float,
+    candles_12h: list[dict] | None = None,
+) -> float:
+    """Composite short entry quality score 0-100. Higher = stronger short signal.
+
+    Mirrors _entry_score_v7_long for bearish conditions with short-specific
+    enhancements: lower-high pattern detection and overhead resistance scoring.
+    """
+    sc = 0.0
+
+    # Trend strength (40 pts) — bearish trend dominant signal
+    sc += {-3: 40, -2: 28, -1: 14, 0: 6}.get(trend_score, 0)
+
+    # MA alignment: fast < slow = bearish (12 pts)
+    if trend_ma_fast_1d and trend_ma_fast_1d < trend_ma_slow_1d:
+        sc += 12
+    elif trend_ma_fast_1d:
+        sc += 4
+
+    # MA200 overhead resistance (12 pts) — price below MA200 = strong bearish
+    if ma200_1d and close < ma200_1d:
+        sc += 12
+    elif ma200_1d and close < ma200_1d * 1.08:
+        sc += 7
+    elif ma200_1d:
+        sc += 2
+    else:
+        sc += 6
+
+    # Pullback proximity to MA7 from below (16 pts) — bounce rejection
+    if ma7_1d > 0:
+        dist = abs(close - ma7_1d) / ma7_1d
+        if dist <= 0.02:   sc += 16
+        elif dist <= 0.04: sc += 12
+        elif dist <= 0.06: sc += 8
+        elif dist <= 0.10: sc += 4
+        else:              sc += 1
+
+    # Volume composite (12 pts) — selling pressure confirmation
+    if vol_5d_avg > 0 and last_volume > vol_5d_avg:
+        sc += 7
+    elif vol_5d_avg > 0 and last_volume > vol_5d_avg * 0.7:
+        sc += 3
+    elif vol_5d_avg > 0:
+        sc += 1
+    sc += min(volume_score, 1.0) * 5
+
+    # RSI neutral-bearish zone (8 pts) — not oversold, room to fall
+    if 45 <= rsi_1d <= 60:
+        sc += 8
+    elif 40 <= rsi_1d <= 65:
+        sc += 5
+    elif rsi_1d >= 30:    sc += 2
+
+    return round(sc, 2)
+
+
 # ---------------------------------------------------------------------------
 # Entry system (v6) — RSI pullback within trend
 # ---------------------------------------------------------------------------
@@ -1355,8 +1432,21 @@ def compute_entry_v6_short(
     trend_max: int = -3,
     vol_min: float = 0.3,
     rsi_min: float = 45,
+    ma7_1d: float | None = None,
+    ma10_1d: float | None = None,
+    ma200_1d: float | None = None,
+    last_volume: float = 0,
+    vol_5d_avg: float = 0,
+    use_ma200_filter: bool = False,
+    use_pullback_filter: bool = False,
+    use_volume_expan: bool = False,
+    min_entry_score: float = 0,
+    candles_12h: list[dict] | None = None,
 ) -> bool:
-    """Entry signal for SHORT: bear trend + price below MA20 + RSI not oversold."""
+    """Entry signal for SHORT: bear trend + price below MA20 + RSI not oversold.
+
+    v7: optional MA200 gate, pullback-to-MA7, volume expansion, and quality score.
+    """
     if trend_score > trend_max:
         return False
     if rsi_1d < rsi_min:
@@ -1369,6 +1459,29 @@ def compute_entry_v6_short(
         return False
     if volume_score < vol_min:
         return False
+
+    if use_ma200_filter and ma200_1d is not None and close > ma200_1d:
+        return False
+
+    if ma200_1d is not None and close > ma200_1d:
+        return False
+
+    if use_pullback_filter and ma7_1d and ma7_1d > 0:
+        if abs(close - ma7_1d) / ma7_1d > 0.03:
+            return False
+
+    if use_volume_expan and vol_5d_avg > 0 and last_volume < vol_5d_avg:
+        return False
+
+    if min_entry_score > 0 and ma7_1d:
+        sc = _entry_score_v7_short(
+            trend_score, close, ma7_1d, ma10_1d or ma20_1d, ma20_1d, ma200_1d,
+            trend_ma_fast_1d, trend_ma_slow_1d, volume_score,
+            last_volume, vol_5d_avg, rsi_1d, candles_12h,
+        )
+        if sc < min_entry_score:
+            return False
+
     return True
 
 
@@ -1814,6 +1927,8 @@ def analyse_coin(
     last_entry_ts = prev.get("last_entry_ts", 0)
     long_cd_until = prev.get("long_cooldown_until", "")
     short_cd_until = prev.get("short_cooldown_until", "")
+    consec_losses = prev.get("consec_losses", 0)
+    loss_cooldown_until = prev.get("loss_cooldown_until", "")
 
     if kill_switch_active:
         db2 = _get_db()
@@ -1901,6 +2016,28 @@ def analyse_coin(
                 exit_reasons.append(f"Trail: {last_close:.2f} <= {tstop:.2f}")
                 removed = True
 
+        # Trend reversal exit: close shorts when trend turns bullish
+        if is_sh and not removed and trend_score >= 2:
+            total_pnl += roi * rem / 100
+            exit_reasons.append(f"Short trend reversal: score {trend_score:+d}, ROI {roi:.1f}%")
+            removed = True
+
+        # Trend reversal exit: close longs when trend turns bearish
+        if not is_sh and not removed and trend_score <= -2:
+            total_pnl += roi * rem / 100
+            exit_reasons.append(f"Long trend reversal: score {trend_score:+d}, ROI {roi:.1f}%")
+            removed = True
+
+        if removed:
+            if roi < 0:
+                consec_losses += 1
+                if consec_losses >= LOSS_COOLDOWN_THRESHOLD:
+                    from datetime import timedelta
+                    loss_cooldown_until = (_now_vnt() + timedelta(hours=LOSS_COOLDOWN_BARS * 12)).isoformat()
+                    consec_losses = 0
+            else:
+                consec_losses = 0
+
         if not removed:
             new_entries.append(ent)
 
@@ -1919,9 +2056,23 @@ def analyse_coin(
             can_enter = False
 
     # Direction cooldowns
+    _long_cd_active = False
+    _short_cd_active = False
     if can_enter and long_cd_until:
         try:
             if datetime.fromisoformat(long_cd_until) > _now_vnt():
+                _long_cd_active = True
+        except Exception: pass
+    if can_enter and short_cd_until:
+        try:
+            if datetime.fromisoformat(short_cd_until) > _now_vnt():
+                _short_cd_active = True
+        except Exception: pass
+
+    # Loss streak cooldown
+    if can_enter and loss_cooldown_until:
+        try:
+            if datetime.fromisoformat(loss_cooldown_until) > _now_vnt():
                 can_enter = False
         except Exception: pass
 
@@ -1934,34 +2085,52 @@ def analyse_coin(
             last_volume=last_volume, vol_5d_avg=vol_5d_avg,
             use_ma200_filter=False, use_pullback_filter=False,
             use_volume_expan=False, min_entry_score=ENTRY_MIN_SCORE,
-        )
+        ) if not _long_cd_active else False
         es = compute_entry_v6_short(
             trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
-            trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+            trend_max=profile.get("trend_max_short", -2), vol_min=profile["vol_min"],
             rsi_min=profile.get("rsi_min_short", 10),
-        ) if coin in SHORT_ALLOWED else False
+            ma7_1d=ma7_12h, ma10_1d=ma10_12h, ma200_1d=ma200_12h,
+            last_volume=last_volume, vol_5d_avg=vol_5d_avg,
+            use_ma200_filter=False, use_pullback_filter=False,
+            use_volume_expan=False,
+            min_entry_score=profile.get("short_min_entry_score", ENTRY_MIN_SCORE),
+            candles_12h=candles_12h,
+        ) if (coin in SHORT_ALLOWED and not _short_cd_active) else False
 
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             is_sh = act.startswith("OPEN_SHORT")
-            sc = _entry_score_v7_long(
-                trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
-                exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
-            )
-            strong = sc >= ENTRY_MIN_SCORE
-            mp = _entry_margin(coin, strong)
-            if deployed + mp <= max_margin / tot_cap + 0.001:
-                entries.append({
-                    "entry_price": last_close,
-                    "margin_pct": mp,
-                    "is_short": is_sh,
-                    "tp_stage": 0,
-                    "remaining_size": 1.0,
-                    "highest_since_entry": last_close,
-                    "trailing_stop": None,
-                })
-                entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
-                last_entry_ts = now_ts
+            has_active_longs = any(not e.get("is_short", False) for e in entries)
+            has_active_shorts = any(e.get("is_short", False) for e in entries)
+            if (is_sh and has_active_longs) or (not is_sh and has_active_shorts):
+                pass
+            else:
+                if is_sh:
+                    sc = _entry_score_v7_short(
+                        trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                        exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
+                        candles_12h,
+                    )
+                else:
+                    sc = _entry_score_v7_long(
+                        trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                        exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
+                    )
+                strong = sc >= ENTRY_MIN_SCORE
+                mp = _entry_margin(coin, strong)
+                if deployed + mp <= max_margin / tot_cap + 0.001:
+                    entries.append({
+                        "entry_price": last_close,
+                        "margin_pct": mp,
+                        "is_short": is_sh,
+                        "tp_stage": 0,
+                        "remaining_size": 1.0,
+                        "highest_since_entry": last_close,
+                        "trailing_stop": None,
+                    })
+                    entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
+                    last_entry_ts = now_ts
 
     # Determine overall action
     if exit_reasons:
@@ -2007,6 +2176,8 @@ def analyse_coin(
                 "last_entry_ts": last_entry_ts,
                 "long_cooldown_until": long_cd_until,
                 "short_cooldown_until": short_cd_until,
+                "consec_losses": consec_losses,
+                "loss_cooldown_until": loss_cooldown_until,
             })
         except Exception as exc:
             print(f"[crypto_trading] Warning: could not save state for {coin}: {exc}", file=sys.stderr)
