@@ -551,6 +551,7 @@ def _smart_round(v: float) -> float:
 
 
 def sma(values: list[float], period: int) -> list[float | None]:
+    period = int(period)
     result: list[float | None] = []
     for i in range(len(values)):
         if i < period - 1:
@@ -561,6 +562,7 @@ def sma(values: list[float], period: int) -> list[float | None]:
 
 
 def compute_atr(candles: list[dict], period: int = 14) -> float:
+    period = int(period)
     if len(candles) < period + 1:
         return 0.0
     trs = []
@@ -574,6 +576,7 @@ def compute_atr(candles: list[dict], period: int = 14) -> float:
 
 
 def compute_rsi(closes: list[float], period: int = 14) -> float:
+    period = int(period)
     if len(closes) < period + 1:
         return 50.0
     gains = []
@@ -1931,18 +1934,19 @@ def analyse_coin(
     exec_s = (sma(closes_12h, EXEC_MA_SLOW)[-1] or ma50_12h)
     ma200_12h_all = sma(closes_12h, 200 * SF)
     ma200_12h = ma200_12h_all[-1] if ma200_12h_all[-1] is not None else None
-    recent_10d_low = min(lows_12h[-(10 * SF):]) if len(lows_12h) >= 10 * SF else last_close * 0.95
-    recent_10d_high = max(highs_12h[-(10 * SF):]) if len(highs_12h) >= 10 * SF else last_close * 1.05
+    recent_10d_low = min(lows_12h[-int(10 * SF):]) if len(lows_12h) >= 10 * SF else last_close * 0.95
+    recent_10d_high = max(highs_12h[-int(10 * SF):]) if len(highs_12h) >= 10 * SF else last_close * 1.05
 
     atr_12h = compute_atr(candles_12h, 14 * SF)
-    atrs_12h = [compute_atr(candles_12h[:i + 1], 14 * SF) for i in range(14 * SF, len(candles_12h))]
+    _atr_period = int(14 * SF)
+    atrs_12h = [compute_atr(candles_12h[:i + 1], _atr_period) for i in range(_atr_period, len(candles_12h))]
     atr_ma20_12h_all = sma(atrs_12h, 20 * SF)
     atr_ma20_12h = atr_ma20_12h_all[-1] if atr_ma20_12h_all[-1] is not None else atr_12h
 
     volume_score = compute_volume_score(last_volume, vol_ma20_12h)
 
     # v7: volume 5d average for expansion filter
-    vol_5d_avg = sum(volumes_12h[-(6 * SF):-1]) / (5 * SF) if len(volumes_12h) >= 6 * SF else last_volume
+    vol_5d_avg = sum(volumes_12h[-int(6 * SF):-1]) / (5 * SF) if len(volumes_12h) >= 6 * SF else last_volume
 
     # v6 entry signals (per-coin profile)
     entry_long = compute_entry_v6_long(
