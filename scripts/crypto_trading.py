@@ -243,6 +243,15 @@ def _fib_cooldown_bars(consec_losses: int, shift: int = 0) -> int:
         a, b = b, a + b
     return a
 
+# ── 3SL Rolling Fibonacci Lock (separated per direction) ──────────────
+# When 3 consecutive SLs in same direction → lock that direction for 8 bars
+# Fibonacci progression: 3→8, 4→13, 5→21, 6→34 bars
+# Combined with Sideway<3 filter to avoid choppy markets
+SL_ROLLING_CAP = 3
+SL_ROLLING_LOCK_BARS = 8
+SL_ROLLING_FIB = True
+SIDEWAY_MAX_SCORE = 2  # Skip entry if sideway_score > 2 (i.e., score 3 or 4)
+
 def compute_adx(candles: list[dict], period: int = 14) -> float:
     """Compute Average Directional Index (ADX) from OHLC candles.
     
@@ -2118,6 +2127,11 @@ def analyse_coin(
     consec_s = prev.get("consec_losses_short", 0)
     cd_l_until = prev.get("cooldown_long_until", "")
     cd_s_until = prev.get("cooldown_short_until", "")
+    # 3SL Rolling lock (separated per direction)
+    rolling_sl_long = prev.get("rolling_sl_long", 0)
+    rolling_sl_short = prev.get("rolling_sl_short", 0)
+    rolling_lock_until_long = prev.get("rolling_lock_until_long", "")
+    rolling_lock_until_short = prev.get("rolling_lock_until_short", "")
 
     if kill_switch_active:
         db2 = _get_db()
@@ -2232,9 +2246,34 @@ def analyse_coin(
                     if cd_bars_fib > 0:
                         from datetime import timedelta
                         cd_l_until = (_now_vnt() + timedelta(hours=cd_bars_fib * 12)).isoformat()
+                
+                # 3SL Rolling Fibonacci Lock (separated per direction)
+                if is_sh:
+                    rolling_sl_short += 1
+                    if rolling_sl_short >= SL_ROLLING_CAP:
+                        lock_bars = SL_ROLLING_LOCK_BARS
+                        if SL_ROLLING_FIB:
+                            extra = rolling_sl_short - SL_ROLLING_CAP
+                            lock_bars = _fib_cooldown_bars(SL_ROLLING_CAP + extra, 0)
+                        from datetime import timedelta
+                        rolling_lock_until_short = (_now_vnt() + timedelta(hours=lock_bars * 12)).isoformat()
+                else:
+                    rolling_sl_long += 1
+                    if rolling_sl_long >= SL_ROLLING_CAP:
+                        lock_bars = SL_ROLLING_LOCK_BARS
+                        if SL_ROLLING_FIB:
+                            extra = rolling_sl_long - SL_ROLLING_CAP
+                            lock_bars = _fib_cooldown_bars(SL_ROLLING_CAP + extra, 0)
+                        from datetime import timedelta
+                        rolling_lock_until_long = (_now_vnt() + timedelta(hours=lock_bars * 12)).isoformat()
             else:
-                if is_sh: consec_s = 0
-                else: consec_l = 0
+                # Win resets all counters
+                if is_sh:
+                    consec_s = 0
+                    rolling_sl_short = 0
+                else:
+                    consec_l = 0
+                    rolling_sl_long = 0
 
         if not removed:
             new_entries.append(ent)
@@ -2260,6 +2299,26 @@ def analyse_coin(
             if datetime.fromisoformat(cd_s_until) > _now_vnt():
                 can_enter_short = False
         except Exception: pass
+    
+    # 3SL Rolling Fibonacci Lock (separated per direction)
+    if can_enter_long and rolling_lock_until_long:
+        try:
+            if datetime.fromisoformat(rolling_lock_until_long) > _now_vnt():
+                can_enter_long = False
+        except Exception: pass
+    
+    if can_enter_short and rolling_lock_until_short:
+        try:
+            if datetime.fromisoformat(rolling_lock_until_short) > _now_vnt():
+                can_enter_short = False
+        except Exception: pass
+    
+    # Sideway filter: skip entry if sideway_score > SIDEWAY_MAX_SCORE
+    if can_enter_long or can_enter_short:
+        sideway_score = compute_sideway_score(candles_12h, SF)
+        if sideway_score > SIDEWAY_MAX_SCORE:
+            can_enter_long = False
+            can_enter_short = False
 
     if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
@@ -2378,6 +2437,11 @@ def analyse_coin(
                 "consec_losses_short": consec_s,
                 "cooldown_long_until": cd_l_until,
                 "cooldown_short_until": cd_s_until,
+                # 3SL Rolling lock (separated per direction)
+                "rolling_sl_long": rolling_sl_long,
+                "rolling_sl_short": rolling_sl_short,
+                "rolling_lock_until_long": rolling_lock_until_long,
+                "rolling_lock_until_short": rolling_lock_until_short,
             })
         except Exception as exc:
             print(f"[crypto_trading] Warning: could not save state for {coin}: {exc}", file=sys.stderr)
