@@ -61,32 +61,62 @@ except ImportError:
 
 COINS = ["ETH", "BNB", "TRX"]
 SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED: set[str] = {"ETH"}
-BTC_SYMBOL = "BTCUSDT"
+SHORT_ALLOWED: set[str] = {"ETH", "TRX"}
 
 # ── v9 Capital & Risk ────────────────────────────────────────────────
 BASE_CAPITAL = 10000
-TOTAL_CAPITAL_MULT = 1.8
-MAX_PER_COIN_PCT = 0.80
+TOTAL_CAPITAL_MULT = 2.8  # baseline multiplier (per-coin overrides below)
+MAX_PER_COIN_PCT = 0.65
 LOW_DD_COINS = {"ETH"}
 ENTRY_MIN_SCORE = 65
 
 def _coin_lev(coin: str) -> float:
-    return 3.0 if coin in LOW_DD_COINS else 2.5
+    if coin == "ETH": return 2.5
+    if coin == "BNB": return 3.5
+    if coin == "TRX": return 3.5
+    return 3.0
 
 def _coin_sl_roi(coin: str) -> float:
-    return 7.0 if coin in LOW_DD_COINS else 12.0 if coin == "BNB" else 9.0
+    if coin in LOW_DD_COINS: return 10.0
+    return 12.0
 
 def _coin_trail(coin: str) -> float:
-    return 0.035 if coin in LOW_DD_COINS else 0.065
+    if coin in LOW_DD_COINS: return 0.04  # ETH trail
+    if coin == "TRX": return 0.065
+    return 0.065
 
 def _entry_margin(coin: str, strong: bool = True) -> float:
-    if coin in LOW_DD_COINS:
-        return 0.09 if strong else 0.07
-    return 0.07 if strong else 0.055
+    return 0.09 if strong else 0.07
 
-TP_SCHEDULE = [(7.0, 0.07), (12.0, 0.11), (20.0, 0.20), (30.0, 0.27)]
-ENTRY_COOLDOWN_BARS = {"ETH": 0, "BNB": 0, "TRX": 3}
+TP_SCHEDULE = [(8.0, 0.10), (15.0, 0.15), (25.0, 0.20), (40.0, 0.25)]
+
+def _coin_cap(coin: str) -> float:
+    """Per-coin capital multiplier override."""
+    if coin == "ETH": return 2.5
+    if coin == "BNB": return 2.8
+    if coin == "TRX": return 2.5
+    return TOTAL_CAPITAL_MULT
+
+# ── Bear-mode risk reduction ─────────────────────────────────────────
+# When BTC regime is bear (MA50 < MA200), reduce risk:
+#   - All coins: leverage 2.0
+#   - ETH: position multiplier 90%, SL 8%
+#   - BNB/TRX: position multiplier 75%, SL 8%/10%
+BEAR_LEV = 2.0
+
+def _coin_lev_bear(coin: str) -> float:
+    return BEAR_LEV
+
+def _coin_sl_bear(coin: str) -> float:
+    if coin == "ETH": return 8.0
+    if coin == "BNB": return 10.0
+    if coin == "TRX": return 8.0
+    return 10.0
+
+def _coin_pos_mult_bear(coin: str) -> float:
+    if coin == "ETH": return 0.90
+    return 0.75  # BNB, TRX, others
+ENTRY_COOLDOWN_BARS = {"ETH": 0, "BNB": 0, "TRX": 5}
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
 ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
@@ -98,7 +128,7 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
 CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
 BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
 
-SF = 1.5                     # scale factor: 12h → 1d equivalent (winner: +26.8% CAGR)
+SF = 2.0                     # scale factor: 12h → 24h equivalent (AGGR=2)
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
@@ -187,20 +217,35 @@ CORRELATION_GROUPS: dict[str, list[str]] = {
     "BNB": ["ETH"],
 }
 
-# Loss streak
+# Loss streak — Fibonacci cooldown per-coin
 LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
 LOSS_STREAK_REDUCE = 0.5     # size multiplier
-SHORT_COOLDOWN_LOSSES = 2    # consecutive short losses → pause short on this coin
-SHORT_COOLDOWN_DAYS = 14     # pause duration (increased from 12)
-LONG_COOLDOWN_LOSSES = 2     # consecutive long losses → pause long on this coin
-LONG_COOLDOWN_DAYS = 14      # pause duration (increased from 12)
-LOSS_COOLDOWN_THRESHOLD = 5  # consecutive losses (any type) → pause all entries
-LOSS_COOLDOWN_BARS = 8       # pause duration (8 bars = 4 days)
+# Fibonacci cooldown: consec_losses → cooldown bars
+#   2 losses → 3 bars (F4)
+#   3 losses → 5 bars (F5)
+#   4 losses → 8 bars (F6)
+#   5 losses → 13 bars (F7)
+#   ... → general formula: fib(consec_losses + 2)
+FIBONACCI_COOLDOWN_MIN = 2   # minimum consecutive losses to trigger cooldown
+def _fib_cooldown_bars(consec_losses: int, shift: int = 0) -> int:
+    """Return cooldown bars using Fibonacci sequence with optional shift.
+
+    shift=0 (standard): 2→3, 3→5, 4→8, 5→13, 6→21, ...
+    shift=1:            2→5, 3→8, 4→13, 5→21, 6→34, ...
+    shift=2:            2→8, 3→13, 4→21, 5→34, 6→55, ...
+    General: fib(n) where n = consec_losses + 2 + shift
+    """
+    if consec_losses < FIBONACCI_COOLDOWN_MIN:
+        return 0
+    a, b = 1, 1
+    for _ in range(consec_losses + 1 + shift):
+        a, b = b, a + b
+    return a
 
 # Trend engine MA periods on 36h candles (aggregated 3×12h)
-TREND_MA_FAST = 10
-TREND_MA_MID = 15
-TREND_MA_SLOW = 30
+TREND_MA_FAST = 7
+TREND_MA_MID = 14
+TREND_MA_SLOW = 28
 
 # Execution engine MA periods on 12h (scaled 1.5× from 1D baseline: MA12, MA25, MA20)
 EXEC_MA_FAST = 18
@@ -295,13 +340,14 @@ COIN_PROFILES: dict[str, dict] = {
         "short_max_loss_pct": 0.07,
         "position_size_base": 0.18,
         "trend_min_long": 2,
-        "trend_max_short": -3,
+        "trend_max_short": -2,
         "rsi_min_short": 45,
+        "rsi_max_long": 65,
         "short_min_entry_score": 70,
     },
     "BNB": {
-        "position_size_base": 0.16,
-        "trend_min_long": 3,
+        "position_size_base": 0.18,
+        "trend_min_long": 2,
         "trend_max_short": -3,
         "rsi_min_short": 45,
         "short_min_entry_score": 70,
@@ -310,8 +356,11 @@ COIN_PROFILES: dict[str, dict] = {
         "max_loss_pct": 0.07,
         "short_max_loss_pct": 0.07,
         "short_trailing_pct": 0.78,
-        "position_size_base": 0.16,
-        "trend_min_long": 3,
+        "position_size_base": 0.18,
+        "trend_min_long": 2,
+        "trend_max_short": -2,
+        "rsi_min_short": 45,
+        "short_min_entry_score": 70,
     },
 }
 
@@ -526,16 +575,23 @@ def compute_atr(candles: list[dict], period: int = 14) -> float:
 def compute_rsi(closes: list[float], period: int = 14) -> float:
     if len(closes) < period + 1:
         return 50.0
-    gains = 0.0
-    losses = 0.0
-    for i in range(-period, 0):
+    gains = []
+    losses = []
+    for i in range(1, period + 1):
         diff = closes[i] - closes[i - 1]
-        if diff > 0:
-            gains += diff
-        else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
+        gains.append(diff if diff > 0 else 0.0)
+        losses.append(-diff if diff < 0 else 0.0)
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+    if avg_loss == 0:
+        return 100.0
+    # Wilder's smoothing for subsequent values
+    for i in range(period + 1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gain = diff if diff > 0 else 0.0
+        loss = -diff if diff < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss
@@ -1463,9 +1519,6 @@ def compute_entry_v6_short(
     if use_ma200_filter and ma200_1d is not None and close > ma200_1d:
         return False
 
-    if ma200_1d is not None and close > ma200_1d:
-        return False
-
     if use_pullback_filter and ma7_1d and ma7_1d > 0:
         if abs(close - ma7_1d) / ma7_1d > 0.03:
             return False
@@ -1621,9 +1674,7 @@ def save_state(
     trailing_stop: float | None = None,
     highest_since_entry: float | None = None,
     short_loss_streak: int = 0,
-    short_cooldown_until: str = "",
     long_loss_streak: int = 0,
-    long_cooldown_until: str = "",
     collapse_bar_count: int = 0,
     sideway_phase: str = "",
     sideway_bars: int = 0,
@@ -1658,12 +1709,8 @@ def save_state(
             data["highest_since_entry"] = highest_since_entry
         if short_loss_streak:
             data["short_loss_streak"] = short_loss_streak
-        if short_cooldown_until:
-            data["short_cooldown_until"] = short_cooldown_until
         if long_loss_streak:
             data["long_loss_streak"] = long_loss_streak
-        if long_cooldown_until:
-            data["long_cooldown_until"] = long_cooldown_until
         if collapse_bar_count:
             data["collapse_bar_count"] = collapse_bar_count
         if sideway_phase:
@@ -1819,11 +1866,11 @@ def analyse_coin(
     # BTC regime filter: bear → smaller positions, stricter entries
     _bear_mode = not btc_bull
 
-    # Aggregate 3×12h → 36h candles for trend engine
-    candles_36h = []
-    for i in range(0, len(candles_12h) - 2, 3):
-        b = candles_12h[i:i + 3]
-        candles_36h.append({
+    # Aggregate 2×12h → 24h candles for trend engine
+    candles_24h = []
+    for i in range(0, len(candles_12h) - 1, 2):
+        b = candles_12h[i:i + 2]
+        candles_24h.append({
             "open_time": b[0]["open_time"], "open": b[0]["open"],
             "high": max(d["high"] for d in b),
             "low": min(d["low"] for d in b),
@@ -1831,22 +1878,22 @@ def analyse_coin(
             "volume": sum(d["volume"] for d in b),
         })
 
-    # --- Trend Engine (36h) ---
-    closes_36h = [c["close"] for c in candles_36h]
+    # --- Trend Engine (24h) ---
+    closes_24h = [c["close"] for c in candles_24h]
 
-    ma_f_36h_all = sma(closes_36h, TREND_MA_FAST)
-    ma_m_36h_all = sma(closes_36h, TREND_MA_MID)
-    ma_s_36h_all = sma(closes_36h, TREND_MA_SLOW)
+    ma_f_24h_all = sma(closes_24h, TREND_MA_FAST)
+    ma_m_24h_all = sma(closes_24h, TREND_MA_MID)
+    ma_s_24h_all = sma(closes_24h, TREND_MA_SLOW)
 
-    ma_f_36h = ma_f_36h_all[-1] if ma_f_36h_all[-1] is not None else closes_36h[-1]
-    ma_m_36h = ma_m_36h_all[-1] if ma_m_36h_all[-1] is not None else closes_36h[-1]
-    ma_s_36h = ma_s_36h_all[-1] if ma_s_36h_all[-1] is not None else closes_36h[-1]
+    ma_f_24h = ma_f_24h_all[-1] if ma_f_24h_all[-1] is not None else closes_24h[-1]
+    ma_m_24h = ma_m_24h_all[-1] if ma_m_24h_all[-1] is not None else closes_24h[-1]
+    ma_s_24h = ma_s_24h_all[-1] if ma_s_24h_all[-1] is not None else closes_24h[-1]
 
-    trend_label, trend_score = evaluate_trend_3d(ma_f_36h, ma_m_36h, ma_s_36h)
+    trend_label, trend_score = evaluate_trend_3d(ma_f_24h, ma_m_24h, ma_s_24h)
     ts_val = trend_strength(trend_score)
 
-    # 36h RSI for exit system
-    rsi_36h = compute_rsi(closes_36h, 14)
+    # 24h RSI for exit system
+    rsi_24h = compute_rsi(closes_24h, 14)
 
     # --- Execution Engine (12h) ---
     closes_12h = [c["close"] for c in candles_12h]
@@ -1925,10 +1972,10 @@ def analyse_coin(
     trail_rate = _coin_trail(coin)
     cd_bars = ENTRY_COOLDOWN_BARS.get(coin, 0)
     last_entry_ts = prev.get("last_entry_ts", 0)
-    long_cd_until = prev.get("long_cooldown_until", "")
-    short_cd_until = prev.get("short_cooldown_until", "")
-    consec_losses = prev.get("consec_losses", 0)
-    loss_cooldown_until = prev.get("loss_cooldown_until", "")
+    consec_l = prev.get("consec_losses_long", 0)
+    consec_s = prev.get("consec_losses_short", 0)
+    cd_l_until = prev.get("cooldown_long_until", "")
+    cd_s_until = prev.get("cooldown_short_until", "")
 
     if kill_switch_active:
         db2 = _get_db()
@@ -1955,7 +2002,7 @@ def analyse_coin(
     entry_action = "HOLD"
     now_ts = int(datetime.fromisoformat(ts).timestamp()) if ts else 0
 
-    tot_cap = BASE_CAPITAL * TOTAL_CAPITAL_MULT
+    tot_cap = BASE_CAPITAL * _coin_cap(coin)
 
     for ent in entries:
         ep = ent.get("entry_price", 0)
@@ -2030,53 +2077,56 @@ def analyse_coin(
 
         if removed:
             if roi < 0:
-                consec_losses += 1
-                if consec_losses >= LOSS_COOLDOWN_THRESHOLD:
-                    from datetime import timedelta
-                    loss_cooldown_until = (_now_vnt() + timedelta(hours=LOSS_COOLDOWN_BARS * 12)).isoformat()
-                    consec_losses = 0
+                # Direction-specific cooldown (shift=0: 2→3, 3→5, 4→8, 5→13)
+                if is_sh:
+                    consec_s += 1
+                    cd_bars_fib = _fib_cooldown_bars(consec_s, 0)
+                    if cd_bars_fib > 0:
+                        from datetime import timedelta
+                        cd_s_until = (_now_vnt() + timedelta(hours=cd_bars_fib * 12)).isoformat()
+                else:
+                    consec_l += 1
+                    cd_bars_fib = _fib_cooldown_bars(consec_l, 0)
+                    if cd_bars_fib > 0:
+                        from datetime import timedelta
+                        cd_l_until = (_now_vnt() + timedelta(hours=cd_bars_fib * 12)).isoformat()
             else:
-                consec_losses = 0
+                if is_sh: consec_s = 0
+                else: consec_l = 0
 
         if not removed:
             new_entries.append(ent)
 
     entries = new_entries
 
-    # Check for new entry
+    # Check for new entry — direction-specific cooldown
     deployed = sum(e.get("margin_pct", 0) for e in entries)
     max_margin = tot_cap * MAX_PER_COIN_PCT
-    can_enter = (deployed * tot_cap) < max_margin
+    can_enter_base = (deployed * tot_cap) < max_margin
 
-    # Cooldown between entries
-    if can_enter and cd_bars > 0 and last_entry_ts > 0:
+    # Cooldown between entries (flat cd_bars)
+    if can_enter_base and cd_bars > 0 and last_entry_ts > 0:
         bar_sec = 12 * 3600
         bars_passed = (now_ts - last_entry_ts) / bar_sec if now_ts > last_entry_ts else 999
         if bars_passed < cd_bars:
-            can_enter = False
+            can_enter_base = False
 
-    # Direction cooldowns
-    _long_cd_active = False
-    _short_cd_active = False
-    if can_enter and long_cd_until:
+    # Direction-specific Fibonacci cooldown: LONG cooldown blocks LONG only, SHORT blocks SHORT only
+    can_enter_long = can_enter_base
+    if can_enter_long and cd_l_until:
         try:
-            if datetime.fromisoformat(long_cd_until) > _now_vnt():
-                _long_cd_active = True
-        except Exception: pass
-    if can_enter and short_cd_until:
-        try:
-            if datetime.fromisoformat(short_cd_until) > _now_vnt():
-                _short_cd_active = True
+            if datetime.fromisoformat(cd_l_until) > _now_vnt():
+                can_enter_long = False
         except Exception: pass
 
-    # Loss streak cooldown
-    if can_enter and loss_cooldown_until:
+    can_enter_short = can_enter_base
+    if can_enter_short and cd_s_until:
         try:
-            if datetime.fromisoformat(loss_cooldown_until) > _now_vnt():
-                can_enter = False
+            if datetime.fromisoformat(cd_s_until) > _now_vnt():
+                can_enter_short = False
         except Exception: pass
 
-    if can_enter:
+    if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
             trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
             trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
@@ -2085,7 +2135,7 @@ def analyse_coin(
             last_volume=last_volume, vol_5d_avg=vol_5d_avg,
             use_ma200_filter=False, use_pullback_filter=False,
             use_volume_expan=False, min_entry_score=ENTRY_MIN_SCORE,
-        ) if not _long_cd_active else False
+        ) if can_enter_long else False
         es = compute_entry_v6_short(
             trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
             trend_max=profile.get("trend_max_short", -2), vol_min=profile["vol_min"],
@@ -2096,7 +2146,7 @@ def analyse_coin(
             use_volume_expan=False,
             min_entry_score=profile.get("short_min_entry_score", ENTRY_MIN_SCORE),
             candles_12h=candles_12h,
-        ) if (coin in SHORT_ALLOWED and not _short_cd_active) else False
+        ) if (coin in SHORT_ALLOWED and can_enter_short) else False
 
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
@@ -2119,6 +2169,12 @@ def analyse_coin(
                     )
                 strong = sc >= ENTRY_MIN_SCORE
                 mp = _entry_margin(coin, strong)
+                # Bear-mode: apply per-coin position multiplier instead of flat halve
+                if _bear_mode:
+                    mp *= _coin_pos_mult_bear(coin)
+                # Bear-mode: also reduce leverage and SL for this entry
+                bear_lev = _coin_lev_bear(coin) if _bear_mode else coin_lev
+                bear_sl = _coin_sl_bear(coin) if _bear_mode else sl_roi
                 if deployed + mp <= max_margin / tot_cap + 0.001:
                     entries.append({
                         "entry_price": last_close,
@@ -2128,13 +2184,22 @@ def analyse_coin(
                         "remaining_size": 1.0,
                         "highest_since_entry": last_close,
                         "trailing_stop": None,
+                        "lev": bear_lev,
+                        "sl_roi": bear_sl,
                     })
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
 
     # Determine overall action
     if exit_reasons:
-        action = "EXIT_LONG" if entries or not any(e.get("is_short") for e in (new_entries or entries)) else "EXIT_SHORT"
+        has_long = any(not e.get("is_short") for e in entries)
+        has_short = any(e.get("is_short") for e in entries)
+        if has_long and has_short:
+            action = "EXIT_ALL"
+        elif has_short:
+            action = "EXIT_SHORT"
+        else:
+            action = "EXIT_LONG"
         pos_state = "FLAT"
         next_rules = exit_reasons
         remaining_size = 0.0
@@ -2174,10 +2239,10 @@ def analyse_coin(
                 "position_state": pos_state,
                 "timestamp": ts,
                 "last_entry_ts": last_entry_ts,
-                "long_cooldown_until": long_cd_until,
-                "short_cooldown_until": short_cd_until,
-                "consec_losses": consec_losses,
-                "loss_cooldown_until": loss_cooldown_until,
+                "consec_losses_long": consec_l,
+                "consec_losses_short": consec_s,
+                "cooldown_long_until": cd_l_until,
+                "cooldown_short_until": cd_s_until,
             })
         except Exception as exc:
             print(f"[crypto_trading] Warning: could not save state for {coin}: {exc}", file=sys.stderr)
@@ -2224,6 +2289,7 @@ def _exec_action_on_okx(
 
     exec_status = {"coin": coin, "action": action, "status": "none", "detail": ""}
     lev = result.get("leverage", 2.5)
+    profile = get_coin_profile(coin)
 
     try:
         if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
@@ -2232,8 +2298,8 @@ def _exec_action_on_okx(
             side = "buy" if pos_side == "long" else "sell"
             entry_px = result.get("entry_zone", {}).get("current_price")
             sl_px = None
-            if entry_px and entry_px > 0 and prof["max_loss_pct"] > 0:
-                sl_factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
+            if entry_px and entry_px > 0 and profile["max_loss_pct"] > 0:
+                sl_factor = 1 - profile["max_loss_pct"] / lev if pos_side == "long" else 1 + profile["max_loss_pct"] / lev
                 sl_px = f"{entry_px * sl_factor:.2f}"
             resp = okx_place_order(inst_id, "cross", side, sz, sl_trigger_px=sl_px)
             exec_status.update({"status": "open", "detail": f"{pos_side} market {sz}ct SL@{sl_px}" if sl_px else f"{pos_side} market {sz}ct"})
@@ -2256,7 +2322,7 @@ def _exec_action_on_okx(
                 if pos:
                     avg_px = float(pos.get("avgPx", 0))
                     if avg_px > 0:
-                        factor = 1 - prof["max_loss_pct"] / lev if pos_side == "long" else 1 + prof["max_loss_pct"] / lev
+                        factor = 1 - profile["max_loss_pct"] / lev if pos_side == "long" else 1 + profile["max_loss_pct"] / lev
                         new_sl = f"{avg_px * factor:.2f}"
                         algos = okx_get_algo_orders(inst_id, "conditional")
                         algo_id = algos[0]["algoId"] if algos else None
@@ -2565,7 +2631,7 @@ def main() -> None:
 
     # Decide notification timing
     all_wait = all(r['action'] == 'NO_TRADE' for r in results)
-    scheduled_hours = {5, 10, 15, 21}
+    scheduled_hours = {10, 15, 21}
     is_scheduled = now_vnt.hour in scheduled_hours
 
     if all_wait and not is_scheduled and not metadata_alerts:

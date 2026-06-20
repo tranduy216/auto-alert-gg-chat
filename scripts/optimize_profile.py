@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Optimize per-coin config: leverage, SL, capital multiplier. SL rate < 20%, max CAGR."""
+"""Optimize per-coin config: leverage, SL, capital multiplier. SL rate < 20%, max CAGR.
+Features: Intrabar SL, fee 0.05%/side, full OHLCV aggregation."""
 import sys, os, json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from statistics import mean
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,29 +22,42 @@ CD_BARS = {"ETH": 0, "BNB": 0, "TRX": 3}
 TRAIL_RATE = {"ETH": 0.035, "BNB": 0.065, "TRX": 0.065}
 ENTRY_STRONG = {"ETH": 0.09, "BNB": 0.07, "TRX": 0.07}
 ENTRY_WEAK = {"ETH": 0.07, "BNB": 0.055, "TRX": 0.055}
+FEE_RATE = 0.0005  # 0.05% per side (taker + slippage)
 
 INITIAL = 75
 CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_klines_12h_5y.json")
 with open(CACHE) as f: _cache = json.load(f)
 
 def fetch(s):
-    return _cache.get(f"{s}_4000_1609434000000", [])
+    data = _cache.get(f"{s}_4000_1609434000000", [])
+    if len(data) < INITIAL + 100:
+        print(f"  WARNING: {s} has only {len(data)} bars")
+    return data
 
 def aggr(c, n=3):
+    """Aggregate n bars into 1 bar with full OHLCV."""
     r = []
     for i in range(0, len(c) - n + 1, n):
         b = c[i:i + n]
-        r.append({"close": b[-1]["close"]})
+        if len(b) < n: continue
+        r.append({
+            'open_time': b[0]['open_time'],
+            'open': b[0]['open'],
+            'high': max(x['high'] for x in b),
+            'low': min(x['low'] for x in b),
+            'close': b[-1]['close'],
+            'volume': sum(x['volume'] for x in b),
+        })
     return r
 
 LEVERAGES = [2.0, 2.5, 3.0, 3.5]
 SL_ROIS = [3, 5, 7, 9, 12]
 CAP_MULTS = [1.8, 1.9, 2.0]
-MAX_POS_PCT = 0.65  # max position value as % of total capital
+MAX_POS_PCT = 0.65
 
 print(f"{'='*95}")
-print(f"  Per-Coin Optimization: SL rate < 20%, max CAGR")
-print(f"  Leverage: {LEVERAGES} | SL ROI: {SL_ROIS}% | Cap: {CAP_MULTS}x")
+print(f"  Per-Coin Optimization: SL rate < 20%, max CAGR (with intrabar SL + fees)")
+print(f"  Leverage: {LEVERAGES} | SL ROI: {SL_ROIS}% | Cap: {CAP_MULTS}x | Fee: {FEE_RATE*100:.2f}%/side")
 print(f"  Max position/coin = {MAX_POS_PCT*100:.0f}% of total capital (incl. leverage)")
 print(f"{'='*95}")
 
@@ -60,7 +74,7 @@ for coin in COINS:
     results = []
 
     for lev in LEVERAGES:
-        max_margin_sum = MAX_POS_PCT / lev  # max total margin_pct sum
+        max_margin_sum = MAX_POS_PCT / lev
 
         for sl_roi_val in SL_ROIS:
             for cap_mult in CAP_MULTS:
@@ -76,6 +90,8 @@ for coin in COINS:
                     ct = aggr(ds, 3)
                     if len(ct) < 25: continue
                     cc = ds[-1]["close"]
+                    bar_high = ds[-1]["high"]
+                    bar_low = ds[-1]["low"]
                     cl = [c["close"] for c in ct]
                     mf = sma(cl, 10)[-1] or cl[-1]
                     mm = sma(cl, 15)[-1] or cl[-1]
@@ -98,9 +114,42 @@ for coin in COINS:
                     for ent in entries:
                         ep = ent["ep"]; mp = ent["mp"]; tp_s = ent["tp"]
                         rem2 = ent["rem"]; hi = ent["hi"]; tstop = ent["tstop"]
-                        roi = ((cc - ep) / ep * 100) * mp * tot_cap_fixed * lev / BASE
+                        is_sh = ent.get("is_short", False)
+
+                        # ── Intrabar SL check ────────────────────────────
+                        sl_mult = mp * tot_cap_fixed * lev / BASE
+                        sl_pct_price = sl_roi_val / sl_mult / 100 if sl_mult > 0 else 1.0
+                        intrabar_hit = False
+
+                        if not is_sh:
+                            sl_price = ep * (1 - sl_pct_price)
+                            if bar_low <= sl_price:
+                                exit_px = sl_price * (1 - FEE_RATE)
+                                entry_adj = ep * (1 + FEE_RATE)
+                                roi = ((exit_px - entry_adj) / entry_adj * 100) * mp * tot_cap_fixed * lev / BASE
+                                eq += roi * rem2 / 100
+                                trades_log.append({"t": "SL", "r": roi})
+                                intrabar_hit = True
+                        else:
+                            sl_price = ep * (1 + sl_pct_price)
+                            if bar_high >= sl_price:
+                                exit_px = sl_price * (1 + FEE_RATE)
+                                entry_adj = ep * (1 - FEE_RATE)
+                                roi = ((entry_adj - exit_px) / entry_adj * 100) * mp * tot_cap_fixed * lev / BASE
+                                eq += roi * rem2 / 100
+                                trades_log.append({"t": "SL", "r": roi})
+                                intrabar_hit = True
+
+                        if intrabar_hit:
+                            continue  # position removed
+
+                        # Normal ROI
+                        entry_adj = ep * (1 + FEE_RATE) if not is_sh else ep * (1 - FEE_RATE)
+                        roi = ((cc - entry_adj) / entry_adj * 100) * mp * tot_cap_fixed * lev / BASE if not is_sh \
+                              else ((entry_adj - cc) / entry_adj * 100) * mp * tot_cap_fixed * lev / BASE
                         if cc > hi: hi = cc; ent["hi"] = hi
                         rm = False
+
                         if roi <= -sl_roi_val:
                             eq += roi * rem2 / 100
                             trades_log.append({"t": "SL", "r": roi})
@@ -108,22 +157,28 @@ for coin in COINS:
                         elif tp_s < len(TP):
                             trg, cpct = TP[tp_s]
                             if roi >= trg:
-                                cf = cpct * rem2
-                                eq += roi * cf / 100
-                                rem2 -= cf
-                                ent["rem"] = rem2
-                                ent["tp"] = tp_s + 1
+                                cf = cpct * rem2; eq += roi * cf / 100; rem2 -= cf
+                                ent["rem"] = rem2; ent["tp"] = tp_s + 1
                                 trades_log.append({"t": "TP", "r": roi})
                                 if ent["tp"] >= len(TP):
-                                    ent["tstop"] = cc * (1 - tr_rate)
+                                    ent["tstop"] = cc * (1 - tr_rate) if not is_sh else cc * (1 + tr_rate)
                         if tp_s >= len(TP) and not rm:
-                            if tstop is None: tstop = cc * (1 - tr_rate)
-                            tstop = max(tstop, hi * (1 - tr_rate))
-                            ent["tstop"] = tstop
-                            if cc <= tstop:
-                                eq += roi * rem2 / 100
-                                trades_log.append({"t": "TRAIL", "r": roi})
-                                rm = True
+                            if not is_sh:
+                                if tstop is None: tstop = cc * (1 - tr_rate)
+                                tstop = max(tstop, hi * (1 - tr_rate))
+                                ent["tstop"] = tstop
+                                if bar_low <= tstop:
+                                    eq += roi * rem2 / 100
+                                    trades_log.append({"t": "TRAIL", "r": roi})
+                                    rm = True
+                            else:
+                                if tstop is None: tstop = cc * (1 + tr_rate)
+                                tstop = min(tstop, hi * (1 + tr_rate))
+                                ent["tstop"] = tstop
+                                if bar_high >= tstop:
+                                    eq += roi * rem2 / 100
+                                    trades_log.append({"t": "TRAIL", "r": roi})
+                                    rm = True
                         if not rm: new_entries.append(ent)
                     entries = new_entries
 
@@ -141,10 +196,13 @@ for coin in COINS:
                             rsi_min=prof.get("rsi_min_short", 10)) if coin in SHORT_ALLOWED else False
                         ps_, act = resolve_action_v6(ts, el, es_, "FLAT")
                         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
-                            sc = _entry_score_v7_long(ts, cc, ma7, ma10, es, ma200, ef, em, vs, v1[-1], v5a, rsi1)
+                            is_sh_entry = act.startswith("OPEN_SHORT")
+                            sc = _entry_score_v7_long(ts, cc, ma7, ma10, es, ma200, ef, em, vs, v1[-1], v5a, rsi1) if not is_sh_entry \
+                                 else 0
                             mp = e_strong if sc >= ENTRY_MIN else e_weak
                             if dep + mp <= max_margin_sum + 0.001:
-                                entries.append({"ep": cc, "mp": mp, "tp": 0, "rem": 1.0, "hi": cc, "tstop": None})
+                                entry_adj = cc * (1 + FEE_RATE) if not is_sh_entry else cc * (1 - FEE_RATE)
+                                entries.append({"ep": entry_adj, "mp": mp, "tp": 0, "rem": 1.0, "hi": cc, "tstop": None, "is_short": is_sh_entry})
                                 last_entry_idx = idx
 
                     ureal = sum(((cc - e["ep"]) / e["ep"] * 100) * e["mp"] * tot_cap_fixed * lev / BASE * e["rem"] / 100 for e in entries)

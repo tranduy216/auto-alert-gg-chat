@@ -2,3 +2,35 @@ feedparser==6.0.11
 firebase-admin>=6.5.0
 requests>=2.31.0
 pytz>=2024.1
+COMBO1
+#market in bear_mode: 
+## Cooldown
+SHORT: first cooldown: 5 nến
+LONG: first cooldown: 8 nến
+
+#market bull_mode: 
+## Cooldown
+SHORT: first cooldown: 8 nến
+LONG: first cooldown: 5 nến
+
+COMBO2
+#market in bear_mode: 
+## Cooldown
+SHORT: first cooldown: 3 nến
+LONG: first cooldown: 5 nến
+
+#market bull_mode: 
+## Cooldown
+SHORT: first cooldown: 5 nến
+LONG: first cooldown: 3 nến
+
+COMBO3
+#market in bear_mode: 
+## Cooldown
+SHORT: first cooldown: 3 nến
+LONG: first cooldown: 8 nến
+
+#market bull_mode: 
+## Cooldown
+SHORT: first cooldown: 8 nến
+LONG: first cooldown: 3 nến
