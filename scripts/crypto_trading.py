@@ -64,6 +64,30 @@ SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
 SHORT_ALLOWED = {"ETH"}
 BTC_SYMBOL = "BTCUSDT"
 
+# ── v9 Capital & Risk ────────────────────────────────────────────────
+BASE_CAPITAL = 10000
+TOTAL_CAPITAL_MULT = 1.8
+MAX_PER_COIN_PCT = 0.80
+LOW_DD_COINS = {"ETH"}
+ENTRY_MIN_SCORE = 65
+
+def _coin_lev(coin: str) -> float:
+    return 3.0 if coin in LOW_DD_COINS else 2.5
+
+def _coin_sl_roi(coin: str) -> float:
+    return 7.0 if coin in LOW_DD_COINS else 12.0 if coin == "BNB" else 9.0
+
+def _coin_trail(coin: str) -> float:
+    return 0.035 if coin in LOW_DD_COINS else 0.065
+
+def _entry_margin(coin: str, strong: bool = True) -> float:
+    if coin in LOW_DD_COINS:
+        return 0.09 if strong else 0.07
+    return 0.07 if strong else 0.055
+
+TP_SCHEDULE = [(7.0, 0.07), (12.0, 0.11), (20.0, 0.20), (30.0, 0.27)]
+ENTRY_COOLDOWN_BARS = {"ETH": 0, "BNB": 0, "TRX": 3}
+
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
 ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
     (1, 4),   # FOMC minutes / fed speeches (~2am VNT) — wider window
@@ -1780,308 +1804,212 @@ def analyse_coin(
         ) if coin in SHORT_ALLOWED else False
     )
 
-    # Load previous state
+    # ── v9 Isolated Entry Engine ──────────────────────────────────────
     prev = load_state(coin)
-    prev_pos_state = prev.get("position_state", "FLAT")
-    entry_price = prev.get("entry_price")
-    remaining_size = prev.get("remaining_size", 1.0)
-    trailing_stop = prev.get("trailing_stop")
-    highest_since_entry = prev.get("highest_since_entry")
+    entries: list[dict] = prev.get("entries", [])
+    coin_lev = _coin_lev(coin)
+    sl_roi = _coin_sl_roi(coin)
+    trail_rate = _coin_trail(coin)
+    cd_bars = ENTRY_COOLDOWN_BARS.get(coin, 0)
+    last_entry_ts = prev.get("last_entry_ts", 0)
+    long_cd_until = prev.get("long_cooldown_until", "")
+    short_cd_until = prev.get("short_cooldown_until", "")
 
-    # Kill-switch override
     if kill_switch_active:
-        save_state(coin, "FLAT", "KILL_SWITCH", trend_score,
-                   0.0, 0.0, ts, entry_price=last_close, remaining_size=0.0)
+        db2 = _get_db()
+        if db2:
+            try:
+                db2.collection(FIRESTORE_COLLECTION).document(coin).set({
+                    "entries": [], "position_state": "FLAT", "timestamp": ts,
+                })
+            except Exception: pass
         return {
-            "coin": coin,
-            "trend": trend_label,
-            "trend_score": trend_score,
-            "entry2_prob": 0.0,
-            "entry3_prob": 0.0,
-            "position_state": "FLAT",
-            "action": "KILL_SWITCH",
-            "leverage": profile["leverage"],
-            "entry_zone": {"current_price": last_close},
-            "volume_score": volume_score,
-            "reaction_score": 0.0,
-            "atr_score": 0.0,
-            "break_score": 0.0,
-            "next_rules": ["Wait for market to stabilise"],
-            "timestamp": ts,
-            "pnl_pct": 0.0,
-            "remaining_size": 0.0,
+            "coin": coin, "trend": trend_label, "trend_score": trend_score,
+            "entry2_prob": 0.0, "entry3_prob": 0.0,
+            "position_state": "FLAT", "action": "KILL_SWITCH",
+            "leverage": coin_lev, "entry_zone": {"current_price": last_close},
+            "volume_score": volume_score, "reaction_score": 0.0,
+            "atr_score": 0.0, "break_score": 0.0,
+            "next_rules": ["Kill switch active"],
+            "timestamp": ts, "pnl_pct": 0.0, "remaining_size": 0.0,
         }
 
-    pnl_pct = 0.0
-    _loss_streak = prev.get("loss_streak", 0)
-    _short_loss_streak = prev.get("short_loss_streak", 0)
-    _short_cooldown_until = prev.get("short_cooldown_until", "")
-    _long_loss_streak = prev.get("long_loss_streak", 0)
-    _long_cooldown_until = prev.get("long_cooldown_until", "")
-    _collapse_bars = prev.get("collapse_bar_count", 0)
-    _sw_phase = prev.get("sideway_phase", "none")
-    _sw_bars = prev.get("sideway_bars", 0)
-    _sw_milestone = prev.get("sideway_milestone", 0)
-    _rev_count = prev.get("reversal_count", 0)
-    _rev_low = prev.get("rev_low", 0.0)
+    new_entries = []
+    exit_reasons = []
+    total_pnl = 0.0
+    entry_action = "HOLD"
+    now_ts = int(datetime.fromisoformat(ts).timestamp()) if ts else 0
 
-    if prev_pos_state == "FLAT":
-        # ── Filter chain ─────────────────────────────────────────────
-        _skip_reason = None
+    tot_cap = BASE_CAPITAL * TOTAL_CAPITAL_MULT
 
-        # 1. Max positions
-        if active_count >= max_positions:
-            _skip_reason = f"Max positions ({max_positions})"
+    for ent in entries:
+        ep = ent.get("entry_price", 0)
+        mp = ent.get("margin_pct", 0.07)
+        is_sh = ent.get("is_short", False)
+        tp_s = ent.get("tp_stage", 0)
+        rem = ent.get("remaining_size", 1.0)
+        hi = ent.get("highest_since_entry", ep)
+        tstop = ent.get("trailing_stop")
 
-        # 2. Volatility filter
-        if not _skip_reason and atr_12h > atr_ma20_12h * VOLATILITY_ATR_MULTIPLIER:
-            _skip_reason = f"ATR {atr_12h:.2f} > {VOLATILITY_ATR_MULTIPLIER}× ATR_MA20({atr_ma20_12h:.2f})"
+        if ep <= 0:
+            continue
 
-        # 3. Time filter
-        if not _skip_reason and in_event_window:
-            _skip_reason = "Economic event window"
-
-        # 4. Correlation filter
-        if not _skip_reason:
-            for _corr_coin in CORRELATION_GROUPS.get(coin, []):
-                if load_state(_corr_coin).get("position_state", "FLAT") != "FLAT":
-                    _skip_reason = f"{_corr_coin} already in position (correlated)"
-                    break
-
-        if _skip_reason:
-            pos_state, action = "FLAT", "NO_TRADE"
-            entry_price = prev.get("entry_price")
-            remaining_size = prev.get("remaining_size", 1.0)
+        if not is_sh:
+            pnl_pct_entry = (last_close - ep) / ep * 100
         else:
-            # Tight mode: khi >50% vốn đã dùng, chỉ vào với tín hiệu mạnh
-            tight_mode = active_count / max_positions >= POSITION_RATE_TIGHT_THRESHOLD
-            _trend_min = profile["trend_min_long_tight"] if tight_mode else profile["trend_min_long"]
-            entry_long = compute_entry_v6_long(
-                trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
-                trend_min=_trend_min, vol_min=profile["vol_min"],
-                rsi_max=profile.get("rsi_max_long", 55),
-                ma7_1d=ma7_12h, ma200_1d=ma200_12h,
-                last_volume=last_volume, vol_5d_avg=vol_5d_avg,
-                use_ma200_filter=profile.get("use_ma200_filter", False),
-                use_pullback_filter=profile.get("use_pullback_filter", False),
-                use_volume_expan=profile.get("use_volume_expan", False),
-                min_entry_score=profile.get("min_entry_score", 0),
-            )
-            entry_short = (
-                compute_entry_v6_short(
-                    trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
-                    trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
-                    rsi_min=profile.get("rsi_min_short", 45),
-                ) if coin in SHORT_ALLOWED else False
-            )
-            if tight_mode and (entry_long or entry_short):
-                print(f"  [{coin}] TIGHT mode active ({active_count}/{max_positions} positions) — strong signal required", file=sys.stderr)
-            # Direction-specific cooldowns
-            if entry_short and _short_cooldown_until:
-                _cd_dt = datetime.fromisoformat(_short_cooldown_until)
-                if _cd_dt > _now_vnt():
-                    entry_short = False
-            if entry_long and _long_cooldown_until:
-                _cd_dt = datetime.fromisoformat(_long_cooldown_until)
-                if _cd_dt > _now_vnt():
-                    entry_long = False
-            pos_state, action = resolve_action_v6(
-                trend_score, entry_long, entry_short, prev_pos_state,
-            )
+            pnl_pct_entry = (ep - last_close) / ep * 100
+        roi = pnl_pct_entry * mp * tot_cap * coin_lev / BASE_CAPITAL
 
-            if action in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
-                is_short = action.startswith("OPEN_SHORT")
-                # Compute entry score for allocation
-                _sc = _entry_score_v7_long(
-                    trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
-                    exec_f, exec_m, volume_score,
-                    last_volume, vol_5d_avg, rsi_12h,
-                )
-                alloc_mul = get_allocation_multiplier(_sc, True)
-                remaining_size = get_position_size(trend_score, coin) * alloc_mul
-                if is_short:
-                    remaining_size *= profile.get("short_size_mult", 0.5)
-                entry_price = last_close
-                trailing_stop = None
-                highest_since_entry = None
-            # Loss streak breaker
-            if action.startswith("OPEN_") and _loss_streak >= LOSS_STREAK_BREAKER:
-                remaining_size *= LOSS_STREAK_REDUCE
-        next_rules = compute_next_rules(pos_state)
+        if not is_sh and last_close > hi:
+            hi = last_close
+        if is_sh and last_close < hi:
+            hi = last_close
+        ent["highest_since_entry"] = hi
 
-    else:
-        # Exit evaluation for active positions
-        is_short_pos = prev_pos_state.startswith("SHORT")
-        is_long_pos = not is_short_pos
+        removed = False
 
-        # ── Collapse tracking: if in collapse mode, increment bar count ──
-        if _collapse_bars > 0:
-            _collapse_bars += 1
+        # Stop loss (ROI-based)
+        if roi <= -sl_roi:
+            total_pnl += roi * rem / 100
+            exit_reasons.append(f"SL: ROI {roi:.1f}% <= -{sl_roi}%")
+            removed = True
 
-        # Short-specific exit params
-        eff_max_loss = profile.get("short_max_loss_pct", profile["max_loss_pct"]) if is_short_pos else profile["max_loss_pct"]
-        eff_trail = (profile.get("short_trailing_pct", profile["trailing_pct"]) if is_short_pos else profile["trailing_pct"])
-        eff_trail = eff_trail * get_trailing_multiplier(trend_score)
+        # Partial TP
+        elif tp_s < len(TP_SCHEDULE):
+            target_roi, close_pct = TP_SCHEDULE[tp_s]
+            if roi >= target_roi:
+                cf = close_pct * rem
+                total_pnl += roi * cf / 100
+                rem -= cf
+                ent["remaining_size"] = rem
+                ent["tp_stage"] = tp_s + 1
+                exit_reasons.append(f"TP{tp_s + 1}: ROI {roi:.1f}%")
+                if ent["tp_stage"] >= len(TP_SCHEDULE):
+                    ent["trailing_stop"] = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
 
-        # ── Sideway & staged reversal exit (runs before normal exit) ──
-        sw_result = evaluate_sideway_exit(
-            _sw_phase, _sw_bars, _sw_milestone, _rev_count, _rev_low,
-            last_close, last_high, last_low,
-            ts_val, rsi_12h, exec_s, last_volume, vol_5d_avg,
-            candles_12h, atr_ma20_12h, atr_12h, eff_trail,
-            is_long=is_long_pos,
-        )
-        _sw_phase = sw_result["sideway_phase"]
-        _sw_bars = sw_result["sideway_bars"]
-        _sw_milestone = sw_result["sideway_milestone"]
-        _rev_count = sw_result["reversal_count"]
-        _rev_low = sw_result["rev_low"]
-
-        if sw_result["action"] != "HOLD":
-            exit_action = sw_result["action"]
-            reduce_pct = sw_result["reduce_pct"]
-            exit_reason = sw_result["reason"]
-            new_trailing_stop = trailing_stop
-            new_highest = highest_since_entry
-            eff_trail = sw_result["new_trailing_pct"]
-        else:
-            eff_trail = sw_result["new_trailing_pct"]
-
-            exit_action, reduce_pct, exit_reason, new_trailing_stop, new_highest = evaluate_exit_v6(
-                prev_pos_state, entry_price, last_close, remaining_size,
-                ma_f_36h, ma_s_36h, trend_score, ts_val, rsi_36h,
-                recent_10d_low, recent_10d_high,
-                trailing_stop, highest_since_entry,
-                max_loss_pct=eff_max_loss,
-                trailing_pct=eff_trail,
-                initial_stop_pct=profile["initial_stop_pct"],
-                hard_stop_pct=profile["hard_stop_pct"],
-                atr_1d=atr_12h,
-                trail_atr_mult=profile.get("trail_atr_mult", 0),
-                use_profit_locking=profile.get("use_profit_locking", False),
-            )
-        trailing_stop = new_trailing_stop
-        highest_since_entry = new_highest
-
-        # ── Staged collapse exit: after 5 bars, exit remaining 75% if still collapsed ──
-        if _collapse_bars >= 5 and exit_action in ("HOLD", "EXIT_COLLAPSE_25"):
-            if is_long_pos and ts_val < -0.3:
-                exit_action = "EXIT_ALL"
-                reduce_pct = 1.0
-                exit_reason = f"Collapse persisted {_collapse_bars-1} bars: {ts_val:.1f} < -0.3"
-            elif is_short_pos and ts_val > 0.3:
-                exit_action = "EXIT_ALL"
-                reduce_pct = 1.0
-                exit_reason = f"Collapse persisted {_collapse_bars-1} bars: {ts_val:.1f} > +0.3"
+        # Trailing stop (after all TPs)
+        if tp_s >= len(TP_SCHEDULE) and not removed:
+            if tstop is None:
+                tstop = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
+            if not is_sh:
+                tstop = max(tstop, hi * (1 - trail_rate))
             else:
-                _collapse_bars = 0  # trend recovered, cancel collapse tracking
+                tstop = min(tstop, hi * (1 + trail_rate))
+            ent["trailing_stop"] = tstop
+            if (not is_sh and last_close <= tstop) or (is_sh and last_close >= tstop):
+                total_pnl += roi * rem / 100
+                exit_reasons.append(f"Trail: {last_close:.2f} <= {tstop:.2f}")
+                removed = True
 
-        # Suppress re-triggered collapse during wait (bars 2-4)
-        if exit_action == "EXIT_COLLAPSE_25" and _collapse_bars > 1:
-            exit_action = "HOLD"
+        if not removed:
+            new_entries.append(ent)
 
-        if exit_action == "HOLD" and _collapse_bars > 0:
-            # In collapse mode but waiting: keep counting
-            pos_state, action = prev_pos_state, "HOLD_COLLAPSE_WAIT"
-            next_rules = [f"Collapse wait: bar {_collapse_bars}/5"]
-        elif exit_action == "HOLD":
-            pos_state, action = prev_pos_state, "HOLD"
-            next_rules = compute_next_rules(pos_state)
+    entries = new_entries
+
+    # Check for new entry
+    deployed = sum(e.get("margin_pct", 0) for e in entries)
+    max_margin = tot_cap * MAX_PER_COIN_PCT
+    can_enter = (deployed * tot_cap) < max_margin
+
+    # Cooldown between entries
+    if can_enter and cd_bars > 0 and last_entry_ts > 0:
+        bar_sec = 12 * 3600
+        bars_passed = (now_ts - last_entry_ts) / bar_sec if now_ts > last_entry_ts else 999
+        if bars_passed < cd_bars:
+            can_enter = False
+
+    # Direction cooldowns
+    if can_enter and long_cd_until:
+        try:
+            if datetime.fromisoformat(long_cd_until) > _now_vnt():
+                can_enter = False
+        except Exception: pass
+
+    if can_enter:
+        el = compute_entry_v6_long(
+            trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
+            trend_min=profile["trend_min_long"], vol_min=profile["vol_min"],
+            rsi_max=profile.get("rsi_max_long", 90),
+            ma7_1d=ma7_12h, ma200_1d=ma200_12h,
+            last_volume=last_volume, vol_5d_avg=vol_5d_avg,
+            use_ma200_filter=False, use_pullback_filter=False,
+            use_volume_expan=False, min_entry_score=ENTRY_MIN_SCORE,
+        )
+        es = compute_entry_v6_short(
+            trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
+            trend_max=profile["trend_max_short"], vol_min=profile["vol_min"],
+            rsi_min=profile.get("rsi_min_short", 10),
+        ) if coin in SHORT_ALLOWED else False
+
+        ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
+        if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
+            is_sh = act.startswith("OPEN_SHORT")
+            sc = _entry_score_v7_long(
+                trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
+            )
+            strong = sc >= ENTRY_MIN_SCORE
+            mp = _entry_margin(coin, strong)
+            if deployed + mp <= max_margin / tot_cap + 0.001:
+                entries.append({
+                    "entry_price": last_close,
+                    "margin_pct": mp,
+                    "is_short": is_sh,
+                    "tp_stage": 0,
+                    "remaining_size": 1.0,
+                    "highest_since_entry": last_close,
+                    "trailing_stop": None,
+                })
+                entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
+                last_entry_ts = now_ts
+
+    # Determine overall action
+    if exit_reasons:
+        action = "EXIT_LONG" if entries or not any(e.get("is_short") for e in (new_entries or entries)) else "EXIT_SHORT"
+        pos_state = "FLAT"
+        next_rules = exit_reasons
+        remaining_size = 0.0
+    elif entry_action not in ("HOLD",):
+        action = entry_action
+        pos_state = "LONG_ENTRY_1" if "LONG" in entry_action else "SHORT_ENTRY_1"
+        next_rules = compute_next_rules(pos_state)
+        remaining_size = sum(e.get("margin_pct", 0.07) for e in entries)
+    else:
+        if entries:
+            action = "HOLD"
+            pos_state = "LONG_ENTRY_1" if not entries[0].get("is_short") else "SHORT_ENTRY_1"
+            next_rules = [f"{len(entries)} active entries, deployed={deployed*100:.0f}%"]
         else:
-            next_rules = [exit_reason]
-            if exit_action == "EXIT_COLLAPSE_25":
-                # First collapse hit: reduce 25%, start counting bars
-                remaining_size = remaining_size * (1 - reduce_pct)
-                pos_state = prev_pos_state
-                action = "EXIT_COLLAPSE_25"
-                _collapse_bars = 1
-                next_rules = [exit_reason, f"Collapse wait: bar 1/5 — remaining {remaining_size*100:.0f}%"]
-            elif exit_action == "EXIT_SIDEWAY":
-                remaining_size = remaining_size * (1 - reduce_pct)
-                pos_state = prev_pos_state
-                action = "EXIT_SIDEWAY"
-                next_rules = [exit_reason, f"Remaining {remaining_size*100:.0f}% — watching for reversal"]
-            elif exit_action == "EXIT_REVERSAL":
-                remaining_size = remaining_size * (1 - reduce_pct)
-                pos_state = prev_pos_state
-                action = f"EXIT_REVERSAL_{_rev_count}"
-                next_rules = [exit_reason, f"Reversal #{_rev_count} — {remaining_size*100:.0f}% remaining"]
-            elif exit_action == "EXIT_ALL":
-                _loss_streak = 0 if pnl_pct > 0 else _loss_streak + 1
-                if is_long:
-                    if pnl_pct > 0:
-                        _long_loss_streak = 0
-                        _long_cooldown_until = ""
-                    else:
-                        _long_loss_streak += 1
-                        if _long_loss_streak >= LONG_COOLDOWN_LOSSES:
-                            _cooldown_dt = _now_vnt()
-                            _cooldown_dt = _cooldown_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                            from datetime import timedelta
-                            _cooldown_dt += timedelta(days=LONG_COOLDOWN_DAYS)
-                            _long_cooldown_until = _cooldown_dt.isoformat()
-                else:  # short position closed
-                    if pnl_pct > 0:
-                        _short_loss_streak = 0
-                        _short_cooldown_until = ""
-                    else:
-                        _short_loss_streak += 1
-                        if _short_loss_streak >= SHORT_COOLDOWN_LOSSES:
-                            _cooldown_dt = _now_vnt()
-                            _cooldown_dt = _cooldown_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                            from datetime import timedelta
-                            _cooldown_dt += timedelta(days=SHORT_COOLDOWN_DAYS)
-                            _short_cooldown_until = _cooldown_dt.isoformat()
-                pos_state = "FLAT"
-                remaining_size = 0.0
-                action = "EXIT_LONG" if is_long else "EXIT_SHORT"
-                _sw_phase = "none"
-                _sw_bars = 0
-                _sw_milestone = 0
-                _rev_count = 0
-
-            if remaining_size < 0.01 and pos_state != "FLAT":
-                pos_state = "FLAT"
-                remaining_size = 0.0
-                action = "EXIT_LONG" if is_long else "EXIT_SHORT"
+            action = "NO_TRADE"
+            pos_state = "FLAT"
+            next_rules = ["Waiting for strong signal (score >= 65)"]
+        remaining_size = sum(e.get("remaining_size", 0) for e in entries)
 
     output = {
-        "coin": coin,
-        "trend": trend_label,
-        "trend_score": trend_score,
-        "entry2_prob": 0.0,
-        "entry3_prob": 0.0,
-        "position_state": pos_state,
-        "action": action,
-        "leverage": profile["leverage"],
-        "entry_zone": {"current_price": last_close},
-        "volume_score": volume_score,
-        "reaction_score": 0.0,
-        "atr_score": 0.0,
-        "break_score": 0.0,
-        "next_rules": next_rules,
-        "timestamp": ts,
-        "pnl_pct": round(pnl_pct, 2),
-        "remaining_size": remaining_size,
+        "coin": coin, "trend": trend_label, "trend_score": trend_score,
+        "entry2_prob": 0.0, "entry3_prob": 0.0,
+        "position_state": pos_state, "action": action,
+        "leverage": coin_lev, "entry_zone": {"current_price": last_close},
+        "volume_score": volume_score, "reaction_score": 0.0,
+        "atr_score": 0.0, "break_score": 0.0,
+        "next_rules": next_rules, "timestamp": ts,
+        "pnl_pct": round(total_pnl, 2), "remaining_size": remaining_size,
     }
 
-    save_state(
-        coin, pos_state, action, trend_score,
-        output["entry2_prob"], output["entry3_prob"], ts,
-        entry_price=entry_price, remaining_size=remaining_size,
-        loss_streak=_loss_streak,
-        trailing_stop=trailing_stop, highest_since_entry=highest_since_entry,
-        short_loss_streak=_short_loss_streak,
-        short_cooldown_until=_short_cooldown_until,
-        long_loss_streak=_long_loss_streak,
-        long_cooldown_until=_long_cooldown_until,
-        collapse_bar_count=_collapse_bars if _collapse_bars > 0 else 0,
-        sideway_phase=_sw_phase if _sw_phase and _sw_phase != "none" else "",
-        sideway_bars=_sw_bars,
-        sideway_milestone=_sw_milestone,
-        reversal_count=_rev_count,
-        rev_low=_rev_low,
-    )
+    # Save state with entries list
+    db2 = _get_db()
+    if db2:
+        try:
+            db2.collection(FIRESTORE_COLLECTION).document(coin).set({
+                "entries": entries,
+                "position_state": pos_state,
+                "timestamp": ts,
+                "last_entry_ts": last_entry_ts,
+                "long_cooldown_until": long_cd_until,
+                "short_cooldown_until": short_cd_until,
+            })
+        except Exception as exc:
+            print(f"[crypto_trading] Warning: could not save state for {coin}: {exc}", file=sys.stderr)
 
     return output
 
