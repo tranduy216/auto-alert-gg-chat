@@ -171,11 +171,11 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 # Close 70% position
                 close_pct = 0.70
                 close_exposure = position['exposure'] * close_pct
-                pnl = current_pnl_pct * close_exposure * equity
+                pnl = current_pnl_pct * close_exposure * equity * 3.5  # leverage 3.5x
                 equity += pnl
                 position['exposure'] = position['exposure'] * (1 - close_pct)  # Keep 30%
                 position['trailing_activated'] = True
-                position['trailing_stop_pct'] = 0.09  # 9% from peak
+                position['trailing_stop_pct'] = 0.09  # 9% from peak (coin price, not leveraged)
             
             # Trailing stop exit
             if position.get('trailing_activated'):
@@ -183,7 +183,7 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 if current_price < trailing_stop_price:
                     exit_price = current_price
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
-                    pnl = pnl_pct * position['exposure'] * equity
+                    pnl = pnl_pct * position['exposure'] * equity * 3.5  # leverage 3.5x
                     equity += pnl
                     position = None
                     continue
@@ -194,7 +194,7 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 if current_price < peak_price - atr_multiplier * atr:
                     exit_price = current_price
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
-                    pnl = pnl_pct * position['exposure'] * equity
+                    pnl = pnl_pct * position['exposure'] * equity * 3.5  # leverage 3.5x
                     equity += pnl
                     position = None
                     continue
