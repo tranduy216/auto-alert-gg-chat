@@ -2013,8 +2013,16 @@ def analyse_coin(
     ts = _now_vnt().isoformat()
     profile = get_coin_profile(coin)
 
-    # BTC regime filter: bear → smaller positions, stricter entries
-    _bear_mode = not btc_bull
+    # Per-coin regime detection (not BTC-based)
+    # Each coin has its own bull/bear regime based on its own MA50 vs MA200
+    closes_12h_temp = [c["close"] for c in candles_12h]
+    ma50_temp_all = sma(closes_12h_temp, 50 * SF)
+    ma200_temp_all = sma(closes_12h_temp, 200 * SF)
+    ma50_temp = ma50_temp_all[-1] if ma50_temp_all[-1] is not None else closes_12h_temp[-1]
+    ma200_temp = ma200_temp_all[-1] if ma200_temp_all[-1] is not None else closes_12h_temp[-1]
+    
+    _coin_bull = ma50_temp > ma200_temp
+    _bear_mode = not _coin_bull
 
     # Aggregate 2×12h → 24h candles for trend engine
     candles_24h = []
@@ -2415,6 +2423,7 @@ def analyse_coin(
 
     output = {
         "coin": coin, "trend": trend_label, "trend_score": trend_score,
+        "regime": "BULL" if _coin_bull else "BEAR",  # Per-coin regime
         "entry2_prob": 0.0, "entry3_prob": 0.0,
         "position_state": pos_state, "action": action,
         "leverage": coin_lev, "entry_zone": {"current_price": last_close},
@@ -2821,8 +2830,13 @@ def main() -> None:
             in_event_window=_in_event_window,
         )
         results.append(result)
+        
+        # Get regime from result (added in analyse_coin)
+        coin_regime = result.get('regime', 'UNKNOWN')
+        
         print(
-            f"  {coin}: trend={result['trend']} "
+            f"  {coin}: regime={coin_regime} "
+            f"trend={result['trend']} "
             f"TrendScore={result['trend_score']:+d} "
             f"state={result['position_state']} "
             f"action={result['action']}"

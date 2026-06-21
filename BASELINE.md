@@ -9,45 +9,60 @@
 ## 🎯 Strategy Overview
 
 ### Hybrid Approach
-- **🐂 Bull Market (bull_score ≥ 3):** HOLD strategy - buy and hold, full exposure
-- **🐻 Bear Market (bull_score < 3):** TRADING strategy - active risk management
+- **🐂 Bull Market (coin's MA50 > MA200):** HOLD strategy - buy and hold, full exposure
+- **🐻 Bear Market (coin's MA50 < MA200):** SHORT strategy - profit from downtrends
+
+**Important:** Each coin has its own regime detection based on its own MA50 vs MA200, NOT based on BTC regime.
 
 ### Core Logic
 ```python
-if bull_score >= 3:
-    # Bull market: Use HOLD strategy
-    strategy = HOLD_CONFIG
-else:
-    # Bear market: Use TRADING strategy
-    strategy = TRADING_CONFIG
+# Per-coin regime detection
+def detect_coin_regime(candles):
+    ma50 = calculate_ma(candles, 50)
+    ma200 = calculate_ma(candles, 200)
+    return "BULL" if ma50 > ma200 else "BEAR"
+
+# Each coin runs independently
+for coin in coins:
+    regime = detect_coin_regime(coin_candles)
+    if regime == "BULL":
+        strategy = BULL_CONFIG
+    else:
+        strategy = BEAR_CONFIG
 ```
 
 ---
 
 ## 📊 Production Configurations
 
-### 🐻 Bear Market - Risk Management v3 Final
+### 🐻 Bear Market - SHORT Strategy
 
-**Purpose:** Protect capital, steady growth in sideways/downtrends
+**Purpose:** Profit from downtrends with short positions
 
 ```python
 BEAR_CONFIG = {
     'max_position_size': 25000,      # Max $25K per position
-    'leverage': 3.5,                 # 3.5x leverage
-    'max_margin': 7142.86,           # Max margin = 25000 / 3.5
+    'leverage': 2.5,                 # 2.5x leverage for short
+    'max_margin': 10000,             # Max margin = 25000 / 2.5
     'max_exposure_pct': 0.50,        # Max 50% exposure per coin
     'initial_exposure': 0.10,        # Start with 10%
-    'snowball_levels': [1.25, 1.50], # Scale in at +25%, +50%
+    'no_snowball': True,             # NO snowball in bear market
     'atr_multiplier': 6.0,           # ATR-based exit (6x)
-    'trailing_activation': 0.60,     # Trailing at +60% ROI
-    'trailing_stop_pct': 0.25,       # 25% trailing stop
-    'trailing_close_pct': 0.70,      # Close 70% when trailing hits
-    'partial_tp': [                  # Partial take profit
-        (0.30, 0.10),               # At +30% ROI, close 10%
-        (0.50, 0.10),               # At +50% ROI, close 10%
-    ]
+    'take_profit_levels': [
+        (0.30, 0.70),               # At +30% ROI, close 70%
+    ],
+    'trailing_activation': 0.30,     # Trailing starts after 70% closed
+    'trailing_stop_pct': 0.07,       # 7% on coin price = 17.5% on margin (2.5x)
+    'trailing_close_pct': 1.0,       # Close 100% of remaining 30%
 }
 ```
+
+**Logic:**
+1. Open short position (10% initial exposure)
+2. When ROI reaches +30%: Close 70% of position (lock profits)
+3. Remaining 30%: Set trailing stop at 7% coin price increase
+4. If coin increases 7% from peak → stop loss triggers
+5. With 2.5x leverage: 7% × 2.5 = 17.5% loss on margin
 
 **Results (5-year backtest):**
 - CAGR: 33.16%
