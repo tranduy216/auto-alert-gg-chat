@@ -173,6 +173,26 @@ class TestCoinProfiles(unittest.TestCase):
         self.assertIn('leverage', profile)
         self.assertIn('trailing_pct', profile)  # Use trailing_pct instead of sl_roi
 
+    def test_get_profile_bull(self):
+        """get_profile should return BULL profile when is_bull=True"""
+        from trading_config import get_profile, PROFILES_BULL
+        profile = get_profile("ETH", is_bull=True)
+        self.assertEqual(profile["lev"], 3.5)
+        self.assertEqual(profile["sl"], 10)
+        self.assertEqual(profile["trail"], 0.09)
+        self.assertEqual(profile["trail_activation"], 0.30)
+        self.assertEqual(profile["snowball_levels"], [0.10, 0.20, 0.30])
+
+    def test_get_profile_bear(self):
+        """get_profile should return BEAR profile when is_bull=False"""
+        from trading_config import get_profile, PROFILES_BEAR
+        profile = get_profile("ETH", is_bull=False)
+        self.assertEqual(profile["lev"], 2.0)
+        self.assertEqual(profile["sl"], 8)
+        self.assertEqual(profile["trail"], 0.25)
+        self.assertEqual(profile["trail_activation"], 0.60)
+        self.assertEqual(profile["snowball_levels"], [])  # NO snowball in bear
+
 
 class TestEdgeCases(unittest.TestCase):
     """Test edge cases and error handling"""
@@ -211,6 +231,42 @@ class TestEdgeCases(unittest.TestCase):
         ]
         adx = compute_adx(candles, period=14)
         self.assertEqual(adx, 50.0)  # Default value for insufficient data
+
+
+class TestBULLStrategy(unittest.TestCase):
+    """Test BULL snowball strategy constants"""
+
+    def test_snowball_levels_count(self):
+        from trading_config import BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES
+        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 7)
+        self.assertGreater(len(BULL_SNOWBALL_SIZES), len(BULL_SNOWBALL_LEVELS))
+
+    def test_snowball_levels_ascending(self):
+        from trading_config import BULL_SNOWBALL_LEVELS
+        for i in range(1, len(BULL_SNOWBALL_LEVELS)):
+            self.assertGreater(BULL_SNOWBALL_LEVELS[i], BULL_SNOWBALL_LEVELS[i-1])
+
+    def test_bull_initial_size(self):
+        from trading_config import BULL_INITIAL_SIZE
+        self.assertGreater(BULL_INITIAL_SIZE, 0)
+        self.assertLess(BULL_INITIAL_SIZE, 0.15)
+
+    def test_bull_trail_params(self):
+        from trading_config import (BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
+                                     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS)
+        self.assertTrue(0 < BULL_TRAIL_DISTANCE < 0.3)
+        self.assertTrue(0 < BULL_TRAIL_ACTIVATION < 0.8)
+        self.assertTrue(0 < BULL_TRAIL_CLOSE <= 1.0)
+        self.assertGreater(BULL_TRAIL_COOLDOWN_BARS, 0)
+
+    def test_bull_no_sl(self):
+        from trading_config import BULL_NO_SL
+        self.assertTrue(BULL_NO_SL)
+
+    def test_snowball_min_score(self):
+        from trading_config import COIN_CONFIG, ENTRY_MIN_SCORE
+        for coin in ["ETH", "BNB", "TRX"]:
+            self.assertGreaterEqual(COIN_CONFIG[coin]["snowball_min_score"], ENTRY_MIN_SCORE)
 
 
 if __name__ == '__main__':

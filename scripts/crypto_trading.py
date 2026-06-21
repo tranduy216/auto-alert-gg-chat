@@ -41,6 +41,18 @@ from utils.firebase_utils import (
     get_unsent_queued_alerts, is_firebase_enabled,
     mark_alert_sent, queue_alert,
 )
+from trading_config import (  # centralized config
+    COINS, BASE_CAPITAL, MAX_POS_PCT, ENTRY_MIN_SCORE,
+    ENTRY_COOLDOWN_BARS, TP_SCHEDULE,
+    FIBONACCI_COOLDOWN_MIN, SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS,
+    SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
+    BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
+    BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
+    BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
+    COIN_CONFIG, SF, SHORT_ALLOWED,
+    _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
+    get_profile, PROFILES_BULL, PROFILES_BEAR, FEE_RATE,
+)
 
 
 try:
@@ -56,56 +68,15 @@ except ImportError:
         return datetime.now(_VNT_TZ)
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration — all constants imported from trading_config.py
 # ---------------------------------------------------------------------------
 
-COINS = ["ETH", "BNB", "TRX"]
-SYMBOL_MAP: dict[str, str] = {coin: f"{coin}USDT" for coin in COINS}
-SHORT_ALLOWED: set[str] = {"ETH", "TRX"}
-
-# ── v9 Capital & Risk ────────────────────────────────────────────────
-BASE_CAPITAL = 10000
-TOTAL_CAPITAL_MULT = 2.8  # baseline multiplier (per-coin overrides below)
-MAX_PER_COIN_PCT = 0.65
-LOW_DD_COINS = {"ETH"}
-ENTRY_MIN_SCORE = 65
-
-def _coin_lev(coin: str) -> float:
-    if coin == "ETH": return 2.5
-    if coin == "BNB": return 3.5
-    if coin == "TRX": return 3.5
-    return 3.0
-
-def _coin_sl_roi(coin: str) -> float:
-    if coin in LOW_DD_COINS: return 10.0
-    return 12.0
-
-def _coin_trail(coin: str) -> float:
-    if coin in LOW_DD_COINS: return 0.04  # ETH trail
-    if coin == "TRX": return 0.065
-    return 0.065
-
+# Runtime-only helpers (not in trading_config)
 def _entry_margin(coin: str, strong: bool = True) -> float:
     return 0.09 if strong else 0.07
 
-TP_SCHEDULE = [(8.0, 0.10), (15.0, 0.15), (25.0, 0.20), (40.0, 0.25)]
-
-def _coin_cap(coin: str) -> float:
-    """Per-coin capital multiplier override."""
-    if coin == "ETH": return 2.5
-    if coin == "BNB": return 2.8
-    if coin == "TRX": return 2.5
-    return TOTAL_CAPITAL_MULT
-
-# ── Bear-mode risk reduction ─────────────────────────────────────────
-# When BTC regime is bear (MA50 < MA200), reduce risk:
-#   - All coins: leverage 2.0
-#   - ETH: position multiplier 90%, SL 8%
-#   - BNB/TRX: position multiplier 75%, SL 8%/10%
-BEAR_LEV = 2.0
-
 def _coin_lev_bear(coin: str) -> float:
-    return BEAR_LEV
+    return 2.0
 
 def _coin_sl_bear(coin: str) -> float:
     if coin == "ETH": return 8.0
@@ -115,8 +86,13 @@ def _coin_sl_bear(coin: str) -> float:
 
 def _coin_pos_mult_bear(coin: str) -> float:
     if coin == "ETH": return 0.90
-    return 0.75  # BNB, TRX, others
-ENTRY_COOLDOWN_BARS = {"ETH": 0, "BNB": 0, "TRX": 5}
+    return 0.75
+
+# ── v9 Capital & Risk ────────────────────────────────────────────────
+TOTAL_CAPITAL_MULT = 2.8
+MAX_PER_COIN_PCT = 0.65  # == MAX_POS_PCT
+LOW_DD_COINS = {"ETH"}
+BEAR_LEV = 2.0
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
 ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
@@ -1329,21 +1305,24 @@ def analyse_coin(
     kill_switch_active: bool,
     active_count: int = 0,
     max_positions: int = MAX_CONCURRENT_POSITIONS,
-    btc_bull: bool = True,
     in_event_window: bool = False,
 ) -> dict:
     ts = _now_vnt().isoformat()
     profile = get_coin_profile(coin)
 
     # Per-coin regime detection (not BTC-based)
-    # Each coin has its own bull/bear regime based on its own MA50 vs MA200
+    # Each coin has its own bull/bear regime based on MA50 vs MA120 (12h raw)
     closes_12h_temp = [c["close"] for c in candles_12h]
-    ma50_temp_all = sma(closes_12h_temp, 50 * SF)
-    ma200_temp_all = sma(closes_12h_temp, 200 * SF)
+    ma50_temp_all = sma(closes_12h_temp, 50)
+    ma120_temp_all = sma(closes_12h_temp, 120)
     ma50_temp = ma50_temp_all[-1] if ma50_temp_all[-1] is not None else closes_12h_temp[-1]
-    ma200_temp = ma200_temp_all[-1] if ma200_temp_all[-1] is not None else closes_12h_temp[-1]
+    ma120_temp = ma120_temp_all[-1] if ma120_temp_all[-1] is not None else closes_12h_temp[-1]
     
-    _coin_bull = ma50_temp > ma200_temp
+    cfg = COIN_CONFIG.get(coin, COIN_CONFIG["ETH"])
+    _coin_bull = ma50_temp > ma120_temp
+    buf = cfg.get("ma_buffer", 0)
+    if buf:
+        _coin_bull = ma50_temp > ma120_temp * (1 + buf)
     _bear_mode = not _coin_bull
 
     # Aggregate 2×12h → 24h candles for trend engine
@@ -1506,7 +1485,8 @@ def analyse_coin(
             pnl_pct_entry = (last_close - ep) / ep * 100
         else:
             pnl_pct_entry = (ep - last_close) / ep * 100
-        roi = pnl_pct_entry * mp * tot_cap * coin_lev / BASE_CAPITAL
+        ent_lev = ent.get("lev", coin_lev)
+        roi = pnl_pct_entry * mp * tot_cap * ent_lev / BASE_CAPITAL
 
         if not is_sh and last_close > hi:
             hi = last_close
@@ -1515,48 +1495,89 @@ def analyse_coin(
         ent["highest_since_entry"] = hi
 
         removed = False
+        ent_is_bull_long = ent_lev > 2.5 and not is_sh  # bull long: classified by entry leverage
 
-        # Stop loss (ROI-based)
-        if roi <= -sl_roi:
-            total_pnl += roi * rem / 100
-            exit_reasons.append(f"SL: ROI {roi:.1f}% <= -{sl_roi}%")
-            removed = True
-
-        # Partial TP
-        elif tp_s < len(TP_SCHEDULE):
-            target_roi, close_pct = TP_SCHEDULE[tp_s]
-            if roi >= target_roi:
-                cf = close_pct * rem
-                total_pnl += roi * cf / 100
-                rem -= cf
-                ent["remaining_size"] = rem
-                ent["tp_stage"] = tp_s + 1
-                exit_reasons.append(f"TP{tp_s + 1}: ROI {roi:.1f}%")
-                if ent["tp_stage"] >= len(TP_SCHEDULE):
-                    ent["trailing_stop"] = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
-
-        # Trailing stop (after all TPs)
-        if tp_s >= len(TP_SCHEDULE) and not removed:
-            if tstop is None:
-                tstop = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
-            if not is_sh:
-                tstop = max(tstop, hi * (1 - trail_rate))
-            else:
-                tstop = min(tstop, hi * (1 + trail_rate))
-            ent["trailing_stop"] = tstop
-            if (not is_sh and last_close <= tstop) or (is_sh and last_close >= tstop):
+        # ── BULL mode: snowball trailing (no SL, no TP, 30% close + cooldown) ──
+        if ent_is_bull_long and BULL_NO_SL:
+            # Safety: close if loss > 30% even in bull
+            if roi <= -BULL_MAX_LOSS * 100:
                 total_pnl += roi * rem / 100
-                exit_reasons.append(f"Trail: {last_close:.2f} <= {tstop:.2f}")
+                exit_reasons.append(f"Bull Max Loss: ROI {roi:.1f}% <= -{BULL_MAX_LOSS*100:.0f}%")
+                removed = True
+            else:
+                pnl_from_entry = (last_close - ep) / ep
+                trail_cd_until = ent.get("trail_cooldown_until", 0)
+                in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
+
+                if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
+                    if tstop is None:
+                        tstop = last_close * (1 - BULL_TRAIL_DISTANCE)
+                    tstop = max(tstop, hi * (1 - BULL_TRAIL_DISTANCE))
+                    ent["trailing_stop"] = tstop
+
+                    if last_close <= tstop:
+                        cf = BULL_TRAIL_CLOSE * rem
+                        total_pnl += roi * cf / 100
+                        rem -= cf
+                        ent["remaining_size"] = rem
+                        exit_reasons.append(f"Bull Trail: {last_close:.2f} <= {tstop:.2f} (closed {BULL_TRAIL_CLOSE*100:.0f}%)")
+                        tstop = last_close * (1 - BULL_TRAIL_DISTANCE)
+                        ent["trailing_stop"] = tstop
+                        from datetime import timedelta
+                        ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=BULL_TRAIL_COOLDOWN_BARS * 12)).isoformat()
+                        if rem <= 0.001:
+                            removed = True
+
+                # Regime change exit for bull longs
+                if not removed and not _coin_bull:
+                    total_pnl += roi * rem / 100
+                    exit_reasons.append(f"Bull regime exit: MA50 cross MA120")
+                    removed = True
+
+        # ── BEAR mode: standard SL + TP + trail ──
+        else:
+            # Stop loss (ROI-based, uses entry-specific SL)
+            ent_sl = ent.get("sl_roi", sl_roi)
+            if roi <= -ent_sl:
+                total_pnl += roi * rem / 100
+                exit_reasons.append(f"SL: ROI {roi:.1f}% <= -{ent_sl}%")
                 removed = True
 
-        # Trend reversal exit: close shorts when trend turns bullish
+            # Partial TP
+            elif tp_s < len(TP_SCHEDULE):
+                target_roi, close_pct = TP_SCHEDULE[tp_s]
+                if roi >= target_roi:
+                    cf = close_pct * rem
+                    total_pnl += roi * cf / 100
+                    rem -= cf
+                    ent["remaining_size"] = rem
+                    ent["tp_stage"] = tp_s + 1
+                    exit_reasons.append(f"TP{tp_s + 1}: ROI {roi:.1f}%")
+                    if ent["tp_stage"] >= len(TP_SCHEDULE):
+                        ent["trailing_stop"] = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
+
+            # Trailing stop (after all TPs)
+            if tp_s >= len(TP_SCHEDULE) and not removed:
+                if tstop is None:
+                    tstop = last_close * (1 - trail_rate) if not is_sh else last_close * (1 + trail_rate)
+                if not is_sh:
+                    tstop = max(tstop, hi * (1 - trail_rate))
+                else:
+                    tstop = min(tstop, hi * (1 + trail_rate))
+                ent["trailing_stop"] = tstop
+                if (not is_sh and last_close <= tstop) or (is_sh and last_close >= tstop):
+                    total_pnl += roi * rem / 100
+                    exit_reasons.append(f"Trail: {last_close:.2f} <= {tstop:.2f}")
+                    removed = True
+
+        # Trend reversal exit (BEAR mode + shorts + bull longs as safety)
         if is_sh and not removed and trend_score >= 2:
             total_pnl += roi * rem / 100
             exit_reasons.append(f"Short trend reversal: score {trend_score:+d}, ROI {roi:.1f}%")
             removed = True
 
-        # Trend reversal exit: close longs when trend turns bearish
-        if not is_sh and not removed and trend_score <= -2:
+        # Trend reversal exit: close longs when trend turns bearish (BEAR mode only)
+        if not is_sh and not removed and not ent_is_bull_long and trend_score <= -2:
             total_pnl += roi * rem / 100
             exit_reasons.append(f"Long trend reversal: score {trend_score:+d}, ROI {roi:.1f}%")
             removed = True
@@ -1612,8 +1633,11 @@ def analyse_coin(
 
     # Check for new entry — direction-specific cooldown
     deployed = sum(e.get("margin_pct", 0) for e in entries)
-    max_margin = tot_cap * MAX_PER_COIN_PCT
-    can_enter_base = (deployed * tot_cap) < max_margin
+    max_margin_pct = MAX_PER_COIN_PCT  # flat cap
+    # Adjust cap for leverage to maintain risk parity
+    profile_for_cap = get_profile(coin, _coin_bull)
+    max_margin_pct = MAX_PER_COIN_PCT / profile_for_cap["lev"] * profile_for_cap["pos_mult"]
+    can_enter_base = deployed < max_margin_pct
 
     # Direction-specific Fibonacci cooldown: LONG cooldown blocks LONG only, SHORT blocks SHORT only
     can_enter_long = can_enter_base
@@ -1649,6 +1673,15 @@ def analyse_coin(
         if sideway_score > SIDEWAY_MAX_SCORE:
             can_enter_long = False
             can_enter_short = False
+        adx_val = compute_adx(candles_12h, int(14*SF))
+        if adx_val < cfg["adx_min"]:
+            can_enter_long = False
+            can_enter_short = False
+    
+    # TRX: go to cash in bear (no short, no entry)
+    if coin == "TRX" and not _coin_bull and not cfg["bear_short"]:
+        can_enter_long = False
+        can_enter_short = False
 
     if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
@@ -1658,7 +1691,7 @@ def analyse_coin(
             ma7_1d=ma7_12h, ma200_1d=ma200_12h,
             last_volume=last_volume, vol_5d_avg=vol_5d_avg,
             use_ma200_filter=False, use_pullback_filter=False,
-            use_volume_expan=False, min_entry_score=ENTRY_MIN_SCORE,
+            use_volume_expan=False, min_entry_score=cfg["entry_score"],
         ) if can_enter_long else False
         es = compute_entry_v6_short(
             trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
@@ -1672,12 +1705,53 @@ def analyse_coin(
             candles_12h=candles_12h,
         ) if (coin in SHORT_ALLOWED and can_enter_short) else False
 
+        has_active_longs = any(not e.get("is_short", False) for e in entries)
+        has_active_shorts = any(e.get("is_short", False) for e in entries)
+
+        # ── BULL Snowball: add to existing bull long ──
+        snowball_added = False
+        if _coin_bull and el and has_active_longs and not has_active_shorts:
+            sc_snow = _entry_score_v7_long(
+                trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
+            )
+            if sc_snow >= cfg["snowball_min_score"]:
+                for ent in entries:
+                    if ent.get("is_short", False): continue
+                    ent_ep = ent.get("entry_price", 0)
+                    if ent_ep <= 0: continue
+                    pnl_from_last = (last_close - ent_ep) / ent_ep
+                    sb_stage = ent.get("snowball_stage", 0)
+                    if sb_stage < len(BULL_SNOWBALL_LEVELS):
+                        if pnl_from_last >= BULL_SNOWBALL_LEVELS[sb_stage]:
+                            add_mp = BULL_SNOWBALL_SIZES[sb_stage + 1] if sb_stage + 1 < len(BULL_SNOWBALL_SIZES) else BULL_INITIAL_SIZE
+                            profile = get_profile(coin, _coin_bull)
+                            if deployed + add_mp <= max_margin_pct + 0.001:
+                                entries.append({
+                                    "entry_price": last_close,
+                                    "margin_pct": add_mp,
+                                    "is_short": False,
+                                    "tp_stage": 0,
+                                    "remaining_size": 1.0,
+                                    "highest_since_entry": last_close,
+                                    "trailing_stop": None,
+                                    "lev": profile["lev"],
+                                    "sl_roi": profile["sl"],
+                                    "snowball_stage": sb_stage + 1,
+                                    "is_snowball": True,
+                                })
+                                entry_action = "ADD_LONG_SNOWBALL"
+                                last_entry_ts = now_ts
+                                snowball_added = True
+                            break
+
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             is_sh = act.startswith("OPEN_SHORT")
-            has_active_longs = any(not e.get("is_short", False) for e in entries)
-            has_active_shorts = any(e.get("is_short", False) for e in entries)
-            if (is_sh and has_active_longs) or (not is_sh and has_active_shorts):
+            # Skip new entry if snowball already added (bull mode)
+            if _coin_bull and not is_sh and snowball_added:
+                pass
+            elif (is_sh and has_active_longs) or (not is_sh and has_active_shorts):
                 pass
             else:
                 if is_sh:
@@ -1691,15 +1765,24 @@ def analyse_coin(
                         trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
                         exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
                     )
-                strong = sc >= ENTRY_MIN_SCORE
-                mp = _entry_margin(coin, strong)
-                # Bear-mode: apply per-coin position multiplier instead of flat halve
-                if _bear_mode:
-                    mp *= _coin_pos_mult_bear(coin)
-                # Bear-mode: also reduce leverage and SL for this entry
-                bear_lev = _coin_lev_bear(coin) if _bear_mode else coin_lev
-                bear_sl = _coin_sl_bear(coin) if _bear_mode else sl_roi
-                if deployed + mp <= max_margin / tot_cap + 0.001:
+                strong = sc >= cfg["entry_score"]
+                
+                # Get HYBRID profile based on market regime
+                profile = get_profile(coin, _coin_bull)
+                
+                # Apply profile parameters
+                if _coin_bull and not is_sh:
+                    mp = BULL_INITIAL_SIZE  # fixed snowball entry size
+                    profile_lev = 3.5  # BULL leverage
+                    profile_sl = 12  # not used (no SL in bull)
+                else:
+                    mp = profile["initial_exposure"] * profile["pos_mult"]
+                    if strong: mp *= 1.0
+                    else: mp *= 0.7
+                    profile_lev = profile["lev"]
+                    profile_sl = 12 if coin == "TRX" else profile["sl"]  # TRX wider SL
+                
+                if deployed + mp <= max_margin_pct + 0.001:
                     entries.append({
                         "entry_price": last_close,
                         "margin_pct": mp,
@@ -1708,8 +1791,10 @@ def analyse_coin(
                         "remaining_size": 1.0,
                         "highest_since_entry": last_close,
                         "trailing_stop": None,
-                        "lev": bear_lev,
-                        "sl_roi": bear_sl,
+                        "lev": profile_lev,
+                        "sl_roi": profile_sl,
+                        "snowball_levels": profile["snowball_levels"],
+                        "trail_activation": profile["trail_activation"],
                     })
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
@@ -2148,7 +2233,6 @@ def main() -> None:
         result = analyse_coin(
             coin, candles_12h, kill_switch,
             active_count=_active_positions,
-            btc_bull=_btc_bull,
             in_event_window=_in_event_window,
         )
         results.append(result)
