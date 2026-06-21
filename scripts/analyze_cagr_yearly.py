@@ -120,21 +120,47 @@ def compute_bull_score(candles):
         
     return score
 
-def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
-    """Backtest với ATR exit, trả về yearly returns"""
+def backtest_coin_yearly(candles, symbol, config=None, initial_exposure=0.25, rsi_max=65):
+    """Backtest với ATR exit, trả về yearly returns
+    
+    Args:
+        candles: list of candle data
+        symbol: coin symbol
+        config: dict with config parameters (optional)
+        initial_exposure: initial exposure percentage (default 0.25)
+        rsi_max: max RSI for entry (default 65)
+    """
     initial_capital = 10000
     equity = initial_capital
     position = None
     
-    # Margin constraints - Test 5 config (no limit, wider ATR)
-    max_position_size = None  # No position size limit
-    leverage = 3.5
-    max_margin = None  # No margin limit
-    max_exposure_pct = 1.0  # Allow 100% exposure
-    atr_multiplier = 4.0  # Wider ATR exit (was 2.0)
-    
-    # Snowball config
-    snowball_levels = [1.10, 1.20, 1.30]  # 3 levels (was 1 level)
+    # Use config if provided, otherwise use defaults
+    if config:
+        max_position_size = config.get('max_position_size', None)
+        leverage = config.get('leverage', 3.5)
+        max_margin = config.get('max_margin', None)
+        max_exposure_pct = config.get('max_exposure_pct', 1.0)
+        atr_multiplier = config.get('atr_multiplier', 2.0)
+        bull_score_threshold = config.get('bull_score_threshold', 3)
+        initial_exposure = config.get('initial_exposure', 0.25)
+        snowball_levels = config.get('snowball_levels', [1.10])
+        trailing_activation = config.get('trailing_activation', 0.30)
+        trailing_stop_pct = config.get('trailing_stop_pct', 0.09)
+        trailing_close_pct = config.get('trailing_close_pct', 0.70)
+        partial_tp = config.get('partial_tp', None)
+    else:
+        # Margin constraints - Test 5 config (no limit, wider ATR)
+        max_position_size = None  # No position size limit
+        leverage = 3.5
+        max_margin = None  # No margin limit
+        max_exposure_pct = 1.0  # Allow 100% exposure
+        atr_multiplier = 4.0  # Wider ATR exit (was 2.0)
+        bull_score_threshold = 3
+        snowball_levels = [1.10, 1.20, 1.30]  # 3 levels (was 1 level)
+        trailing_activation = 0.30
+        trailing_stop_pct = 0.09
+        trailing_close_pct = 0.70
+        partial_tp = None
     
     trades = []  # Track all trades
     exits = 0  # Count exits
@@ -221,24 +247,56 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 position['peak_price'] = current_price
                 peak_price = current_price
 
-            # Trailing stop trigger: profit > 30%
-            if current_pnl_pct > 0.30 and not position.get('trailing_activated'):
-                # Close 70% position
-                close_pct = 0.70
+            # Partial take profit (if configured)
+            if partial_tp and not position.get('trailing_activated'):
+                partial_tp_hit = position.get('partial_tp_hit', [])
+                for i, (roi_level, close_pct) in enumerate(partial_tp):
+                    if i not in partial_tp_hit and current_pnl_pct >= roi_level:
+                        # Close partial position
+                        close_exposure = position['exposure'] * close_pct
+                        pnl = current_pnl_pct * close_exposure * position['position_equity'] * leverage
+                        equity += pnl
+                        
+                        # Update max drawdown
+                        if equity > peak_equity:
+                            peak_equity = equity
+                        drawdown = (peak_equity - equity) / peak_equity * 100
+                        if drawdown > max_drawdown:
+                            max_drawdown = drawdown
+                        
+                        position['exposure'] = position['exposure'] * (1 - close_pct)
+                        partial_tp_hit.append(i)
+                        position['partial_tp_hit'] = partial_tp_hit
+                        
+                        trades.append({
+                            'type': 'partial_tp',
+                            'entry': position['entry_price'],
+                            'exit': current_price,
+                            'pnl_pct': current_pnl_pct * 100,
+                            'pnl': pnl,
+                            'exposure': close_exposure,
+                            'equity': equity,
+                            'tp_level': roi_level
+                        })
+
+            # Trailing stop trigger: profit > trailing_activation (default 30%, can be 60%)
+            if current_pnl_pct > trailing_activation and not position.get('trailing_activated'):
+                # Close trailing_close_pct position (default 70%, can be 50%)
+                close_pct = trailing_close_pct
                 close_exposure = position['exposure'] * close_pct
                 pnl = current_pnl_pct * close_exposure * position['position_equity'] * leverage
                 equity += pnl
-                
+
                 # Update max drawdown
                 if equity > peak_equity:
                     peak_equity = equity
                 drawdown = (peak_equity - equity) / peak_equity * 100
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
-                
-                position['exposure'] = position['exposure'] * (1 - close_pct)  # Keep 30%
+
+                position['exposure'] = position['exposure'] * (1 - close_pct)  # Keep remaining
                 position['trailing_activated'] = True
-                position['trailing_stop_pct'] = 0.09  # 9% from peak (coin price, not leveraged)
+                position['trailing_stop_pct'] = trailing_stop_pct  # Use config value
 
             # Trailing stop exit
             if position.get('trailing_activated'):
@@ -248,15 +306,26 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
                     pnl = pnl_pct * position['exposure'] * position['position_equity'] * leverage
                     equity += pnl
-                    
+
                     # Update max drawdown
                     if equity > peak_equity:
                         peak_equity = equity
                     drawdown = (peak_equity - equity) / peak_equity * 100
                     if drawdown > max_drawdown:
                         max_drawdown = drawdown
-                    
+
+                    trades.append({
+                        'type': 'trailing_exit',
+                        'entry': position['entry_price'],
+                        'exit': exit_price,
+                        'pnl_pct': pnl_pct * 100,
+                        'pnl': pnl,
+                        'exposure': position['exposure'],
+                        'equity': equity
+                    })
+
                     position = None
+                    exits += 1
                     continue
 
             # ATR-based exit (for non-trailing part)
@@ -267,15 +336,26 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
                     pnl = pnl_pct * position['exposure'] * position['position_equity'] * leverage
                     equity += pnl
-                    
+
                     # Update max drawdown
                     if equity > peak_equity:
                         peak_equity = equity
                     drawdown = (peak_equity - equity) / peak_equity * 100
                     if drawdown > max_drawdown:
                         max_drawdown = drawdown
-                    
+
+                    trades.append({
+                        'type': 'atr_exit',
+                        'entry': position['entry_price'],
+                        'exit': exit_price,
+                        'pnl_pct': pnl_pct * 100,
+                        'pnl': pnl,
+                        'exposure': position['exposure'],
+                        'equity': equity
+                    })
+
                     position = None
+                    exits += 1
                     continue
         
         # Entry logic
@@ -293,8 +373,10 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
             if max_position_size and position_size > max_position_size:
                 # Reduce exposure to fit max position size
                 exposure = max_margin / equity
+                # Recalculate position_size with reduced exposure
+                position_size = exposure * equity * leverage
 
-            # Update max position size
+            # Update max position size with ACTUAL position size
             if position_size > max_position_size_actual:
                 max_position_size_actual = position_size
 
@@ -314,14 +396,29 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 if level not in position['snowball_hit']:
                     target_price = position['entry_price'] * level
                     if current_price >= target_price:
-                        # Check max exposure based on position size constraint
+                        # Check max exposure based on CURRENT equity (not position_equity)
                         new_exposure = position['exposure'] + initial_exposure
-                        new_position_size = new_exposure * position['position_equity'] * leverage
+                        # Use current equity for position size calculation
+                        new_position_size = new_exposure * equity * leverage
 
                         # Check both max_position_size and max_exposure_pct
-                        if (max_position_size is None or new_position_size <= max_position_size) and new_exposure <= position['max_exposure']:
+                        can_snowball = True
+                        
+                        # Check position size limit with 2% buffer for rounding
+                        if max_position_size and new_position_size > max_position_size * 0.98:
+                            can_snowball = False
+                        
+                        # Check exposure limit
+                        if new_exposure > position['max_exposure']:
+                            can_snowball = False
+                        
+                        if can_snowball:
                             position['snowball_hit'].append(level)
                             position['exposure'] = new_exposure
+                            
+                            # Update max position size tracking
+                            if new_position_size > max_position_size_actual:
+                                max_position_size_actual = new_position_size
     
     # Close any remaining position
     if position:
