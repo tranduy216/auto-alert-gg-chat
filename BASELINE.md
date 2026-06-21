@@ -1,328 +1,258 @@
-# Baseline Documentation - Crypto Trading System
+# BASELINE - Crypto Trading Strategy
 
 **Last Updated:** 2026-06-21  
-**Version:** Production Ready  
-**Status:** ✅ All tests passing (25/25)
+**Status:** Production Ready (with 1 critical issue to fix)
 
 ---
 
-## 📊 System Overview
+## Strategy Overview
 
-Hệ thống giao dịch crypto tự động với chiến lược **Hybrid Approach**:
-- **🐂 Bull Market** (coin MA50 > MA200): HOLD strategy - buy and hold, full exposure
-- **🐻 Bear Market** (coin MA50 < MA200): TRADING strategy - active risk management
+**Core Principle:** Mỗi coin có regime riêng (MA50 vs MA200), KHÔNG dựa trên BTC regime.
 
-**Key Principle:** Mỗi coin có regime riêng (MA50 vs MA200), KHÔNG dựa trên BTC regime.
+- **🐂 Bull Market** (MA50 > MA200): Normal trading - full leverage, full position
+- **🐻 Bear Market** (MA50 < MA200): Risk reduction - lower leverage, smaller position
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-### 🐻 Bear Market - Risk Management v3 Final
-
-**Mục tiêu:** Bảo vệ vốn, tăng trưởng ổn định trong sideways/downtrends
+### Bear Market (Risk Reduction)
 
 ```python
-BEAR_CONFIG = {
-    'max_position_size': 25000,      # Max $25K per position
-    'leverage': 2.0,                 # Reduced leverage in bear (not 3.5x)
-    'max_margin': 12500,             # Max margin = 25000 / 2.0
-    'max_exposure_pct': 0.50,        # Max 50% exposure per coin
-    'initial_exposure': 0.10,        # Start with 10%
-    'snowball_levels': [1.25, 1.50], # Scale in at +25%, +50% (but effectively disabled)
-    'atr_multiplier': 6.0,           # ATR-based exit (6x)
-    'trailing_activation': 0.60,     # Trailing at +60% ROI
-    'trailing_stop_pct': 0.25,       # 25% trailing stop
-    'trailing_close_pct': 0.70,      # Close 70% when trailing hits
-    'partial_tp': [                  # Partial take profit
-        (8.0, 0.30),                # At +8% ROI, close 30%
-        (15.0, 0.30),               # At +15% ROI, close 30%
-        (25.0, 0.20),               # At +25% ROI, close 20%
-        (40.0, 0.25),               # At +40% ROI, close 25%
-    ]
+BEAR_LEV = 2.0  # All coins use 2.0x leverage
+
+def _coin_sl_bear(coin: str) -> float:
+    if coin == "ETH": return 8.0
+    if coin == "BNB": return 10.0
+    if coin == "TRX": return 8.0
+    return 10.0
+
+def _coin_pos_mult_bear(coin: str) -> float:
+    if coin == "ETH": return 0.90
+    return 0.75  # BNB, TRX, others
+```
+
+**Chiến lược:**
+1. Leverage: 2.0x (từ 2.5-3.5x trong bull)
+2. Position Size: ETH 90%, BNB/TRX 75%
+3. Stop Loss: Tighter (ETH 8%, BNB 10%, TRX 8%)
+
+### Bull Market (Normal Trading)
+
+```python
+PROFILES_BULL = {
+    "ETH": {"lev": 2.5, "sl": 10, "pos_mult": 1.0},
+    "BNB": {"lev": 3.5, "sl": 12, "pos_mult": 1.0},
+    "TRX": {"lev": 3.5, "sl": 12, "pos_mult": 1.0},
 }
 ```
 
-**Chiến lược Bear Market:**
-1. **Entry:** 10% initial exposure (conservative)
-2. **Snowball:** Chỉ scale-in khi position có lãi +10% (SNOWBALL_PNL_THRESHOLD = 0.10). Trong bear market, position thường lỗ → snowball **effectively disabled** (không bao giờ trigger)
-3. **Exit:** ATR 6x (wide) để tránh stop loss sớm trong volatility cao
-4. **Trailing:** Kích hoạt ở +60% ROI, stop 25% (tighter để bảo vệ profit)
-5. **Partial TP:** Chốt lời từng phần ở +8%, +15%, +25%, +40% để giảm risk
-6. **Leverage:** Giảm xuống 2.0x (từ 3.5x) để giảm risk trong bear
-7. **Stop Loss:** Tighter (8% cho ETH, 10% cho BNB/TRX)
+**Chiến lược:**
+1. Leverage: Full (ETH 2.5x, BNB/TRX 3.5x)
+2. Position Size: 100%
+3. Stop Loss: Wider (ETH 10%, BNB/TRX 12%)
 
-**⚠️ Lưu ý về Snowball:**
-- Code vẫn có `snowball_levels: [1.25, 1.50]` nhưng thực tế **không bao giờ trigger** trong bear market
-- Lý do: Snowball chỉ trigger khi PnL >= 10% (SNOWBALL_PNL_THRESHOLD)
-- Trong bear market, position thường lỗ hoặc lãi nhỏ (< 10%) → snowball không trigger
-- Đây là thiết kế intentional: bảo vệ vốn trong bear market, không scale-in khi đang lỗ
+---
 
-### 🐂 Bull Market - HOLD $35K Limit
+## Comparison: BEAR vs BULL
 
-**Mục tiêu:** Tối đa hóa lợi nhuận trong strong uptrends
+| Aspect | BEAR | BULL |
+|--------|------|------|
+| **ETH Leverage** | 2.0x | 2.5x |
+| **BNB Leverage** | 2.0x | 3.5x |
+| **TRX Leverage** | 2.0x | 3.5x |
+| **ETH Position** | 90% | 100% |
+| **BNB Position** | 75% | 100% |
+| **TRX Position** | 75% | 100% |
+| **ETH SL** | 8% | 10% |
+| **BNB SL** | 10% | 12% |
+| **TRX SL** | 8% | 12% |
+
+---
+
+## Performance Results (BASELINE Config)
+
+**Tested with backtest_fast.py:**
+
+| Coin | CAGR | Max DD | SL Rate | Final Equity |
+|------|------|--------|---------|--------------|
+| ETH | +23.14% | 37.18% | 16.19% | $30,549 |
+| BNB | +37.50% | 20.60% | 15.25% | $55,187 |
+| TRX | +33.65% | 34.07% | 12.96% | $47,389 |
+| **Average** | **+31.43%** | **30.62%** | **14.80%** | **$44,375** |
+
+---
+
+## 🚨 CRITICAL ISSUE: Regime-Dependent Cooldown Shift
+
+### Problem
+
+**backtest_optimal.py có, nhưng crypto_trading.py KHÔNG có:**
 
 ```python
-BULL_CONFIG = {
-    'max_position_size': 35000,      # Max $35K (3.5x leverage)
-    'leverage': 3.5,                 # 3.5x leverage
-    'max_margin': 10000,             # Max margin = 35000 / 3.5
-    'max_exposure_pct': 1.0,         # Max 100% exposure
-    'initial_exposure': 0.15,        # Start with 15% (reduced from 25%)
-    'snowball_levels': [1.10, 1.20, 1.30], # Scale in at +10%, +20%, +30%
-    'atr_multiplier': 4.0,           # ATR-based exit (4x)
-    'trailing_activation': 0.30,     # Trailing at +30% ROI
-    'trailing_stop_pct': 0.09,       # 9% trailing stop
-    'trailing_close_pct': 0.70,      # Close 70% when trailing hits
-}
+# backtest_optimal.py (lines 125-126):
+long_shift = bull_l_shift if is_bull else bear_l_shift
+short_shift = bull_s_shift if is_bull else bear_s_shift
+
+# crypto_trading.py (line 182):
+cd_bars_fib = _fib_cooldown_bars(consec_l, 0)  # ❌ Không có shift
 ```
 
-**Chiến lược Bull Market:**
-1. **Entry:** 15% initial exposure (aggressive hơn Bear)
-2. **Snowball:** Scale-in ở +10%, +20%, +30% (nhiều cơ hội hơn)
-3. **Exit:** ATR 4x (tight hơn Bear) để capture trend sớm
-4. **Trailing:** Kích hoạt ở +30% ROI (sớm hơn Bear), stop 9% (tight hơn)
-5. **No Partial TP:** Giữ full position để maximize profit trong bull run
+### Impact
 
----
+Production results sẽ **khác** backtest results vì production không có regime-dependent cooldown.
 
-## 🔑 Key Differences: BEAR vs BULL
+### Fix Required
 
-### 1. Position Sizing
+Thêm function vào `crypto_trading.py`:
 
-| Aspect | BEAR Market | BULL Market | Reason |
-|--------|-------------|-------------|---------|
-| **Initial Exposure** | 10% | 15% | Bull có trend rõ ràng, risk thấp hơn |
-| **Max Exposure** | 50% | 100% | Bull muốn maximize upside |
-| **Max Position** | $25K | $35K | Bull có leverage tốt hơn |
+```python
+def _get_cooldown_shift(coin: str, is_long: bool, is_bull: bool) -> int:
+    """Get cooldown shift based on regime and direction.
+    
+    Bear market: SHORT→shift=0 (3 bars), LONG→shift=1 (5 bars)
+    Bull market: SHORT→shift=1 (5 bars), LONG→shift=0 (3 bars)
+    """
+    if is_bull:
+        return 1 if is_long else 0
+    else:
+        return 0 if is_long else 1
 
-**Why:** Trong bull market, trend mạnh và rõ ràng → có thể dùng exposure cao hơn. Trong bear market, volatility cao và trend yếu → cần conservative.
-
-### 2. Snowball Strategy
-
-| Aspect | BEAR Market | BULL Market | Reason |
-|--------|-------------|-------------|---------|
-| **Levels** | [+25%, +50%] | [+10%, +20%, +30%] | Bull có nhiều cơ hội scale-in |
-| **Frequency** | 2 levels | 3 levels | Bull trend dài hơn, nhiều pullback |
-| **Risk** | Conservative | Aggressive | Bear cần bảo vệ vốn |
-
-**Why:** Trong bull market, price thường tăng liên tục với các pullback nhỏ → có thể scale-in ở mức thấp hơn (+10%). Trong bear market, pullback thường sâu và không ổn định → chỉ scale-in khi price đã tăng mạnh (+25%).
-
-### 3. Exit Strategy
-
-| Aspect | BEAR Market | BULL Market | Reason |
-|--------|-------------|-------------|---------|
-| **ATR Multiplier** | 6.0x | 4.0x | Bear volatility cao, cần wide exit |
-| **Trailing Activation** | +60% ROI | +30% ROI | Bull muốn lock profit sớm |
-| **Trailing Stop** | 25% | 9% | Bull trend mạnh, stop tight hơn |
-| **Partial TP** | Yes (30%, 50%) | No | Bear cần reduce risk sớm |
-
-**Why:** 
-- **BEAR:** Volatility cao → cần ATR wide (6x) để tránh stop loss sớm. Trailing activation cao (+60%) vì trend yếu, cần đợi profit lớn mới lock. Trailing stop wide (25%) vì price dao động mạnh.
-- **BULL:** Trend mạnh và ổn định → ATR tight (4x) để exit sớm khi trend đảo. Trailing activation thấp (+30%) vì muốn lock profit sớm. Trailing stop tight (9%) vì trend mạnh, ít dao động.
-
-### 4. Risk Management
-
-| Aspect | BEAR Market | BULL Market | Reason |
-|--------|-------------|-------------|---------|
-| **Exposure Control** | Max 50% | Max 100% | Bear cần diversify risk |
-| **Position Size** | Conservative | Aggressive | Bear ưu tiên bảo vệ vốn |
-| **Partial TP** | Yes | No | Bear cần reduce risk sớm |
-| **Stop Loss** | Wide (ATR 6x) | Tight (ATR 4x) | Bear volatility cao |
-
-**Why:** Trong bear market, cần bảo vệ vốn là ưu tiên số 1 → dùng exposure thấp, partial TP, wide stop loss. Trong bull market, ưu tiên maximize profit → dùng exposure cao, no partial TP, tight stop loss.
-
----
-
-## 📈 Performance Results
-
-### Overall (5-year backtest: 2021-2025)
-
-| Metric | Bear Config | Bull Config | Hybrid |
-|--------|-------------|-------------|--------|
-| **CAGR** | 33.16% | 54.68% | **66.52%** |
-| **Max DD** | 17.69% | 25.59% | **25.59%** |
-| **Risk-Adj** | 1.87 | 2.14 | **2.60** |
-
-### Per-Coin Breakdown (Hybrid)
-
-| Coin | CAGR | Final Equity | Max DD |
-|------|------|--------------|--------|
-| **ETH** | 47.29% | $61,234 | 22.3% |
-| **BNB** | 52.18% | $78,456 | 28.4% |
-| **TRX** | 100.09% | $245,678 | 26.1% |
-| **Average** | **66.52%** | **$128,456** | **25.59%** |
-
-### Hybrid vs Buy & Hold (2022-2025, $10K initial)
-
-| Strategy | Final Equity | Total Return | Outperformance |
-|----------|--------------|--------------|----------------|
-| **Hybrid** | **$82,686** | **+726.86%** | **+617.79%** |
-| Buy & Hold | $20,907 | +109.07% | Baseline |
-
----
-
-## 🎯 Decision Tree
-
-```
-Start
-  ↓
-Calculate coin's MA50 and MA200
-  ↓
-MA50 > MA200?
-  ├─ YES → BULL market
-  │         Use BULL_CONFIG:
-  │         - Max position: $35K
-  │         - Max exposure: 100%
-  │         - Initial: 15%
-  │         - Snowball: +10%, +20%, +30%
-  │         - ATR: 4.0x
-  │         - Trailing: 9% at +30% ROI
-  │
-  └─ NO → BEAR market
-            Use BEAR_CONFIG:
-            - Max position: $25K
-            - Max exposure: 50%
-            - Initial: 10%
-            - Snowball: +25%, +50%
-            - ATR: 6.0x
-            - Trailing: 25% at +60% ROI
-            - Partial TP: +30% (10%), +50% (10%)
+# Usage trong entry logic:
+shift = _get_cooldown_shift(coin, is_long=True, is_bull=_coin_bull)
+cd_bars_fib = _fib_cooldown_bars(consec_l, shift)
 ```
 
 ---
 
-## ✅ Success Factors
+## Consistency Checklist
 
-### 1. Per-Coin Regime Detection
-- **What:** Mỗi coin dùng MA50 vs MA200 của chính nó
-- **Why:** ETH có thể bull trong khi BNB bear (hoặc ngược lại)
-- **Result:** Chọn strategy chính xác hơn
+### 4 Files Must Sync
 
-### 2. Position Size Limits
-- **Bear:** $25K max, 50% exposure
-- **Bull:** $35K max, 100% exposure
-- **Result:** Max DD giảm từ 53% → 25.59% (52% reduction)
+1. `scripts/backtest_optimal.py` - Backtest framework
+2. `scripts/crypto_trading.py` - Production implementation
+3. `tests/test_crypto_trading.py` - Unit tests (25/25 passing)
+4. `BASELINE.md` - This file
 
-### 3. Different Snowball Levels
-- **Bear:** Conservative (+25%, +50%) - ít entries hơn
-- **Bull:** Aggressive (+10%, +20%, +30%) - nhiều entries hơn
-- **Result:** Balance risk và reward
+### Values Comparison
 
-### 4. Trailing Stop Strategy
-- **Bear:** 25% trailing at +60% ROI (wide)
-- **Bull:** 9% trailing at +30% ROI (tight)
-- **Result:** Lock profits trong khi cho phép volatility
-
-### 5. Partial Take Profit (Bear only)
-- **What:** Close 10% at +30% và +50% ROI
-- **Why:** Secure profits sớm trong bear markets volatile
-- **Result:** Equity curve ổn định hơn
-
----
-
-## ❌ Lessons Learned
-
-### 1. BTC-Based Regime is Wrong
-- **Problem:** Dùng BTC regime cho tất cả coins
-- **Result:** ETH trong bull trong khi BTC trong bear → chọn sai strategy
-- **Fix:** Per-coin regime detection (MA50 vs MA200)
-
-### 2. Unlimited Position Size = High Risk
-- **Problem:** Test 5 có CAGR 282% nhưng Max DD 53%
-- **Result:** Quá risky cho production
-- **Fix:** Limit $35K (3.5x leverage)
-
-### 3. High Initial Exposure = High DD
-- **Problem:** 25% initial exposure → Max DD 35.98%
-- **Result:** Vượt quá 30% target
-- **Fix:** Giảm xuống 15% initial exposure
-
-### 4. Same Config for Bull/Bear = Suboptimal
-- **Problem:** Dùng BEAR_CONFIG cho cả 2 → CAGR 33.16%
-- **Result:** Bỏ lỡ upside trong bull market
-- **Fix:** Hybrid với BULL_CONFIG cho bull markets
-
-### 5. Too Many Snowball Levels = Over-Exposure
-- **Problem:** 4 snowball levels → position size vượt limit
-- **Result:** Vi phạm risk constraints
-- **Fix:** Bear: 2 levels, Bull: 3 levels
+| Parameter | backtest_optimal.py | crypto_trading.py | Status |
+|-----------|---------------------|-------------------|--------|
+| **ETH Leverage (Bull)** | 2.5 | 2.5 | ✅ Match |
+| **BNB Leverage (Bull)** | 3.5 | 3.5 | ✅ Match |
+| **TRX Leverage (Bull)** | 3.5 | 3.5 | ✅ Match |
+| **All Leverage (Bear)** | 2.0 | 2.0 | ✅ Match |
+| **ETH SL (Bull)** | 10% | 10% | ✅ Match |
+| **BNB SL (Bull)** | 12% | 12% | ✅ Match |
+| **TRX SL (Bull)** | 12% | 12% | ✅ Match |
+| **ETH SL (Bear)** | 8% | 8% | ✅ Match |
+| **BNB SL (Bear)** | 10% | 10% | ✅ Match |
+| **TRX SL (Bear)** | 8% | 8% | ✅ Match |
+| **ETH Position (Bear)** | 0.90 | 0.90 | ✅ Match |
+| **BNB Position (Bear)** | 0.75 | 0.75 | ✅ Match |
+| **TRX Position (Bear)** | 0.75 | 0.75 | ✅ Match |
+| **Cooldown Shift** | ✅ Có | ❌ KHÔNG | 🔴 **MISMATCH** |
 
 ---
 
-## 🚀 Deployment Checklist
+## Sync Process
+
+Khi thay đổi strategy:
+
+1. **Update backtest_optimal.py:**
+   - Thay đổi PROFILES_BULL/BEAR
+   - Chạy backtest để validate
+
+2. **Update crypto_trading.py:**
+   - Sync `_coin_lev()`, `_coin_sl_roi()`, `_coin_pos_mult_bear()`
+   - **Sync `_get_cooldown_shift()` logic** 🔴 **CRITICAL**
+
+3. **Update tests/test_crypto_trading.py:**
+   - Thêm tests cho new logic
+   - Đảm bảo 25/25 tests passing
+
+4. **Update BASELINE.md:**
+   - Document changes
+   - Update checklist
+
+5. **Validate:**
+   - Chạy backtest_optimal.py
+   - Chạy crypto_trading.py với cùng data
+   - So sánh results (differences < 5% là acceptable)
+
+---
+
+## Validation Commands
+
+```bash
+# 1. Chạy backtest
+python3 scripts/backtest_optimal.py
+# Expected: CAGR ~31.43%, Max DD ~30.62%, SL Rate ~14.80%
+
+# 2. Chạy production với test data
+python3 scripts/crypto_trading.py --test-mode
+# Expected: Results tương tự backtest (±5%)
+
+# 3. Chạy unit tests
+python3 -m unittest tests.test_crypto_trading -v
+# Expected: 25/25 tests passing
+
+# 4. So sánh results
+# Expected: CAGR, Max DD, SL Rate tương tự nhau (±5%)
+# Differences > 5% → Investigate mismatch
+```
+
+---
+
+## Known Issues
+
+### Issue #1: Regime-Dependent Cooldown Shift 🔴 CRITICAL
+
+**Problem:** crypto_trading.py KHÔNG có regime-dependent cooldown shift
+
+**Impact:** Production results khác backtest results
+
+**Status:** 🔴 **NOT FIXED** - Cần implement trước khi deploy
+
+**Priority:** 🔴 **CRITICAL** - Ảnh hưởng đến production results
+
+---
+
+## Deployment Checklist
 
 - [x] Per-coin regime detection implemented
 - [x] Backtest validation (5-year historical data)
 - [x] Risk management (position limits, exposure limits)
-- [x] Unit tests (> 80% coverage, 25/25 passing)
+- [x] Unit tests (25/25 passing)
 - [x] Integration tests
 - [x] Out-of-sample testing
-- [x] Documentation (BASELINE.md, HYBRID_BASELINE.md)
+- [x] Documentation updated
+- [ ] **Fix regime-dependent cooldown shift** 🔴 **CRITICAL**
 - [ ] Paper trading (1-2 weeks)
 - [ ] Live trading (small capital)
 - [ ] Monitor and adjust
 
 ---
 
-## 📝 Key Files
+## Key Files
 
-- `scripts/crypto_trading.py` - Main trading logic (per-coin regime)
+- `scripts/crypto_trading.py` - Main trading logic
 - `scripts/backtest_optimal.py` - Backtest framework
+- `scripts/backtest_fast.py` - Fast backtest tool (cache, parallel)
 - `tests/test_crypto_trading.py` - Unit tests (25 tests)
 - `BASELINE.md` - This file
-- `HYBRID_BASELINE.md` - Hybrid strategy details
+- `TESTING_BEST_PRACTICES.md` - Testing guidelines
 
 ---
 
-## 📊 Monitoring Metrics
+## Key Takeaways
 
-**Daily:**
-- Position size per coin
-- Total exposure
-- Unrealized PnL
-
-**Weekly:**
-- CAGR (rolling 30 days)
-- Max DD (rolling 30 days)
-- Win rate
-- Number of trades
-
-**Monthly:**
-- CAGR (monthly)
-- Max DD (monthly)
-- Regime classification accuracy
-- Strategy performance vs benchmark
+1. **Per-Coin Regime > BTC Regime** - Mỗi coin có trend riêng
+2. **Direction-Specific > Cross-Direction** - LONG cooldown chỉ block LONG
+3. **Fibonacci > Fixed Cooldown** - Progressive cooldown
+4. **Risk Reduction in Bear Market** - Lower leverage, smaller position, tighter SL
+5. **Performance: CAGR 31.43%, DD 30.62%** - Solid performance với risk management
 
 ---
 
-## 🎓 Key Takeaways
-
-1. **Per-Coin Regime > BTC Regime**
-   - Mỗi coin có trend riêng
-   - Chọn strategy chính xác hơn
-
-2. **Hybrid > Single Strategy**
-   - Bull: Maximize upside (CAGR 54.68%)
-   - Bear: Protect capital (CAGR 33.16%)
-   - Hybrid: Best of both (CAGR 66.52%)
-
-3. **Risk Management is Critical**
-   - Position limits ngăn catastrophic losses
-   - Exposure limits control drawdown
-   - Max DD 25.59% (vs 53% không có limits)
-
-4. **Scale-in Improves Returns**
-   - Snowball thêm vào winning positions
-   - Giảm average entry price
-   - Aggressive trong bull, conservative trong bear
-
-5. **Trailing Stop Protects Profits**
-   - Locks in gains
-   - Allows for volatility
-   - Tight trong bull (9%), wide trong bear (25%)
-
----
-
-**Status:** ✅ READY FOR PRODUCTION  
 **Next Review:** 2026-07-21 (after paper trading)
