@@ -25,28 +25,38 @@ Hệ thống giao dịch crypto tự động với chiến lược **Hybrid Appr
 ```python
 BEAR_CONFIG = {
     'max_position_size': 25000,      # Max $25K per position
-    'leverage': 3.5,                 # 3.5x leverage
-    'max_margin': 7142.86,           # Max margin = 25000 / 3.5
+    'leverage': 2.0,                 # Reduced leverage in bear (not 3.5x)
+    'max_margin': 12500,             # Max margin = 25000 / 2.0
     'max_exposure_pct': 0.50,        # Max 50% exposure per coin
     'initial_exposure': 0.10,        # Start with 10%
-    'snowball_levels': [1.25, 1.50], # Scale in at +25%, +50%
+    'snowball_levels': [1.25, 1.50], # Scale in at +25%, +50% (but effectively disabled)
     'atr_multiplier': 6.0,           # ATR-based exit (6x)
     'trailing_activation': 0.60,     # Trailing at +60% ROI
     'trailing_stop_pct': 0.25,       # 25% trailing stop
     'trailing_close_pct': 0.70,      # Close 70% when trailing hits
     'partial_tp': [                  # Partial take profit
-        (0.30, 0.10),               # At +30% ROI, close 10%
-        (0.50, 0.10),               # At +50% ROI, close 10%
+        (8.0, 0.30),                # At +8% ROI, close 30%
+        (15.0, 0.30),               # At +15% ROI, close 30%
+        (25.0, 0.20),               # At +25% ROI, close 20%
+        (40.0, 0.25),               # At +40% ROI, close 25%
     ]
 }
 ```
 
 **Chiến lược Bear Market:**
 1. **Entry:** 10% initial exposure (conservative)
-2. **Snowball:** Chỉ scale-in khi price tăng +25%, +50% (không scale-in ở mức thấp)
+2. **Snowball:** Chỉ scale-in khi position có lãi +10% (SNOWBALL_PNL_THRESHOLD = 0.10). Trong bear market, position thường lỗ → snowball **effectively disabled** (không bao giờ trigger)
 3. **Exit:** ATR 6x (wide) để tránh stop loss sớm trong volatility cao
 4. **Trailing:** Kích hoạt ở +60% ROI, stop 25% (tighter để bảo vệ profit)
-5. **Partial TP:** Chốt lời từng phần ở +30% và +50% để giảm risk
+5. **Partial TP:** Chốt lời từng phần ở +8%, +15%, +25%, +40% để giảm risk
+6. **Leverage:** Giảm xuống 2.0x (từ 3.5x) để giảm risk trong bear
+7. **Stop Loss:** Tighter (8% cho ETH, 10% cho BNB/TRX)
+
+**⚠️ Lưu ý về Snowball:**
+- Code vẫn có `snowball_levels: [1.25, 1.50]` nhưng thực tế **không bao giờ trigger** trong bear market
+- Lý do: Snowball chỉ trigger khi PnL >= 10% (SNOWBALL_PNL_THRESHOLD)
+- Trong bear market, position thường lỗ hoặc lãi nhỏ (< 10%) → snowball không trigger
+- Đây là thiết kế intentional: bảo vệ vốn trong bear market, không scale-in khi đang lỗ
 
 ### 🐂 Bull Market - HOLD $35K Limit
 
