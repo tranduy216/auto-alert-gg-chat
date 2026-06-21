@@ -42,46 +42,55 @@ def compute_rsi(prices, period=14):
 def compute_adx(candles, period=14):
     if len(candles) < period + 1:
         return 25
-    
+
     plus_dm = []
     minus_dm = []
     tr_list = []
-    
+
     for i in range(1, len(candles[-(period+1):])):
         high_diff = candles[-(period+1+i)]['high'] - candles[-(period+i)]['high']
         low_diff = candles[-(period+i)]['low'] - candles[-(period+1+i)]['low']
-        
+
         if high_diff > low_diff and high_diff > 0:
             plus_dm.append(high_diff)
         else:
             plus_dm.append(0)
-            
+
         if low_diff > high_diff and low_diff > 0:
             minus_dm.append(low_diff)
         else:
             minus_dm.append(0)
-            
+
         tr = max(
             candles[-(period+1+i)]['high'] - candles[-(period+1+i)]['low'],
             abs(candles[-(period+1+i)]['high'] - candles[-(period+i)]['close']),
             abs(candles[-(period+1+i)]['low'] - candles[-(period+i)]['close'])
         )
         tr_list.append(tr)
+
+    # Use Wilder's smoothing instead of simple average
+    atr = tr_list[0]
+    for tr in tr_list[1:]:
+        atr = (atr * (period - 1) + tr) / period
     
-    atr = sum(tr_list[-period:]) / period
-    plus_di = sum(plus_dm[-period:]) / period
-    minus_di = sum(minus_dm[-period:]) / period
+    plus_di = plus_dm[0]
+    for dm in plus_dm[1:]:
+        plus_di = (plus_di * (period - 1) + dm) / period
     
+    minus_di = minus_dm[0]
+    for dm in minus_dm[1:]:
+        minus_di = (minus_di * (period - 1) + dm) / period
+
     if atr == 0:
         return 25
-        
+
     plus_di_pct = 100 * plus_di / atr
     minus_di_pct = 100 * minus_di / atr
-    
+
     di_sum = plus_di_pct + minus_di_pct
     if di_sum == 0:
         return 25
-        
+
     dx = 100 * abs(plus_di_pct - minus_di_pct) / di_sum
     return dx
 
@@ -117,17 +126,33 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
     equity = initial_capital
     position = None
     
+    # Margin constraints
+    max_position_size = 10000  # Max position size in USD (including leverage)
+    leverage = 3.5
+    max_margin = max_position_size / leverage  # Max margin = 2,857 USD
+    max_exposure_pct = max_margin / initial_capital  # Max exposure = 28.57%
+    
+    trades = []  # Track all trades
+    exits = 0  # Count exits
+    
+    # Track max drawdown
+    peak_equity = equity
+    max_drawdown = 0
+    
+    # Track max position size
+    max_position_size_actual = 0
+
     # Dynamic parameters per coin
     coin_params = {
         'ETH': {'rsi_max': 70, 'atr_multiplier': 2.5},  # Looser (high volatility)
         'BNB': {'rsi_max': 65, 'atr_multiplier': 2.0},  # Tighter (medium volatility)
         'TRX': {'rsi_max': 65, 'atr_multiplier': 2.0},  # Tighter (medium volatility)
     }
-    
+
     params = coin_params.get(symbol, {'rsi_max': 65, 'atr_multiplier': 2.0})
     rsi_max = params['rsi_max']
     atr_multiplier = params['atr_multiplier']
-    
+
     yearly_equity = {2020: initial_capital}
     current_year = 2020
     
@@ -140,7 +165,13 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
         # Track year
         candle_date = datetime.fromtimestamp(candles[i]['open_time'] / 1000)
         if candle_date.year != current_year:
-            yearly_equity[candle_date.year] = equity
+            # Calculate unrealized PnL if there's an open position
+            if position:
+                unrealized_pnl_pct = (current_price - position['entry_price']) / position['entry_price']
+                unrealized_pnl = unrealized_pnl_pct * position['exposure'] * position['position_equity'] * leverage
+                yearly_equity[candle_date.year] = equity + unrealized_pnl
+            else:
+                yearly_equity[candle_date.year] = equity
             current_year = candle_date.year
         
         # Compute indicators
@@ -161,41 +192,85 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
             current_pnl_pct = (current_price - position['entry_price']) / position['entry_price']
             peak_price = position.get('peak_price', position['entry_price'])
             
+            # Check for liquidation (at -28.6% drop = 1/3.5 leverage)
+            if current_pnl_pct < -0.286:
+                # Lose entire position
+                loss = position['exposure'] * position['position_equity']
+                equity -= loss
+                
+                trades.append({
+                    'type': 'liquidation',
+                    'entry': position['entry_price'],
+                    'exit': current_price,
+                    'pnl_pct': -100,
+                    'pnl': -loss,
+                    'exposure': position['exposure'],
+                    'equity': equity
+                })
+                
+                position = None
+                exits += 1
+                continue
+
             # Update peak
             if current_price > peak_price:
                 position['peak_price'] = current_price
                 peak_price = current_price
-            
+
             # Trailing stop trigger: profit > 30%
             if current_pnl_pct > 0.30 and not position.get('trailing_activated'):
                 # Close 70% position
                 close_pct = 0.70
                 close_exposure = position['exposure'] * close_pct
-                pnl = current_pnl_pct * close_exposure * equity * 3.5  # leverage 3.5x
+                pnl = current_pnl_pct * close_exposure * position['position_equity'] * leverage
                 equity += pnl
+                
+                # Update max drawdown
+                if equity > peak_equity:
+                    peak_equity = equity
+                drawdown = (peak_equity - equity) / peak_equity * 100
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+                
                 position['exposure'] = position['exposure'] * (1 - close_pct)  # Keep 30%
                 position['trailing_activated'] = True
                 position['trailing_stop_pct'] = 0.09  # 9% from peak (coin price, not leveraged)
-            
+
             # Trailing stop exit
             if position.get('trailing_activated'):
                 trailing_stop_price = peak_price * (1 - position['trailing_stop_pct'])
                 if current_price < trailing_stop_price:
                     exit_price = current_price
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
-                    pnl = pnl_pct * position['exposure'] * equity * 3.5  # leverage 3.5x
+                    pnl = pnl_pct * position['exposure'] * position['position_equity'] * leverage
                     equity += pnl
+                    
+                    # Update max drawdown
+                    if equity > peak_equity:
+                        peak_equity = equity
+                    drawdown = (peak_equity - equity) / peak_equity * 100
+                    if drawdown > max_drawdown:
+                        max_drawdown = drawdown
+                    
                     position = None
                     continue
-            
+
             # ATR-based exit (for non-trailing part)
             if not position.get('trailing_activated'):
                 atr = compute_adx(window) * current_price / 100
                 if current_price < peak_price - atr_multiplier * atr:
                     exit_price = current_price
                     pnl_pct = (exit_price - position['entry_price']) / position['entry_price']
-                    pnl = pnl_pct * position['exposure'] * equity * 3.5  # leverage 3.5x
+                    pnl = pnl_pct * position['exposure'] * position['position_equity'] * leverage
                     equity += pnl
+                    
+                    # Update max drawdown
+                    if equity > peak_equity:
+                        peak_equity = equity
+                    drawdown = (peak_equity - equity) / peak_equity * 100
+                    if drawdown > max_drawdown:
+                        max_drawdown = drawdown
+                    
                     position = None
                     continue
         
@@ -204,17 +279,29 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
             # RSI filter
             if rsi > rsi_max:
                 continue
-            
+
             # Enter HOLD
             entry_price = current_price
             exposure = initial_exposure
             
+            # Check if position size exceeds max
+            position_size = exposure * equity * leverage
+            if position_size > max_position_size:
+                # Reduce exposure to fit max position size
+                exposure = max_margin / equity
+            
+            # Update max position size
+            if position_size > max_position_size_actual:
+                max_position_size_actual = position_size
+            
             position = {
                 'entry_price': entry_price,
                 'exposure': exposure,
-                'snowball_levels': [1.10, 1.20, 1.30],
+                'position_equity': equity,  # Track equity at entry for correct PnL calculation
+                'snowball_levels': [1.10],  # Only 1 snowball: +10%
                 'snowball_hit': [],
-                'peak_price': entry_price
+                'peak_price': entry_price,
+                'max_exposure': max_exposure_pct  # Max exposure based on position size constraint
             }
         
         # Snowball logic
@@ -223,16 +310,28 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                 if level not in position['snowball_hit']:
                     target_price = position['entry_price'] * level
                     if current_price >= target_price:
-                        position['snowball_hit'].append(level)
-                        position['exposure'] += initial_exposure
+                        # Check max exposure based on position size constraint
+                        new_exposure = position['exposure'] + initial_exposure
+                        new_position_size = new_exposure * position['position_equity'] * leverage
+                        
+                        if new_position_size <= max_position_size:
+                            position['snowball_hit'].append(level)
+                            position['exposure'] = new_exposure
     
     # Close any remaining position
     if position:
         final_price = candles[-1]['close']
         pnl_pct = (final_price - position['entry_price']) / position['entry_price']
-        pnl = pnl_pct * position['exposure'] * equity
+        pnl = pnl_pct * position['exposure'] * position['position_equity'] * leverage
         equity += pnl
-    
+        
+        # Update max drawdown
+        if equity > peak_equity:
+            peak_equity = equity
+        drawdown = (peak_equity - equity) / peak_equity * 100
+        if drawdown > max_drawdown:
+            max_drawdown = drawdown
+
     yearly_equity[2025] = equity
     
     # Calculate yearly returns
@@ -246,12 +345,15 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
     # Calculate CAGR
     years = 5
     cagr = ((equity / initial_capital) ** (1 / years) - 1) * 100
-    
+
     return {
         'symbol': symbol,
         'yearly_returns': yearly_returns,
         'cagr': cagr,
-        'final_equity': equity
+        'final_equity': equity,
+        'max_drawdown': max_drawdown,
+        'max_position_size': max_position_size_actual,
+        'trades': trades
     }
 
 def buy_and_hold_yearly(candles, symbol):
