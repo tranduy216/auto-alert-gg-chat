@@ -126,11 +126,15 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
     equity = initial_capital
     position = None
     
-    # Margin constraints
-    max_position_size = 10000  # Max position size in USD (including leverage)
+    # Margin constraints - Test 5 config (no limit, wider ATR)
+    max_position_size = None  # No position size limit
     leverage = 3.5
-    max_margin = max_position_size / leverage  # Max margin = 2,857 USD
-    max_exposure_pct = max_margin / initial_capital  # Max exposure = 28.57%
+    max_margin = None  # No margin limit
+    max_exposure_pct = 1.0  # Allow 100% exposure
+    atr_multiplier = 4.0  # Wider ATR exit (was 2.0)
+    
+    # Snowball config
+    snowball_levels = [1.10, 1.20, 1.30]  # 3 levels (was 1 level)
     
     trades = []  # Track all trades
     exits = 0  # Count exits
@@ -283,22 +287,22 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
             # Enter HOLD
             entry_price = current_price
             exposure = initial_exposure
-            
-            # Check if position size exceeds max
+
+            # Check if position size exceeds max (only if max_position_size is set)
             position_size = exposure * equity * leverage
-            if position_size > max_position_size:
+            if max_position_size and position_size > max_position_size:
                 # Reduce exposure to fit max position size
                 exposure = max_margin / equity
-            
+
             # Update max position size
             if position_size > max_position_size_actual:
                 max_position_size_actual = position_size
-            
+
             position = {
                 'entry_price': entry_price,
                 'exposure': exposure,
                 'position_equity': equity,  # Track equity at entry for correct PnL calculation
-                'snowball_levels': [1.10],  # Only 1 snowball: +10%
+                'snowball_levels': snowball_levels,  # Use config snowball levels
                 'snowball_hit': [],
                 'peak_price': entry_price,
                 'max_exposure': max_exposure_pct  # Max exposure based on position size constraint
@@ -313,8 +317,9 @@ def backtest_coin_yearly(candles, symbol, initial_exposure=0.25, rsi_max=65):
                         # Check max exposure based on position size constraint
                         new_exposure = position['exposure'] + initial_exposure
                         new_position_size = new_exposure * position['position_equity'] * leverage
-                        
-                        if new_position_size <= max_position_size:
+
+                        # Check both max_position_size and max_exposure_pct
+                        if (max_position_size is None or new_position_size <= max_position_size) and new_exposure <= position['max_exposure']:
                             position['snowball_hit'].append(level)
                             position['exposure'] = new_exposure
     
