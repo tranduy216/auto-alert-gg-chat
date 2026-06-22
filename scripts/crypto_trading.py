@@ -94,6 +94,8 @@ CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
 BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
 BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
 
+MAX_PER_COIN_PCT = 1.20  # matches MAX_POS_PCT
+
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
 CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position
