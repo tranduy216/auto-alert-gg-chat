@@ -42,7 +42,7 @@ from utils.firebase_utils import (
     mark_alert_sent, queue_alert,
 )
 from trading_config import (  # centralized config
-    COINS, BASE, MAX_POS_PCT, ENTRY_MIN_SCORE,
+    COINS, SYMBOL_MAP, BASE, MAX_POS_PCT, ENTRY_MIN_SCORE,
     ENTRY_COOLDOWN_BARS, TP_SCHEDULE,
     FIBONACCI_COOLDOWN_MIN, SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS,
     SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
