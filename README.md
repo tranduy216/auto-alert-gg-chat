@@ -1,31 +1,20 @@
-# Crypto Trading Alert System — v11
+# Crypto Trading Alert System — v12
 
-Hệ thống cảnh báo giao dịch crypto tự động với chiến lược **4-Mode BTC Regime**.
+Hệ thống cảnh báo giao dịch crypto tự động — 4-mode BTC regime.
 
-## Overview
+## Performance
 
-- **Coins:** ETH, BNB, TRX
-- **Strategy:** 4-mode per BTC regime × direction
-- **Performance:** CAGR +34.4%, Avg DD 47.1%, SL Rate 3.4%
-- **Tests:** 41/41 passing
+| Coin | CAGR | Max DD | SL Rate | Final |
+|------|------|--------|---------|-------|
+| ETH | +37.3% | 38.4% | 0.0% | $54,688 |
+| BNB | +32.0% | 61.5% | 5.1% | $44,341 |
+| TRX | +44.6% | 51.2% | 0.0% | $72,405 |
+| **Avg** | **+38.0%** | **50.4%** | **1.7%** | **$57,145** |
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
 python3 scripts/backtest_bull_snowball.py --parallel
-python3 -m unittest tests.test_crypto_trading tests.test_utils -v
+python3 -m unittest tests.test_crypto_trading tests.test_utils -v  # 41/41
 ```
-
-## Performance
-
-| Coin | CAGR | Max DD | SL Rate | Final |
-|------|------|--------|---------|-------|
-| ETH | +25.6% | 43.7% | 7.4% | $33,969 |
-| BNB | +47.4% | 53.9% | 2.7% | $80,158 |
-| TRX | +30.3% | 43.8% | 0.0% | $41,281 |
-| **Avg** | **+34.4%** | **47.1%** | **3.4%** | **$51,803** |
-
-## Documentation
-
-- **[CryptoTrading.md](CryptoTrading.md)** — Strategy details, config, performance

@@ -25,8 +25,8 @@ from crypto_trading import (
     _fib_cooldown_bars, compute_adx,
 )
 from trading_config import (
-    SF, BASE, ENTRY_MIN, INITIAL, TP, FEE_RATE,
-    SHORT_COINS, MAX_POS_PCT,
+    SF, BASE, ENTRY_MIN_SCORE, INITIAL, TP_SCHEDULE, FEE_RATE,
+    SHORT_ALLOWED, MAX_POS_PCT,
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
@@ -34,6 +34,7 @@ from trading_config import (
     SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS, SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
     get_profile, _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     BTC_BEAR_OVERRIDE,
+    CT_LEVERAGE, CT_STOP_LOSS, CT_TP_SCHEDULE, CT_ENTRY_SCORE, CT_TRAIL,
 )
 
 # All constants imported from trading_config.py
@@ -107,7 +108,7 @@ def backtest_coin(args_tuple):
             "trail_act": BULL_TRAIL_ACTIVATION, "trail_close": BULL_TRAIL_CLOSE,
             "trail_cd": BULL_TRAIL_COOLDOWN_BARS, "no_sl": BULL_NO_SL,
         },
-        "tp": TP, "fee": FEE_RATE,
+        "tp": TP_SCHEDULE, "fee": FEE_RATE,
     }, sort_keys=True)
     config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
 
@@ -124,7 +125,7 @@ def backtest_coin(args_tuple):
         return coin, None
 
     prof = dict(get_coin_profile(coin))
-    allow_short = coin in SHORT_COINS
+    allow_short = coin in SHORT_ALLOWED
 
     entries = []; eq = 1.0; curve = []; trades = []; lei = -999
     yearly_eq = {}; long_trades = []; short_trades = []
@@ -174,6 +175,11 @@ def backtest_coin(args_tuple):
             bull_cfg = {**bull_cfg, **BTC_BEAR_OVERRIDE}
             bull_lev_use = BTC_BEAR_OVERRIDE.get("bull_lev", BULL_LEV)
             bull_max_loss_use = BTC_BEAR_OVERRIDE.get("max_loss", BULL_MAX_LOSS)
+
+        # ETH bear mode: 2x, SL 7%, trail 7%, TP 40%/50%
+        eth_bear = (coin == "ETH" and not btc_bull)
+        # BNB CT: counter-trend long in BTC bear
+        bnb_ct = (coin == "BNB" and not btc_bull)
 
         # --- Year filter: go to cash if year not selected ---
         if selected_years and cur_year not in selected_years:
@@ -238,15 +244,8 @@ def backtest_coin(args_tuple):
             is_sh = ent.get('is_short', False)
             ent_lev = ent.get('lev', coin_lev); ent_sl = ent.get('sl', sl_val)
             ent_ff = 1 - 2 * FEE_RATE * ent_lev
-            ent_is_bull = ent.get('bull_mode', ent_lev > 2.5)
-            # Trail: bull=9%, bear_long=profile, short=coin_trail
-            if ent_is_bull:
-                tr_use = BULL_TRAIL_DISTANCE
-            elif is_sh:
-                tr_use = tr_rate
-            else:
-                tr_use = hybrid_profile.get("trail", tr_rate)
-            tp_sched = TP
+            ent_is_bull = ent_lev > 2.5
+            tr_use = BULL_TRAIL_DISTANCE if ent_is_bull else tr_rate
 
             if not is_sh: raw_roi = ((cc-ep)/ep*100)*mp*tc*ent_lev/BASE
             else: raw_roi = ((ep-cc)/ep*100)*mp*tc*ent_lev/BASE
@@ -293,31 +292,54 @@ def backtest_coin(args_tuple):
                 if cc < hi: hi = cc; ent['hi'] = hi
             rm = False
 
-            # BTC bear long (BNB/TRX): SL + fixed TP 50% at 15%, no trail, no snowball
-            if ent.get('btc_bear_long', False):
+            # BNB CT: counter-trend long in BTC bear (2x, SL 9%, staggered TP, trail 7%)
+            if ent.get('ct_mode', False):
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
-                    long_trades.append({'t':'SL','roi':raw_roi})
-                    trades.append({'t':'SL','dir':'L'})
+                    long_trades.append({'t':'SL','roi':raw_roi}); trades.append({'t':'SL','dir':'L'})
                     consec_l += 1; rolling_sl_long += 1
-                elif not ent.get('_tp_done', False) and raw_roi >= 15.0:
-                    tp_close = 0.50 * rem2
-                    eq += raw_roi * tp_close / 100 * ent_ff
-                    rem2 -= tp_close; ent['rem'] = rem2
-                    ent['_tp_done'] = True
-                    long_trades.append({'t':'TP','roi':raw_roi})
-                    trades.append({'t':'TP','dir':'L'})
-                    consec_l = 0; rolling_sl_long = 0
-                    if rem2 <= 0.001: rm = True
-                # No trail — remaining position held until SL or trend_rev
-                if not rm and ts <= -2:
-                    eq += raw_roi*rem2/100*ent_ff; rm = True
-                    long_trades.append({'t':'TREND_REV','roi':raw_roi})
-                    trades.append({'t':'TREND_REV','dir':'L'})
-                    if raw_roi > 0: consec_l = 0; rolling_sl_long = 0
-                    else: consec_l += 1; rolling_sl_long += 1
+                elif not rm:
+                    tp_s = ent.get('tp', 0)
+                    if tp_s < len(CT_TP_SCHEDULE):
+                        trg, cf_pct = CT_TP_SCHEDULE[tp_s]
+                        if raw_roi >= trg:
+                            cf = cf_pct * rem2; eq += raw_roi * cf / 100 * ent_ff
+                            rem2 -= cf; ent['rem'] = rem2; ent['tp'] = tp_s + 1
+                            long_trades.append({'t':'TP','roi':raw_roi}); trades.append({'t':'TP','dir':'L'})
+                            consec_l = 0; rolling_sl_long = 0
+                            if rem2 <= 0.001: rm = True
+                    if tp_s >= len(CT_TP_SCHEDULE) and not rm:
+                        tstop = max(ent.get('tstop') or cc*(1-CT_TRAIL), hi*(1-CT_TRAIL))
+                        if bl <= tstop:
+                            eq += raw_roi * rem2 / 100 * ent_ff; rm = True
+                            long_trades.append({'t':'TRAIL','roi':raw_roi}); trades.append({'t':'TRAIL','dir':'L'})
+                            consec_l = 0; rolling_sl_long = 0
                 if not rm: ne.append(ent)
                 continue
+
+            # ETH bear: 2x, SL 7%, trail 7%, TP 40%/50%
+            if ent.get('eth_bear', False):
+                if raw_roi <= -ent_sl:
+                    eq += raw_roi*rem2/100*ent_ff; rm = True
+                    long_trades.append({'t':'SL','roi':raw_roi}); trades.append({'t':'SL','dir':'L'})
+                    consec_l += 1; rolling_sl_long += 1
+                elif not rm:
+                    if not ent.get('_tp_done') and raw_roi >= 40.0:
+                        cf = 0.50 * rem2; eq += raw_roi * cf / 100 * ent_ff
+                        rem2 -= cf; ent['rem'] = rem2; ent['_tp_done'] = True
+                        long_trades.append({'t':'TP','roi':raw_roi}); trades.append({'t':'TP','dir':'L'})
+                        consec_l = 0; rolling_sl_long = 0
+                        if rem2 <= 0.001: rm = True
+                    tstop = max(ent.get('tstop') or cc*0.93, hi*0.93)
+                    if bl <= tstop:
+                        eq += raw_roi * rem2 / 100 * ent_ff; rm = True
+                        long_trades.append({'t':'TRAIL','roi':raw_roi}); trades.append({'t':'TRAIL','dir':'L'})
+                        consec_l = 0; rolling_sl_long = 0
+                if not rm: ne.append(ent)
+                continue
+
+            # BEAR mode: standard SL + TP
+            if not ent_is_bull:
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff
                     if is_sh: short_trades.append({'t':'SL','roi':raw_roi})
@@ -326,45 +348,38 @@ def backtest_coin(args_tuple):
                     if is_sh: consec_s += 1; rolling_sl_short += 1
                     else: consec_l += 1; rolling_sl_long += 1
 
-                elif not is_sh:
-                    # BEAR LONG: TP 70% at 40% ROI, then trail remaining
-                    if not ent.get('_tp_done', False) and raw_roi >= 40.0:
-                        tp_close = 0.70 * rem2
-                        eq += raw_roi * tp_close / 100 * ent_ff
-                        rem2 -= tp_close; ent['rem'] = rem2
-                        ent['_tp_done'] = True
-                        long_trades.append({'t':'TP','roi':raw_roi})
-                        trades.append({'t':'TP','dir':'L'})
-                        consec_l = 0; rolling_sl_long = 0
-                        if rem2 <= 0.001: rm = True
-                    if ent.get('_tp_done', False) and not rm:
+                elif tp_s < len(TP_SCHEDULE):
+                    trg, cpct = TP_SCHEDULE[tp_s]
+                    if raw_roi >= trg:
+                        cf = cpct*rem2; eq += raw_roi*cf/100*ent_ff
+                        rem2 -= cf; ent['rem'] = rem2; ent['tp'] = tp_s + 1
+                        if is_sh: short_trades.append({'t':'TP','roi':raw_roi}); consec_s = 0; rolling_sl_short = 0
+                        else: long_trades.append({'t':'TP','roi':raw_roi}); consec_l = 0; rolling_sl_long = 0
+                        trades.append({'t':'TP','dir':'S' if is_sh else 'L'})
+                        if ent['tp'] >= len(TP_SCHEDULE):
+                            ent['tstop'] = cc*(1-tr_use) if not is_sh else cc*(1+tr_use)
+
+                # BEAR trailing
+                if tp_s >= len(TP_SCHEDULE) and not rm:
+                    if not is_sh:
                         if tstop is None: tstop = cc*(1-tr_use)
                         tstop = max(tstop, hi*(1-tr_use)); ent['tstop'] = tstop
                         if bl <= tstop:
-                            eq += raw_roi * rem2 / 100 * ent_ff; rm = True
+                            eq += raw_roi*rem2/100*ent_ff
                             long_trades.append({'t':'TRAIL','roi':raw_roi})
-                            trades.append({'t':'TRAIL','dir':'L'})
-                            consec_l = 0; rolling_sl_long = 0
+                            trades.append({'t':'TRAIL','dir':'L'}); rm = True; consec_l = 0; rolling_sl_long = 0
+                    else:
+                        if tstop is None: tstop = cc*(1+tr_use)
+                        tstop = min(tstop, hi*(1+tr_use)); ent['tstop'] = tstop
+                        if bh >= tstop:
+                            eq += raw_roi*rem2/100*ent_ff
+                            short_trades.append({'t':'TRAIL','roi':raw_roi})
+                            trades.append({'t':'TRAIL','dir':'S'}); rm = True; consec_s = 0; rolling_sl_short = 0
 
-                elif is_sh:
-                    # SHORT: TP schedule only, no trailing
-                    if tp_s < len(TP):
-                        trg, cpct = TP[tp_s]
-                        if raw_roi >= trg:
-                            cf = cpct*rem2; eq += raw_roi*cf/100*ent_ff
-                            rem2 -= cf; ent['rem'] = rem2; ent['tp'] = tp_s + 1
-                            short_trades.append({'t':'TP','roi':raw_roi}); consec_s = 0; rolling_sl_short = 0
-                            trades.append({'t':'TP','dir':'S'})
-
-            # BULL mode: snowball trailing
+            # BULL mode: snowball trailing (30% close, 5-bar cooldown after)
             if ent_is_bull and not rm:
-                bull_has_sl = not hybrid_profile.get('no_sl', BULL_NO_SL)
-                if bull_has_sl and raw_roi <= -ent_sl:
-                    eq += raw_roi*rem2/100*ent_ff
-                    long_trades.append({'t':'SL','roi':raw_roi})
-                    trades.append({'t':'SL','dir':'L'}); rm = True
-                    consec_l += 1; rolling_sl_long += 1
-                elif not bull_has_sl and raw_roi <= -bull_max_loss_use * 100:
+                # Safety: close if loss > 30% ROI
+                if raw_roi <= -bull_max_loss_use * 100:
                     eq += raw_roi*rem2/100*ent_ff
                     long_trades.append({'t':'MAX_LOSS','roi':raw_roi})
                     trades.append({'t':'MAX_LOSS','dir':'L'}); rm = True
@@ -372,8 +387,7 @@ def backtest_coin(args_tuple):
                 else:
                     in_trail_cd = ent.get('_trail_cooldown', -999) > idx
                     pnl_from_entry = (cc - ep) / ep if not is_sh else (ep - cc) / ep
-                    trail_act = hybrid_profile.get('trail_activation', BULL_TRAIL_ACTIVATION)
-                    if pnl_from_entry >= trail_act and not in_trail_cd:
+                    if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
                         if tstop is None:
                             tstop = cc * (1 - BULL_TRAIL_DISTANCE) if not is_sh else cc * (1 + BULL_TRAIL_DISTANCE)
                         if not is_sh:
@@ -438,9 +452,6 @@ def backtest_coin(args_tuple):
         if can_l and idx <= rolling_lock_until_long: can_l = False
         if can_s and idx <= rolling_lock_until_short: can_s = False
 
-        # BNB BTC bear: conservative longs (2x, tight SL, fixed TP, strong signal)
-        btc_bear_long = (coin == "BNB" and not btc_bull)
-
         if can_l or can_s:
             sideway_score = compute_sideway_score(ds, SF)
             if sideway_score > SIDEWAY_MAX_SCORE:
@@ -463,7 +474,7 @@ def backtest_coin(args_tuple):
                 last_volume=v1[-1],vol_5d_avg=v5a,
                 use_ma200_filter=False,use_pullback_filter=False,
                 use_volume_expan=False,
-                min_entry_score=prof.get('short_min_entry_score',ENTRY_MIN),
+                min_entry_score=prof.get('short_min_entry_score',ENTRY_MIN_SCORE),
                 candles_12h=ds) if (allow_short and can_s and (cfg["bear_short"] or is_bull)) else False
             if el and has_s: el = False
             if es_ and has_l: es_ = False
@@ -486,7 +497,6 @@ def backtest_coin(args_tuple):
                                     entries.append({'ep':cc,'mp':add_mp,'tp':0,'rem':1.0,'hi':cc,
                                         'tstop':None,'is_short':False,
                                         'lev':bull_lev_use,'sl':12,
-                                        'bull_mode': True,
                                         'snowball_stage': snowball_idx + 1, 'is_snowball': True})
                                     lei = idx
                                     long_trades.append({'t':'SNOWBALL','roi':pnl_from_last*100})
@@ -506,24 +516,25 @@ def backtest_coin(args_tuple):
                     mp = initial_exposure * pos_mult
                     mp *= 1.0 if strong else 0.7
 
-                    # BNB/TRX BTC bear: conservative long (2x, tight SL, 50% pos, strong signal, no snowball)
-                    if btc_bear_long and not is_sh:
-                        lev_entry = 2.0
-                        sl_entry = 8
-                        bull_entry = False
-                        mp = 0.10 * 0.50  # 50% of normal size
-                        entry_score_req = 72
-                        if sc < entry_score_req:
-                            mp = 0  # block entry
+                    # BNB CT: counter-trend long in BTC bear
+                    if bnb_ct and not is_sh:
+                        if sc < CT_ENTRY_SCORE: mp = 0
+                        lev_entry = CT_LEVERAGE; sl_entry = CT_STOP_LOSS
+                        bull_entry = False; ct_flag = True; eth_flag = False
+                    # ETH bear mode: 2x, SL 7%, no snowball
+                    elif eth_bear and not is_sh:
+                        lev_entry = 2.0; sl_entry = 7
+                        bull_entry = False; ct_flag = False; eth_flag = True
+                        mp = 0.10 * 0.70
                     elif is_bull and not is_sh:
                         lev_entry = bull_lev_use
                         sl_entry = hybrid_profile['sl']
-                        bull_entry = True
+                        bull_entry = True; ct_flag = False; eth_flag = False
                         mp = BULL_INITIAL_SIZE
                     else:
                         lev_entry = bull_lev_use if (is_bull and not is_sh) else hybrid_profile['lev']
                         sl_entry = hybrid_profile['sl']
-                        bull_entry = (is_bull and not is_sh)
+                        bull_entry = (is_bull and not is_sh); ct_flag = False; eth_flag = False
 
                     if mp > 0 and dep + mp <= max_ms + 0.001:
                         entries.append({'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
@@ -531,7 +542,8 @@ def backtest_coin(args_tuple):
                                     'lev': lev_entry,
                                     'sl': sl_entry,
                                     'bull_mode': bull_entry,
-                                    'btc_bear_long': btc_bear_long,
+                                    'ct_mode': ct_flag,
+                                    'eth_bear': eth_flag,
                             'snowball_stage': 0})
                         lei = idx
 

@@ -42,14 +42,14 @@ from utils.firebase_utils import (
     mark_alert_sent, queue_alert,
 )
 from trading_config import (  # centralized config
-    COINS, SYMBOL_MAP, BASE, MAX_POS_PCT, ENTRY_MIN_SCORE,
+    COINS, BASE, MAX_POS_PCT, ENTRY_MIN_SCORE,
     ENTRY_COOLDOWN_BARS, TP_SCHEDULE,
     FIBONACCI_COOLDOWN_MIN, SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS,
     SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
-    COIN_CONFIG, SF, SHORT_ALLOWED, BTC_BEAR_OVERRIDE,
+    COIN_CONFIG, SF, SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile, PROFILES_BULL, PROFILES_BEAR, FEE_RATE,
 )
@@ -1306,7 +1306,6 @@ def analyse_coin(
     active_count: int = 0,
     max_positions: int = MAX_CONCURRENT_POSITIONS,
     in_event_window: bool = False,
-    btc_bull: bool = True,
 ) -> dict:
     ts = _now_vnt().isoformat()
     profile = get_coin_profile(coin)
@@ -1325,19 +1324,6 @@ def analyse_coin(
     if buf:
         _coin_bull = ma50_temp > ma120_temp * (1 + buf)
     _bear_mode = not _coin_bull
-
-    # BTC regime override: stricter bull entries when BTC is bear (skip ETH)
-    bull_cfg = dict(cfg)
-    bull_lev_use = _coin_lev(coin)
-    bull_max_loss_use = BULL_MAX_LOSS
-    if not btc_bull and coin != "ETH" and _coin_bull:
-        bull_cfg.update(BTC_BEAR_OVERRIDE)
-        bull_lev_use = BTC_BEAR_OVERRIDE.get("bull_lev", _coin_lev(coin))
-        bull_max_loss_use = BTC_BEAR_OVERRIDE.get("max_loss", BULL_MAX_LOSS)
-        btc_buf = BTC_BEAR_OVERRIDE.get("ma_buffer", 0)
-        if btc_buf:
-            _coin_bull = ma50_temp > ma120_temp * (1 + max(buf, btc_buf))
-            _bear_mode = not _coin_bull
 
     # Aggregate 2×12h → 24h candles for trend engine
     candles_24h = []
@@ -1514,9 +1500,9 @@ def analyse_coin(
         # ── BULL mode: snowball trailing (no SL, no TP, 30% close + cooldown) ──
         if ent_is_bull_long and BULL_NO_SL:
             # Safety: close if loss > 30% even in bull
-            if roi <= -bull_max_loss_use * 100:
+            if roi <= -BULL_MAX_LOSS * 100:
                 total_pnl += roi * rem / 100
-                exit_reasons.append(f"Bull Max Loss: ROI {roi:.1f}% <= -{bull_max_loss_use*100:.0f}%")
+                exit_reasons.append(f"Bull Max Loss: ROI {roi:.1f}% <= -{BULL_MAX_LOSS*100:.0f}%")
                 removed = True
             else:
                 pnl_from_entry = (last_close - ep) / ep
@@ -1653,12 +1639,6 @@ def analyse_coin(
     max_margin_pct = MAX_PER_COIN_PCT / profile_for_cap["lev"] * profile_for_cap["pos_mult"]
     can_enter_base = deployed < max_margin_pct
 
-    # Per-coin entry cooldown (bar-based, 12h per bar)
-    if can_enter_base and cd_bars > 0 and last_entry_ts > 0:
-        cd_seconds = cd_bars * 12 * 3600
-        if now_ts - last_entry_ts < cd_seconds:
-            can_enter_base = False
-
     # Direction-specific Fibonacci cooldown: LONG cooldown blocks LONG only, SHORT blocks SHORT only
     can_enter_long = can_enter_base
     if can_enter_long and cd_l_until:
@@ -1694,8 +1674,7 @@ def analyse_coin(
             can_enter_long = False
             can_enter_short = False
         adx_val = compute_adx(candles_12h, int(14*SF))
-        adx_required = bull_cfg.get("adx_min", cfg["adx_min"]) if _coin_bull else cfg["adx_min"]
-        if adx_val < adx_required:
+        if adx_val < cfg["adx_min"]:
             can_enter_long = False
             can_enter_short = False
     
@@ -1712,7 +1691,7 @@ def analyse_coin(
             ma7_1d=ma7_12h, ma200_1d=ma200_12h,
             last_volume=last_volume, vol_5d_avg=vol_5d_avg,
             use_ma200_filter=False, use_pullback_filter=False,
-            use_volume_expan=False, min_entry_score=bull_cfg.get("entry_score", cfg["entry_score"]) if _coin_bull else cfg["entry_score"],
+            use_volume_expan=False, min_entry_score=cfg["entry_score"],
         ) if can_enter_long else False
         es = compute_entry_v6_short(
             trend_score, rsi_12h, last_close, exec_s, exec_m, exec_f, volume_score,
@@ -1736,7 +1715,7 @@ def analyse_coin(
                 trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
                 exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
             )
-            if sc_snow >= bull_cfg.get("snowball_min_score", cfg["snowball_min_score"]):
+            if sc_snow >= cfg["snowball_min_score"]:
                 for ent in entries:
                     if ent.get("is_short", False): continue
                     ent_ep = ent.get("entry_price", 0)
@@ -2255,7 +2234,6 @@ def main() -> None:
             coin, candles_12h, kill_switch,
             active_count=_active_positions,
             in_event_window=_in_event_window,
-            btc_bull=_btc_bull,
         )
         results.append(result)
         

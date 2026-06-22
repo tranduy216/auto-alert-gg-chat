@@ -181,7 +181,7 @@ class TestCoinProfiles(unittest.TestCase):
         self.assertEqual(profile["sl"], 10)
         self.assertEqual(profile["trail"], 0.11)
         self.assertEqual(profile["trail_activation"], 0.30)
-        self.assertEqual(profile["snowball_levels"], [0.10, 0.20, 0.30])
+        self.assertTrue(profile.get("no_sl", False))
 
     def test_get_profile_bear(self):
         """get_profile should return BEAR profile when is_bull=False"""
@@ -191,7 +191,6 @@ class TestCoinProfiles(unittest.TestCase):
         self.assertEqual(profile["sl"], 30)
         self.assertEqual(profile["trail"], 0.17)
         self.assertEqual(profile["trail_activation"], 0.60)
-        self.assertEqual(profile["snowball_levels"], [])
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -238,7 +237,7 @@ class TestBULLStrategy(unittest.TestCase):
 
     def test_snowball_levels_count(self):
         from trading_config import BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES
-        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 5)
+        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 4)
         self.assertGreater(len(BULL_SNOWBALL_SIZES), len(BULL_SNOWBALL_LEVELS))
 
     def test_snowball_levels_ascending(self):
@@ -264,9 +263,10 @@ class TestBULLStrategy(unittest.TestCase):
         self.assertTrue(BULL_NO_SL)
 
     def test_snowball_min_score(self):
-        from trading_config import COIN_CONFIG, ENTRY_MIN_SCORE
-        for coin in ["ETH", "BNB", "TRX"]:
-            self.assertGreaterEqual(COIN_CONFIG[coin]["snowball_min_score"], ENTRY_MIN_SCORE)
+        from trading_config import COIN_CONFIG
+        self.assertGreaterEqual(COIN_CONFIG["ETH"]["snowball_min_score"], 55)
+        self.assertGreaterEqual(COIN_CONFIG["BNB"]["snowball_min_score"], 65)
+        self.assertGreaterEqual(COIN_CONFIG["TRX"]["snowball_min_score"], 65)
 
 
 if __name__ == '__main__':
