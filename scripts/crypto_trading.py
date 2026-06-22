@@ -51,7 +51,7 @@ from trading_config import (  # centralized config
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
     COIN_CONFIG, SF, SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
-    get_profile, PROFILES_BULL, PROFILES_BEAR, FEE_RATE,
+    get_profile,
 )
 
 
@@ -72,27 +72,16 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 # Runtime-only helpers (not in trading_config)
+def get_snowball_size(entry_num: int, entry_score: float) -> float:
+    if entry_num == 2:
+        return 0.034
+    elif entry_num == 3:
+        return 0.034 if entry_score >= 65 else 0.017
+    return 0
+
 def _entry_margin(coin: str, strong: bool = True) -> float:
     return 0.09 if strong else 0.07
 
-def _coin_lev_bear(coin: str) -> float:
-    return 2.0
-
-def _coin_sl_bear(coin: str) -> float:
-    if coin == "ETH": return 8.0
-    if coin == "BNB": return 10.0
-    if coin == "TRX": return 8.0
-    return 10.0
-
-def _coin_pos_mult_bear(coin: str) -> float:
-    if coin == "ETH": return 0.90
-    return 0.75
-
-# ── v9 Capital & Risk ────────────────────────────────────────────────
-TOTAL_CAPITAL_MULT = 2.8
-MAX_PER_COIN_PCT = 0.65  # == MAX_POS_PCT
-LOW_DD_COINS = {"ETH"}
-BEAR_LEV = 2.0
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
 ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
@@ -103,55 +92,21 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
 
 CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
 BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
-BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
-
-SF = 2.0                     # scale factor: 12h → 24h equivalent (AGGR=2)
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
 CAPITAL_PER_POSITION = 0.10      # 10% of total capital per position
-CAPITAL_USAGE_HIGH_WATERMARK = 0.70  # total position capital ≤ 70% of total capital
-POSITION_RATE_TIGHT_THRESHOLD = 0.50  # when >50% deployed, tighten entry
-
-# Position sizing decay per position tier
-POSITION_SIZES = [0.10, 0.10, 0.10]
-POSITION_SIZE_BASE = 0.034      # base entry: 3.4%
-POSITION_SIZE_SNOWBALL = 0.034  # snowball add: 3.4%
-MAX_SNOWBALL_ENTRIES = 2
-SNOWBALL_PNL_THRESHOLD = 0.10   # effectively disabled
 
 
-def get_snowball_size(entry_num: int, entry_score: float) -> float:
-    """Snowball sizing rules:
-    Entry 2: same as entry 1
-    Entry 3: ½ of entry 1 if moderate (score < 65), full if strong (score ≥ 65)
-    """
-    if entry_num == 2:
-        return POSITION_SIZE_SNOWBALL  # same as base
-    elif entry_num == 3:
-        if entry_score >= 65:
-            return POSITION_SIZE_SNOWBALL  # strong signal → full size
-        else:
-            return round(POSITION_SIZE_SNOWBALL * 0.5, 4)  # moderate → half
-    return 0
 MAX_MARGIN_PER_COIN_PCT = 0.20   # 20% margin cap (= 60% exposure at 3x)
 
 # Correlation groups: skip entry if correlated coin already has a position
-CORRELATION_GROUPS: dict[str, list[str]] = {
-    "ETH": ["BNB"],
-    "BNB": ["ETH"],
-}
-
-# Loss streak — Fibonacci cooldown per-coin
-LOSS_STREAK_BREAKER = 3      # consecutive losses → reduce size 50%
-LOSS_STREAK_REDUCE = 0.5     # size multiplier
 # Fibonacci cooldown: consec_losses → cooldown bars
 #   2 losses → 3 bars (F4)
 #   3 losses → 5 bars (F5)
 #   4 losses → 8 bars (F6)
 #   5 losses → 13 bars (F7)
 #   ... → general formula: fib(consec_losses + 2)
-FIBONACCI_COOLDOWN_MIN = 2   # minimum consecutive losses to trigger cooldown
 def _fib_cooldown_bars(consec_losses: int, shift: int = 0) -> int:
     """Return cooldown bars using Fibonacci sequence with optional shift.
 
@@ -171,10 +126,6 @@ def _fib_cooldown_bars(consec_losses: int, shift: int = 0) -> int:
 # When 3 consecutive SLs in same direction → lock that direction for 8 bars
 # Fibonacci progression: 3→8, 4→13, 5→21, 6→34 bars
 # Combined with Sideway<3 filter to avoid choppy markets
-SL_ROLLING_CAP = 3
-SL_ROLLING_LOCK_BARS = 8
-SL_ROLLING_FIB = True
-SIDEWAY_MAX_SCORE = 2  # Skip entry if sideway_score > 2 (i.e., score 3 or 4)
 
 def compute_adx(candles: list[dict], period: int = 14) -> float:
     """Compute Average Directional Index (ADX) from OHLC candles.
@@ -325,39 +276,12 @@ EXEC_MA_SLOW = 30
 
 # ── Sideway & Staged Reversal Exit ──────────────────────────────────
 # Gradual exit schedule: (sideway_bars, additional_exit_pct)
-SIDEWAY_EXIT_SCHEDULE = [(4, 0.10), (6, 0.10), (8, 0.10), (10, 0.10)]
-SIDEWAY_EXIT_BASE_STRONG = 0.10   # price > MA20 → exit 10%
-SIDEWAY_EXIT_BASE_WEAK = 0.15     # price < MA20 → exit 15%
-SIDEWAY_EXIT_OVERBOUGHT = 0.25    # RSI > 60 → exit 25%
-SIDEWAY_RSI_OVERBOUGHT = 60
-SIDEWAY_RSI_OVERSOLD = 40
-SIDEWAY_ATR_DROP_PCT = 0.30       # ATR must drop >30% vs 20-bar avg
-SIDEWAY_PRICE_RANGE = 0.05        # ±5% oscillation range
-REVERSAL_STAGE_EXIT_PCT = 0.50    # exit 50% of remaining on each reversal
-MAX_REVERSAL_STAGES = 5           # stage 5 = exit all
-REVERSAL_RSI_MAX = 50             # RSI must be < 50 for reversal
-REVERSAL_VOL_MULT = 1.2           # volume > 1.2× 5-bar avg for reversal
-PULLBACK_RECOVERY_PCT = 0.05      # price recovery >5% cancels reversal tracking
-SIDEWAY_EXTEND_TRAIL_REDUCE = 0.35  # tighten trailing by 35% after 5+ sideway bars
-SIDEWAY_EXTEND_THRESHOLD = 5      # sideway >5 bars = extended
-
-# Volatility filter
-VOLATILITY_ATR_MULTIPLIER = 2.0  # skip entry if ATR > 2× ATR_MA20
-
-# v7 trailing stop — ATR-based adaptive
-TRAIL_ATR_BASE_MULT = 2.0        # distance from high: 2x ATR14
-TRAIL_ATR_TIGHT_MULT = 1.5       # tighten when PnL >= 5%
-TRAIL_ATR_LOCK_MULT = 1.0        # lock profits when PnL >= 10%
-TRAIL_ATR_RUN_MULT = 0.75        # runner mode when PnL >= 20%
 TRAIL_ATR_PROFIT_MILESTONES = [  # (PnL%, atr_mult)
     (5.0, 1.5),
     (10.0, 1.0),
     (20.0, 0.75),
 ]
 
-LEVERAGE = 2.5
-MAX_MARGIN_PER_COIN = 0.15
-STAGE_MARGIN = 0.05
 
 BTC_FLASH_CRASH_PCT = -5.0
 
@@ -605,19 +529,6 @@ def fetch_klines(symbol: str, interval: str = "1d", limit: int = CANDLE_COUNT) -
 # Indicators
 # ---------------------------------------------------------------------------
 
-def _smart_round(v: float) -> float:
-    if v == 0.0:
-        return 0.0
-    abs_v = abs(v)
-    if abs_v >= 1000:
-        return round(v, 1)
-    if abs_v >= 10:
-        return round(v, 2)
-    if abs_v >= 0.1:
-        return round(v, 4)
-    if abs_v >= 0.001:
-        return round(v, 6)
-    return round(v, 8)
 
 
 def sma(values: list[float], period: int) -> list[float | None]:
@@ -753,62 +664,7 @@ def compute_volume_score(volume: float, vol_ma20: float) -> float:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Exit system (v5)
-# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Exit system (v6) — trailing stop + trend reversal
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Sideway detection & staged reversal exit
-# ---------------------------------------------------------------------------
-
-def _detect_sideway(candles_12h: list[dict], atr_ma20: float, atr_current: float) -> tuple[bool, int, float, float]:
-    """Detect if recent candles are in sideway mode.
-
-    Returns (is_sideway, sideway_bars, high, low).
-    """
-    first_threshold = SIDEWAY_EXIT_SCHEDULE[0][0]
-    lookback = min(first_threshold + 8, len(candles_12h) - 1)
-    if lookback < first_threshold:
-        return (False, 0, 0, 0)
-
-    segment = candles_12h[-lookback:]
-    highs = [c["high"] for c in segment]
-    lows = [c["low"] for c in segment]
-    seg_high = max(highs)
-    seg_low = min(lows)
-    mid = (seg_high + seg_low) / 2
-    range_pct = (seg_high - seg_low) / mid if mid > 0 else 0
-
-    atr_dropped = atr_current < atr_ma20 * (1 - SIDEWAY_ATR_DROP_PCT)
-    is_sideway = range_pct <= SIDEWAY_PRICE_RANGE * 2 and atr_dropped
-
-    if not is_sideway:
-        return (False, 0, 0, 0)
-
-    count = 0
-    for c in reversed(segment):
-        if abs(c["close"] - mid) / mid <= SIDEWAY_PRICE_RANGE:
-            count += 1
-        else:
-            break
-    return (count >= first_threshold, count, seg_high, seg_low)
-
-
-def _check_reversal(ts_val: float, close: float, exec_s_ma: float, rsi_val: float,
-                     vol_current: float, vol_5d_avg: float, is_long: bool = True) -> bool:
-    """True reversal: price breaks MA20 + RSI confirmation + volume increasing."""
-    vol_ok = vol_5d_avg <= 0 or vol_current >= vol_5d_avg * REVERSAL_VOL_MULT
-    if is_long:
-        if close >= exec_s_ma: return False
-        if rsi_val >= REVERSAL_RSI_MAX: return False
-    else:
-        if close <= exec_s_ma: return False
-        if rsi_val <= 100 - REVERSAL_RSI_MAX: return False
-    if not vol_ok: return False
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1081,18 +937,6 @@ def compute_entry_v6_short(
     return True
 
 
-_V6_NEXT_STATE = {
-    "LONG_ENTRY_1": ("LONG_ENTRY_2", "ADD_LONG_ENTRY_2"),
-    "LONG_ENTRY_2": ("LONG_ENTRY_3", "ADD_LONG_ENTRY_3"),
-    "LONG_ENTRY_3": ("LONG_ENTRY_4", "ADD_LONG_ENTRY_4"),
-    "LONG_ENTRY_4": ("LONG_ENTRY_5", "ADD_LONG_ENTRY_5"),
-    "LONG_ENTRY_5": ("LONG_ENTRY_5", "HOLD"),
-    "SHORT_ENTRY_1": ("SHORT_ENTRY_2", "ADD_SHORT_ENTRY_2"),
-    "SHORT_ENTRY_2": ("SHORT_ENTRY_3", "ADD_SHORT_ENTRY_3"),
-    "SHORT_ENTRY_3": ("SHORT_ENTRY_4", "ADD_SHORT_ENTRY_4"),
-    "SHORT_ENTRY_4": ("SHORT_ENTRY_5", "ADD_SHORT_ENTRY_5"),
-    "SHORT_ENTRY_5": ("SHORT_ENTRY_5", "HOLD"),
-}
 
 def resolve_action_v6(
     trend_score: int,
@@ -1117,29 +961,6 @@ def resolve_action_v6(
         if entry_short:
             return ("SHORT_ENTRY_1", "OPEN_SHORT_ENTRY_1")
         return ("FLAT", "NO_TRADE")
-
-    is_long = prev_pos_state.startswith("LONG")
-
-    # PnL from LAST entry price (not original)
-    pnl_from_last = 0.0
-    if current_price and last_entry_price and last_entry_price > 0:
-        pnl_from_last = ((current_price - last_entry_price) / last_entry_price * 100) if is_long \
-                        else ((last_entry_price - current_price) / last_entry_price * 100)
-    threshold = snowball_pnl_min * 100  # e.g., 3% → 3
-    if pnl_from_last < threshold:
-        return (prev_pos_state, "HOLD")
-
-    # Size: get_snowball_size handles the sizing rules
-    entry_num = int(prev_pos_state.split("_")[-1]) + 1  # next entry number
-    if entry_num - 1 >= MAX_SNOWBALL_ENTRIES:
-        return (prev_pos_state, "HOLD")
-
-    # Cap check
-    next_margin = deployed_margin_pct + POSITION_SIZE_SNOWBALL  # approximate
-    if next_margin > MAX_MARGIN_PER_COIN_PCT:
-        return (prev_pos_state, "HOLD")
-
-    return _V6_NEXT_STATE.get(prev_pos_state, (prev_pos_state, "HOLD"))
 
 
 # ---------------------------------------------------------------------------
@@ -1267,25 +1088,6 @@ def _action_text(result: dict) -> str:
     return a
 
 
-def _optimal_text(result: dict) -> str:
-    z = result.get("entry_zone", {})
-    trend_score = result["trend_score"]
-    if trend_score >= 2 or trend_score <= -2:
-        return f"${z.get('optimal_entry', '?')}"
-    return "-"
-
-
-def _zone_text(result: dict) -> str:
-    z = result.get("entry_zone", {})
-    trend_score = result["trend_score"]
-    if trend_score >= 2:
-        return f"${z.get('support', '?')} \u2013 ${z.get('upper_bound', '?')} (ATR: ${z.get('atr', '?')})"
-    if trend_score <= -2:
-        return f"${z.get('lower_bound', '?')} \u2013 ${z.get('resistance', '?')} (ATR: ${z.get('atr', '?')})"
-    return f"Sup ${z.get('near_support', '?')} \u2013 Res ${z.get('near_resistance', '?')}"
-
-
-def prob_label(p: float) -> str:
     if p < 0.50:
         return "No action"
     if p < 0.70:
