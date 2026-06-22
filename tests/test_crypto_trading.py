@@ -179,7 +179,7 @@ class TestCoinProfiles(unittest.TestCase):
         profile = get_profile("ETH", is_bull=True)
         self.assertEqual(profile["lev"], 3.5)
         self.assertEqual(profile["sl"], 10)
-        self.assertEqual(profile["trail"], 0.09)
+        self.assertEqual(profile["trail"], 0.11)
         self.assertEqual(profile["trail_activation"], 0.30)
         self.assertEqual(profile["snowball_levels"], [0.10, 0.20, 0.30])
 
@@ -187,11 +187,11 @@ class TestCoinProfiles(unittest.TestCase):
         """get_profile should return BEAR profile when is_bull=False"""
         from trading_config import get_profile, PROFILES_BEAR
         profile = get_profile("ETH", is_bull=False)
-        self.assertEqual(profile["lev"], 2.0)
-        self.assertEqual(profile["sl"], 8)
-        self.assertEqual(profile["trail"], 0.25)
+        self.assertEqual(profile["lev"], 3.0)
+        self.assertEqual(profile["sl"], 30)
+        self.assertEqual(profile["trail"], 0.17)
         self.assertEqual(profile["trail_activation"], 0.60)
-        self.assertEqual(profile["snowball_levels"], [])  # NO snowball in bear
+        self.assertEqual(profile["snowball_levels"], [])
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -238,7 +238,7 @@ class TestBULLStrategy(unittest.TestCase):
 
     def test_snowball_levels_count(self):
         from trading_config import BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES
-        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 7)
+        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 5)
         self.assertGreater(len(BULL_SNOWBALL_SIZES), len(BULL_SNOWBALL_LEVELS))
 
     def test_snowball_levels_ascending(self):

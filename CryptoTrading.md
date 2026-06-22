@@ -1,61 +1,58 @@
-# Crypto Trading — HYBRID Strategy
+# Crypto Trading — HYBRID Strategy v11
 
 **Baseline:** 2026-06-22
 
 ## Strategy Overview
 
-HYBRID strategy — tự động chọn chiến lược theo per-coin regime (MA50 vs MA120 trên 12h):
+4-mode system based on BTC regime × direction per coin:
 
-| Regime | Strategy |
-|--------|----------|
-| **BULL** (MA50 > MA120 + buffer) | Snowball entries + trailing stop, no SL, max loss 10% |
-| **BEAR** (MA50 < MA120) | Trading: SL + TP + trailing stop |
+| BTC | Direction | Leverage | SL | Trail | Snowball |
+|-----|-----------|:--------:|:--:|:-----:|:--------:|
+| Bull | Long | 3.5x | ETH=no SL, BNB/TRX=40% | 11% @40-50% ROI, close 40% | Yes (5 levels) |
+| Bull | Short | 2.0x | 8-10% | TP schedule, no trail | No |
+| Bear | Long (BNB) | 2.0x | 8% | Fixed TP 50%@15%, no trail | No |
+| Bear | Long (ETH) | — | — | cash | — |
+| Bear | Long (TRX) | — | — | cash | — |
 
-BTC regime override: khi BTC đang BEAR → bull entries bị strict hơn (ADX+3, buffer+3%, lev→2x).
+Coin regime: MA50 > MA120 * (1 + buffer). Buffer: ETH=0%, BNB=1%, TRX=1%.
 
 ---
 
 ## Per-Coin Config
 
-| Coin | ADX | MA buf | Snow score | Short | BTC override |
-|------|:---:|:------:|:----------:|:-----:|:------------:|
-| ETH | 12 | — | 65 | Yes | No |
-| BNB | 15 | 1% | 65 | No | Yes |
-| TRX | 22 | 3% | 72 | No | Yes |
+| Coin | ADX | MA buf | Snow score | Entry score | Short | BTC bear long |
+|------|:---:|:------:|:----------:|:-----------:|:-----:|:-------------:|
+| ETH | 12 | 0% | 65 | 65 | Yes | No (cash) |
+| BNB | 15 | 1% | 65 | 65 | No | Yes (2x/8%/TP50%@15%) |
+| TRX | 18 | 1% | 65 | 65 | No | No (cash) |
 
-### Global Constants
+### Entry Cooldown
 
-| Param | Value |
-|-------|-------|
-| BULL initial entry | 0.06 |
-| BULL snowball levels | +5%, +10%, +15%, +20%, +25%, +30%, +40% |
-| BULL snowball size | 0.05 each |
-| BULL trail distance | 9% |
-| BULL trail activation | 40% ROI |
-| BULL trail close | 30% |
-| BULL trail cooldown | 5 bars |
-| BULL max loss | 10% |
-| BULL leverage | 3.5x |
-| BEAR TP | (8%,10%), (15%,15%), (25%,20%), (40%,25%) |
-| BEAR trail | 4% (ETH), 6.5% (BNB/TRX) |
+ETH=3 bars, BNB=1 bar, TRX=1 bar.
+
+### BTC Bear Override
+
+When BTC is bear, BNB bull entries tighten: ADX≥20, buffer 2.5%, lev 3.0x, max_loss 25%.
 
 ---
 
-## Performance (2022–2025)
+## Performance (2021–2025)
 
 | Year | ETH | BNB | TRX | Avg |
 |------|----:|----:|----:|----:|
-| 2022 | +57% | -17% | 0% | +13% |
-| 2023 | -4% | -1% | +7% | +1% |
-| 2024 | +5% | +147% | +111% | +88% |
-| 2025 | +48% | +33% | +4% | +28% |
-| **CAGR** | **23.7%** | **28.4%** | **23.6%** | **25.2%** |
+| 2021 | +109% | +511% | +74% | +231% |
+| 2022 | +28% | -3% | -6% | +6% |
+| 2023 | -0.5% | -1% | +17% | +5% |
+| 2024 | -8% | +28% | +105% | +42% |
+| 2025 | +39% | +11% | +7% | +19% |
+| **CAGR** | **+25.6%** | **+47.4%** | **+30.3%** | **+34.4%** |
 
-| Coin | Max DD | SL Rate |
-|------|:------:|:-------:|
-| ETH | 59.6% | 14.3% |
-| BNB | 38.1% | 1.2% |
-| TRX | 33.1% | 0.0% |
+| Coin | Max DD | SL Rate | Final ($10K→) |
+|------|:------:|:-------:|:-------------:|
+| ETH | 43.7% | 7.4% | $33,969 |
+| BNB | 53.9% | 2.7% | $80,158 |
+| TRX | 43.8% | 0.0% | $41,281 |
+| **Avg** | **47.1%** | **3.4%** | **$51,803** |
 
 ---
 
@@ -63,32 +60,29 @@ BTC regime override: khi BTC đang BEAR → bull entries bị strict hơn (ADX+3
 
 ```
 scripts/
-├── trading_config.py           ← Single source of truth (all constants)
+├── trading_config.py           ← Single source of truth
 ├── crypto_trading.py           ← Production implementation
-└── backtest_bull_snowball.py   ← Backtest (matches production)
+├── backtest_bull_snowball.py   ← Backtest (matches production)
+├── breaking_news.py            ← News alerts
+├── rss_digest.py               ← RSS feed parser
+└── reset_states.py             ← Firestore state reset
 
 tests/
 ├── test_crypto_trading.py      ← Unit tests (33 tests)
-├── test_utils.py               ← Utility tests (8 tests)
-└── utils/
-    ├── verify_crypto_trading_logic.py  ← Logic verification (90 checks)
-    └── compare_bh_yearly.py            ← Buy & Hold comparison
+└── test_utils.py               ← Utility tests (8 tests)
 ```
 
 ## Usage
 
 ```bash
-# Unit tests
+# Unit tests (41/41)
 python3 -m unittest tests.test_crypto_trading tests.test_utils -v
 
-# Logic verification
-python3 tests/utils/verify_crypto_trading_logic.py
-
-# Backtest — all years
+# Backtest — all coins, all years
 python3 scripts/backtest_bull_snowball.py --parallel
 
 # Backtest — specific coin, specific years
 python3 scripts/backtest_bull_snowball.py --coin ETH --years 2022,2023,2024,2025
 
-# Tune config → edit trading_config.py → cache tự invalidate
+# Tune config → edit trading_config.py → rm -rf scripts/.cache
 ```
