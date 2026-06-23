@@ -133,23 +133,76 @@ def backtest_coin(args_tuple):
     rolling_sl_long = 0; rolling_sl_short = 0
     rolling_lock_until_long = -999; rolling_lock_until_short = -999
 
+    # ── Pre-compute all indicators once ──
+    closes_12h = [x['close'] for x in da]
+    volumes_12h = [x['volume'] for x in da]
+    high_12h = [x['high'] for x in da]
+    low_12h = [x['low'] for x in da]
+    n = len(closes_12h)
+    rsi_p = int(14*SF); adx_p = int(14*SF); sw_p = int(5*SF); sw_p2 = int(20*SF)
+    
+    # SMAs on 12h raw data
+    pre12 = {p: sma(closes_12h, p) for p in [18, 37, 30, int(7*SF), int(10*SF), int(200*SF), 50, 120, int(20*SF)]}
+    pre12_v = sma(volumes_12h, int(20*SF))  # volume SMA
+    
+    # SMAs on 24h aggregated data
+    ct_full = aggr(da, 2); ct_c = [c['close'] for c in ct_full]
+    pre24 = {p: sma(ct_c, p) for p in [TMA_F, TMA_M, TMA_S]}
+    
+    # RSI (compute only once per bar)
+    pre_rsi = [50.0] * n
+    for i in range(rsi_p, n):
+        pre_rsi[i] = compute_rsi(closes_12h[:i+1], rsi_p)
+    
+    # ADX (compute only once)
+    pre_adx = [50.0] * n
+    for i in range(adx_p+1, n):
+        pre_adx[i] = compute_adx(da[:i+1], adx_p)
+    
+    # Sideway score (compute only once)
+    pre_sw = [0] * n
+    for i in range(1, n):
+        pre_sw[i] = compute_sideway_score(da[:i+1], SF)
+    
+    # BTC data precompute
+    if btc_da:
+        btc_c1 = [x['close'] for x in btc_da]
+        btc_pre50 = sma(btc_c1, 50)
+        btc_pre120 = sma(btc_c1, 120)
+        btc_n = len(btc_c1)
+        btc_adx = [50.0] * btc_n
+        for i in range(30, btc_n):
+            btc_adx[i] = compute_adx(btc_da[:i+1], 14)
+    else:
+        btc_pre50 = btc_pre120 = btc_adx = [50]*n
+    
+    # Cached indicator lookups
+    def g(arr, idx, default): return arr[idx] if arr[idx] is not None else default
+    
+    # ── Main loop ──
     for idx in range(INITIAL, len(da)):
         ds = da[:idx + 1]; ct = aggr(ds, AGGR_N)
         if len(ct) < 25: continue
+        ci = min(idx // 2, len(ct_c) - 1)
+        if ci >= len(ct_c): continue
         cc = ds[-1]['close']; bh = ds[-1]['high']; bl = ds[-1]['low']
-        cl = [c['close'] for c in ct]
-        mf = sma(cl, TMA_F)[-1] or cl[-1]; mm = sma(cl, TMA_M)[-1] or cl[-1]
-        ms = sma(cl, TMA_S)[-1] or cl[-1]
+        ci = min(idx // 2, len(ct_c) - 1)  # index into 24h data
+        mf = g(pre24[TMA_F], ci, ct_c[ci]); mm = g(pre24[TMA_M], ci, ct_c[ci])
+        ms = g(pre24[TMA_S], ci, ct_c[ci])
         _, ts = evaluate_trend_3d(mf, mm, ms)
-        c1 = [c['close'] for c in ds]; v1 = [c['volume'] for c in ds]
-        ef = sma(c1, 18)[-1] or c1[-1]; em = sma(c1, 37)[-1] or c1[-1]
-        exec_s = sma(c1, 30)[-1] or c1[-1]
-        ma7 = sma(c1, int(7*SF))[-1] or c1[-1]; ma10 = sma(c1, int(10*SF))[-1] or c1[-1]
-        ma200 = sma(c1, int(200*SF))[-1] or None
+        ef = g(pre12[18], idx, closes_12h[idx])
+        em = g(pre12[37], idx, closes_12h[idx])
+        exec_s = g(pre12[30], idx, closes_12h[idx])
+        ma7 = g(pre12[int(7*SF)], idx, closes_12h[idx])
+        ma10 = g(pre12[int(10*SF)], idx, closes_12h[idx])
+        ma200 = g(pre12[int(200*SF)], idx, None)
+        vm2 = g(pre12_v, idx, volumes_12h[idx])
+        rsi1 = pre_rsi[idx]
+        v1 = [c['volume'] for c in ds]
         dt_val = ds[-1]['open_time']
 
-        ma50_pc = sma(c1, 50)[-1] or c1[-1]     
-        ma120_pc = sma(c1, 120)[-1] or c1[-1]
+        ma50_pc = g(pre12[50], idx, closes_12h[idx])
+        ma120_pc = g(pre12[120], idx, closes_12h[idx])
         cfg = COIN_CONFIG.get(coin, COIN_CONFIG["ETH"])
         d_cur = dt_cls.fromtimestamp(dt_val/1000,tz=timezone.utc)
         cur_year = d_cur.year
@@ -160,18 +213,13 @@ def backtest_coin(args_tuple):
 
         # BTC regime override: only affect BULL entries
         btc_bull = True; btc_safe = True  # safe mode by default
-        if btc_da and idx < len(btc_da):
-            btc_c1 = [c['close'] for c in btc_da[:idx+1]]
-            if len(btc_c1) >= 120:
-                btc_ma50 = (sma(btc_c1, 50)[-1] or btc_c1[-1])
-                btc_ma120 = (sma(btc_c1, 120)[-1] or btc_c1[-1])
-                btc_bull = btc_ma50 > btc_ma120
-                # BTC trend confidence: ADX < threshold → weak trend → safe mode
+        if btc_da and idx < len(btc_da) and btc_pre50 is not None and btc_pre120 is not None and idx < len(btc_pre50):
+            b50 = btc_pre50[idx]; b120 = btc_pre120[idx]
+            if b50 is not None and b120 is not None:
+                btc_bull = b50 > b120
                 btc_safe = False
-                if len(btc_c1) >= 30:
-                    btc_adx = compute_adx(btc_da[:idx+1], 14)
-                    if btc_adx < BTC_ADX_SAFE:
-                        btc_safe = True
+                if idx < len(btc_adx) and btc_adx[idx] is not None and btc_adx[idx] < BTC_ADX_SAFE:
+                    btc_safe = True
         else:
             btc_safe = True  # no BTC data → safe mode
         bull_lev_use = BULL_LEV
@@ -206,10 +254,9 @@ def backtest_coin(args_tuple):
             if d_cur.month == 12: yearly_eq[d_cur.year] = total_eq
             continue
 
-        vm2 = sma(v1, int(20*SF))[-1] or v1[-1]
+        vm2 = g(pre12_v, idx, volumes_12h[idx])
         v5a = sum(v1[-int(5*SF):])/(int(5*SF)) if len(v1)>=int(5*SF) else v1[-1]
         vs = compute_volume_score(v1[-1], vm2)
-        rsi1 = compute_rsi(c1, int(14*SF))
 
         hybrid_profile = get_profile(coin, is_bull)
         coin_lev = _coin_lev(coin); sl_val = _coin_sl_roi(coin)
@@ -494,10 +541,10 @@ def backtest_coin(args_tuple):
         if can_s and idx <= rolling_lock_until_short: can_s = False
 
         if can_l or can_s:
-            sideway_score = compute_sideway_score(ds, SF)
+            sideway_score = pre_sw[idx]
             if sideway_score > SIDEWAY_MAX_SCORE:
                 can_l = False; can_s = False
-            adx_val = compute_adx(ds, int(14*SF))
+            adx_val = pre_adx[idx]
             if adx_val < cfg["adx_min"]:  # too weak -> skip
                 can_l = False; can_s = False
 
