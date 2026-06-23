@@ -290,11 +290,9 @@ class TestSafeMode(unittest.TestCase):
         self.assertLess(total, 0.4)  # 30% total before trail
 
     def test_bnb_bear_constants(self):
-        from trading_config import BNB_BEAR_LEV, BNB_BEAR_SL, BNB_BEAR_ENTRY, BNB_BEAR_ENTRY_SCORE
-        self.assertLessEqual(BNB_BEAR_LEV, 2.0)  # conservative leverage
-        self.assertLess(BNB_BEAR_SL, 6)  # tight SL
-        self.assertLess(BNB_BEAR_ENTRY, 0.06)  # small entry
-        self.assertGreater(BNB_BEAR_ENTRY_SCORE, 65)
+        from trading_config import BNB_BEAR_ADX, BNB_BEAR_MA_BUF
+        self.assertGreaterEqual(BNB_BEAR_ADX, 20)
+        self.assertGreater(BNB_BEAR_MA_BUF, 0)
 
     def test_bear_short_constants(self):
         from trading_config import BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL

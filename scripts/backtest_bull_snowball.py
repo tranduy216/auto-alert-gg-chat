@@ -35,7 +35,6 @@ from trading_config import (
     SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS, SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
     get_profile, _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     BTC_BEAR_OVERRIDE,
-    BNB_BEAR_LEV, BNB_BEAR_SL, BNB_BEAR_ENTRY, BNB_BEAR_TP, BNB_BEAR_PEAK_DD, BNB_BEAR_ENTRY_SCORE,
     BNB_BEAR_ADX, BNB_BEAR_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
@@ -297,11 +296,11 @@ def backtest_coin(args_tuple):
                 if cc < hi: hi = cc; ent['hi'] = hi
             rm = False
 
-            # BNB bear / Safe mode / TRX safe: SL, staggered TP, peak DD 5%
-            if ent.get('bnb_bear', False) or ent.get('safe_mode', False) or ent.get('trx_safe', False):
-                tp_schedule = BNB_BEAR_TP if ent.get('bnb_bear') else SAFE_TP
+            # BNB bear / Safe mode: SL, staggered TP, peak DD (all use SAFE params)
+            if ent.get('bnb_bear', False) or ent.get('safe_mode', False):
+                tp_schedule = SAFE_TP
+                dd_threshold = SAFE_PEAK_DD
                 peak_roi = max(ent.get('_peak_roi', -999), raw_roi)
-                ent['_peak_roi'] = peak_roi
                 ent['_peak_roi'] = peak_roi
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
@@ -320,7 +319,6 @@ def backtest_coin(args_tuple):
                             if is_sh: consec_s = 0; rolling_sl_short = 0
                             else: consec_l = 0; rolling_sl_long = 0
                             if rem2 <= 0.001: rm = True
-                    dd_threshold = BNB_BEAR_PEAK_DD if ent.get('bnb_bear') else SAFE_PEAK_DD
                     if not rm and raw_roi <= peak_roi - dd_threshold:
                         eq += raw_roi * rem2 / 100 * ent_ff; rm = True
                         trades.append({'t':'PEAK_DD','dir':'S' if is_sh else 'L'})
@@ -613,12 +611,12 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True; is_trx_safe = True
                         mp = SAFE_ENTRY
-                    # BNB BTC bear long: tuned isolated params
+                    # BNB BTC bear: safe isolated (same as safe mode)
                     elif bnb_bear and not is_sh:
-                        if sc < BNB_BEAR_ENTRY_SCORE: mp = 0
-                        lev_entry = BNB_BEAR_LEV; sl_entry = BNB_BEAR_SL
+                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; bnb_flag = True
-                        mp = BNB_BEAR_ENTRY
+                        mp = SAFE_ENTRY
                     elif eth_bear and not is_sh:
                         lev_entry = 2.0; sl_entry = 7
                         bull_entry = False; ct_flag = False; eth_flag = True

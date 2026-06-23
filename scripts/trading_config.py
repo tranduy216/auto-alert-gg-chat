@@ -61,13 +61,7 @@ BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 # BTC bear override (only for BNB in BTC bear)
 BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
 
-# BNB BTC bear long: minimum risk, isolated entries, no snowball
-BNB_BEAR_LEV       = 2.0
-BNB_BEAR_SL        = 4.5     # stop loss ROI %
-BNB_BEAR_ENTRY     = 0.05    # 5% equity including margin
-BNB_BEAR_TP        = [(3, 0.07), (7, 0.13), (20, 0.30), (25, 0.25), (30, 0.25)]  # sum=100%
-BNB_BEAR_PEAK_DD   = 5       # close all if ROI drops 5% from peak
-BNB_BEAR_ENTRY_SCORE = 70
+# BNB BTC bear: counter-trend uses safe isolated (same as SAFE mode)
 BNB_BEAR_ADX       = 22      # ADX >= 22
 BNB_BEAR_MA_BUF    = 0.025   # MA50 > MA120 * 1.025
 
