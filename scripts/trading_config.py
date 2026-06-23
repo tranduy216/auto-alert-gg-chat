@@ -29,7 +29,7 @@ SHORT_ALLOWED = {"ETH", "TRX"}
 
 PROFILES_BULL = {
     "ETH": {"lev": 3.5, "sl": 10, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.08,
-            "trail_activation": 0.30, "no_sl": True, "max_loss": 0.05},
+            "trail_activation": 0.25, "no_sl": True, "max_loss": 0.10},
     "BNB": {"lev": 3.5, "sl": 20, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
             "trail_activation": 0.30, "no_sl": False, "max_loss": 0.20},
     "TRX": {"lev": 3.5, "sl": 12, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
@@ -50,7 +50,7 @@ BULL_SNOWBALL_SIZES = [0.06, 0.06, 0.06, 0.06]
 BULL_INITIAL_SIZE = 0.10
 BULL_TRAIL_DISTANCE = 0.11
 BULL_TRAIL_ACTIVATION = 0.40
-BULL_TRAIL_CLOSE = 0.50
+BULL_TRAIL_CLOSE = 0.60
 BULL_TRAIL_COOLDOWN_BARS = 5
 BULL_NO_SL = True
 BULL_MAX_LOSS = 0.10

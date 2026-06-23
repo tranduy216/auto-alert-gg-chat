@@ -180,7 +180,7 @@ class TestCoinProfiles(unittest.TestCase):
         self.assertEqual(profile["lev"], 3.5)
         self.assertEqual(profile["sl"], 10)
         self.assertEqual(profile["trail"], 0.11)
-        self.assertEqual(profile["trail_activation"], 0.30)
+        self.assertEqual(profile["trail_activation"], 0.25)
         self.assertTrue(profile.get("no_sl", False))
 
     def test_get_profile_bear(self):

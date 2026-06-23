@@ -224,6 +224,9 @@ def backtest_coin(args_tuple):
             btc_safe = True  # no BTC data → safe mode
         bull_lev_use = BULL_LEV
         bull_max_loss_use = BULL_MAX_LOSS
+        # Use per-coin max_loss from profile
+        pm = get_profile(coin, True).get("max_loss")
+        if pm is not None: bull_max_loss_use = pm
         bull_cfg = dict(cfg)  # copy for bull-specific overrides
         # BTC regime override: only affect BULL entries, skip if coin has own strict config
         if not btc_bull and coin != "ETH":
