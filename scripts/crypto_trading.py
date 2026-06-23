@@ -54,6 +54,9 @@ from trading_config import (  # centralized config
     SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
+    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD,
+    COIN_PEAK_DD, COIN_BOUNCE_TP,
+    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD,
 )
 
 
@@ -1333,6 +1336,38 @@ def analyse_coin(
                     exit_reasons.append("Bull regime exit")
                     removed = True
 
+        # ── Bounce exit: per-coin TP, peak DD, no trailing ──
+        elif ent.get("bounce", False):
+            ent_sl = ent.get("sl_roi", sl_roi)
+            bounce_tp = COIN_BOUNCE_TP.get(coin, BOUNCE_TP)
+            bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
+            peak_roi = max(ent.get("_peak_roi", -999), roi)
+            ent["_peak_roi"] = peak_roi
+
+            # SL
+            if roi <= -ent_sl:
+                total_pnl += roi * rem / 100
+                exit_reasons.append(f"Bounce SL: ROI {roi:.1f}%")
+                removed = True
+
+            # Per-coin staggered TP
+            elif tp_s < len(bounce_tp):
+                trg, cf_pct = bounce_tp[tp_s]
+                if roi >= trg:
+                    cf = cf_pct * rem
+                    total_pnl += roi * cf / 100
+                    rem -= cf; ent["remaining_size"] = rem
+                    ent["tp_stage"] = tp_s + 1
+                    ent["_peak_roi"] = roi
+                    exit_reasons.append(f"Bounce TP@{trg}%: ROI {roi:.1f}%")
+                    if rem <= 0.001: removed = True
+
+            # Peak DD (close remaining if ROI drops from peak)
+            if not removed and roi <= peak_roi - bounce_peak_dd:
+                total_pnl += roi * rem / 100
+                exit_reasons.append(f"Bounce peak DD: ROI dropped {bounce_peak_dd:.1f}% from peak {peak_roi:.1f}%")
+                removed = True
+
         # ── BEAR mode: standard SL + TP + trail ──
         else:
             # Stop loss (ROI-based, uses entry-specific SL)
@@ -1576,7 +1611,14 @@ def analyse_coin(
                     else: mp *= 0.7
                     profile_lev = profile["lev"]
                     profile_sl = 12 if coin == "TRX" else profile["sl"]  # TRX wider SL
-                
+
+                    # Bounce: coin bear + long → defensive entry (2x, fixed TP, peak DD)
+                    is_bounce = coin in ("ETH", "BNB", "TRX") and not _coin_bull and not is_sh
+                    if is_bounce:
+                        profile_lev = 2.0
+                        profile_sl = BOUNCE_SL
+                        mp = 0.10 * 0.70  # 7% entry
+
                 if deployed + mp <= max_margin_pct + 0.001:
                     entries.append({
                         "entry_price": last_close,
@@ -1588,6 +1630,7 @@ def analyse_coin(
                         "trailing_stop": None,
                         "lev": profile_lev,
                         "sl_roi": profile_sl,
+                        "bounce": is_bounce if not is_sh else False,
                     })
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts

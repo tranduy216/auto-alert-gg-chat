@@ -61,15 +61,15 @@ BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 # BTC bear override (only for BNB in BTC bear)
 BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
 
-# BNB BTC bear: counter-trend uses safe isolated (same as SAFE mode)
-BNB_BEAR_MA_BUF    = 0.025   # MA50 > MA120 * 1.025
+# BNB bounce: MA confirmation buffer before entering
+BNB_BOUNCE_MA_BUF = 0.024   # MA50 > MA120 * 1.024
 
 # Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)
 SAFE_LEV        = 1.5
 SAFE_SL         = 3.3     # tight stop loss %
 SAFE_ENTRY      = 0.035   # 3.5% equity including margin
-SAFE_TP         = [(5, 0.05), (8, 0.20), (14, 0.35), (20, 0.25), (30, 0.15)]
-SAFE_PEAK_DD    = 5
+SAFE_TP         = [(3, 0.10), (5, 0.20), (8, 0.25), (12, 0.25), (20, 0.20)]  # 80% at 3-12%, max 20%
+SAFE_PEAK_DD    = 2.8     # close remaining if ROI drops 2.8% from peak
 SAFE_ENTRY_SCORE = 75
 SAFE_MA_BUF     = 0.02    # MA50 > MA120 * 1.02 to confirm trend
 BTC_ADX_SAFE    = 22      # BTC ADX < 22 → safe mode for all coins
@@ -80,10 +80,19 @@ BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
-# ETH bounce TP schedule: fixed ROI levels, no trailing, 80% in 5-15% range
-ETH_BOUNCE_TP   = [(3, 0.05), (5, 0.10), (8, 0.20), (12, 0.25), (15, 0.25), (20, 0.10), (25, 0.05)]
-ETH_BOUNCE_SL   = 5.5    # stop loss %
-ETH_BOUNCE_PEAK_DD = 5.5  # close remaining if ROI drops 5.5% from peak
+# Bounce TP schedule: shared by ETH (default), per-coin for BNB/TRX
+BOUNCE_TP       = [(3, 0.05), (5, 0.10), (8, 0.20), (12, 0.25), (15, 0.25), (20, 0.10), (25, 0.05)]
+BOUNCE_SL       = 5.5    # stop loss %
+BOUNCE_PEAK_DD  = 5.5    # default
+
+# Per-coin peak DD (applies to both safe & bounce)
+COIN_PEAK_DD = {"ETH": 3.5, "BNB": 6.0, "TRX": 6.0}
+
+# Per-coin bounce TP (BNB/TRX: 5%→5%, 75% in 7-21%, 10%→25%, ~10% via peak DD)
+COIN_BOUNCE_TP = {
+    "BNB": [(5, 0.05), (7, 0.10), (10, 0.15), (14, 0.20), (18, 0.15), (21, 0.15), (25, 0.10)],
+    "TRX": [(5, 0.05), (7, 0.10), (10, 0.15), (14, 0.20), (18, 0.15), (21, 0.15), (25, 0.10)],
+}
 
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 65, "entry_score": 65},

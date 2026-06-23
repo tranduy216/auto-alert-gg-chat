@@ -4,9 +4,10 @@
 Strategy for BULL mode:
   - Snowball entries: 25% → 50% → 75% → 100% (at +10%, +20%, +30% price milestones)
   - NO stop loss (hold through pullbacks)
-  - Trailing stop at 9% (activates at 30% ROI)
+  - Trailing stop at 11% (activates at 40% ROI)
   - Exit on trend reversal (3D trend score <= 0)
   - BEAR mode uses standard HYBRID (unchanged)
+  - ETH/BNB/TRX bounce: 2x, SL 5.5%, per-coin TP, per-coin peak DD, no trail
 """
 
 import sys, json, argparse, hashlib
@@ -35,11 +36,10 @@ from trading_config import (
     SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS, SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
     get_profile, _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     BTC_BEAR_OVERRIDE,
-    BNB_BEAR_MA_BUF,
+    BNB_BOUNCE_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
-    ETH_BOUNCE_TP, ETH_BOUNCE_SL, ETH_BOUNCE_PEAK_DD,
-)
+    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, COIN_PEAK_DD, COIN_BOUNCE_TP,)
 
 # All constants imported from trading_config.py
 
@@ -235,10 +235,8 @@ def backtest_coin(args_tuple):
             bull_lev_use = BTC_BEAR_OVERRIDE.get("bull_lev", BULL_LEV)
             bull_max_loss_use = BTC_BEAR_OVERRIDE.get("max_loss", BULL_MAX_LOSS)
 
-        # ETH bear mode: 2x, SL 7%, trail 7%, TP 40%/50%
-        eth_bounce = (coin == "ETH" and not btc_bull)
-        # BNB CT: counter-trend long in BTC bear
-        bnb_bear = (coin == "BNB" and not btc_bull)
+        # Bounce: defensive long in BTC bear (ETH/BNB/TRX: 2x, SL 5.5%, fixed TP, peak DD)
+        bounce = (coin in ("ETH", "BNB", "TRX") and not btc_bull)
         # Aggressive bear short: snowball + trail like longs, when BTC strong bear
         bear_short = (not btc_safe and not btc_bull and coin == "ETH" and BEAR_SHORT_SNOWBALL)
 
@@ -273,9 +271,6 @@ def backtest_coin(args_tuple):
         max_ms = MAX_POS_PCT / hybrid_profile["lev"] * pos_mult
 
         go_cash = False
-        # TRX: go to cash in BTC bear — safest for TRX
-        if coin == "TRX" and not btc_bull:
-            go_cash = True
         if go_cash:
             if entries:
                 for ent in entries:
@@ -347,10 +342,10 @@ def backtest_coin(args_tuple):
                 if cc < hi: hi = cc; ent['hi'] = hi
             rm = False
 
-            # BNB bear / Safe mode: SL, staggered TP, peak DD (all use SAFE params)
-            if ent.get('bnb_bear', False) or ent.get('safe_mode', False):
+            # Safe mode: SL, staggered TP, peak DD
+            if ent.get('safe_mode', False):
                 tp_schedule = SAFE_TP
-                dd_threshold = SAFE_PEAK_DD
+                dd_threshold = COIN_PEAK_DD.get(coin, SAFE_PEAK_DD)
                 peak_roi = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_roi
                 if raw_roi <= -ent_sl:
@@ -376,8 +371,8 @@ def backtest_coin(args_tuple):
                 if not rm: ne.append(ent)
                 continue
 
-            # ETH bear: 2x, SL 7%, trail 7%, TP 40%/50%
-            if ent.get('eth_bounce', False):
+            # Bounce: defensive long in BTC bear (per-coin TP, peak DD, no trail)
+            if ent.get('bounce', False):
                 peak_r = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_r
                 if raw_roi <= -ent_sl:
@@ -386,8 +381,9 @@ def backtest_coin(args_tuple):
                     consec_l += 1; rolling_sl_long += 1
                 elif not rm:
                     tp_s = ent.get('tp', 0)
-                    if tp_s < len(ETH_BOUNCE_TP):
-                        trg, cf_pct = ETH_BOUNCE_TP[tp_s]
+                    bounce_tp = COIN_BOUNCE_TP.get(coin, BOUNCE_TP)
+                    if tp_s < len(bounce_tp):
+                        trg, cf_pct = bounce_tp[tp_s]
                         if raw_roi >= trg:
                             cf = cf_pct * rem2
                             eq += raw_roi * cf / 100 * ent_ff
@@ -396,8 +392,9 @@ def backtest_coin(args_tuple):
                             trades.append({'t':'TP','dir':'L'})
                             consec_l = 0; rolling_sl_long = 0
                             if rem2 <= 0.001: rm = True
-                    # Peak DD: close remaining if ROI drops 5.5% from peak
-                    if not rm and raw_roi <= peak_r - ETH_BOUNCE_PEAK_DD:
+                    bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
+                    # Peak DD: close remaining if ROI drops from peak
+                    if not rm and raw_roi <= peak_r - bounce_peak_dd:
                         eq += raw_roi * rem2 / 100 * ent_ff; rm = True
                         trades.append({'t':'PEAK_DD','dir':'L'})
                 if not rm: ne.append(ent)
@@ -558,9 +555,9 @@ def backtest_coin(args_tuple):
             if adx_val < cfg["adx_min"]:  # too weak -> skip
                 can_l = False; can_s = False
 
-        # BNB bear: only allow if MA confirms bounce (2.5% buffer)
-        if can_l and bnb_bear:
-            if ma50_pc <= ma120_pc * (1 + BNB_BEAR_MA_BUF):
+        # Bounce: BNB needs MA confirmation (2.5% buffer)
+        if can_l and bounce and coin == "BNB":
+            if ma50_pc <= ma120_pc * (1 + BNB_BOUNCE_MA_BUF):
                 can_l = False
         # BNB: block bull entries when BTC bear
         if coin == "BNB" and not btc_bull and is_bull:
@@ -569,7 +566,7 @@ def backtest_coin(args_tuple):
         if btc_bull:
             can_s = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
-        if can_l and btc_safe and not bnb_bear:
+        if can_l and btc_safe and not bounce and not bear_short:
             if ma50_pc <= ma120_pc * (1 + SAFE_MA_BUF):
                 can_l = False
 
@@ -671,14 +668,9 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True; is_trx_safe = True
                         mp = SAFE_ENTRY
-                    # BNB BTC bear: safe isolated (same as safe mode)
-                    elif bnb_bear and not is_sh:
-                        if sc < SAFE_ENTRY_SCORE: mp = 0
-                        lev_entry = SAFE_LEV; sl_entry = SAFE_SL
-                        bull_entry = False; bnb_flag = True
-                        mp = SAFE_ENTRY
-                    elif eth_bounce and not is_sh:
-                        lev_entry = 2.0; sl_entry = ETH_BOUNCE_SL
+                    # Bounce: defensive long in BTC bear (all coins, same params)
+                    elif bounce and not is_sh:
+                        lev_entry = 2.0; sl_entry = BOUNCE_SL
                         bull_entry = False; eth_flag = True
                         mp = 0.10 * 0.70
                     elif is_bull and not is_sh:
@@ -697,7 +689,7 @@ def backtest_coin(args_tuple):
                                     'lev': lev_entry,
                                     'sl': sl_entry,
                                     'bull_mode': bull_entry,
-                                    'ct_mode': False, 'eth_bounce': eth_flag, 'bnb_bear': bnb_bear,
+                                    'ct_mode': False, 'bounce': bounce,
                                     'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
                             'snowball_stage': 0})
                         lei = idx
@@ -773,7 +765,7 @@ def main():
     print(f"BULL SNOWBALL BACKTEST - {', '.join(coins)}")
     if selected_years:
         print(f"(years: {sorted(selected_years)} | go to cash outside)")
-    print("(snowball entries | NO SL in bull | trailing 9% at +30% ROI | trend reversal exit)")
+    print("(snowball entries | NO SL in bull | trailing 11% at 40% ROI | trend reversal exit | bounce: per-coin TP, peak DD)")
     print("=" * 80)
 
     print("\nLoading data...")

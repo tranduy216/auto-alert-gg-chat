@@ -289,9 +289,9 @@ class TestSafeMode(unittest.TestCase):
         total = sum(cf for _, cf in BULL_TP_SCHEDULE)
         self.assertLess(total, 0.4)  # 30% total before trail
 
-    def test_bnb_bear_constants(self):
-        from trading_config import BNB_BEAR_MA_BUF
-        self.assertGreater(BNB_BEAR_MA_BUF, 0)
+    def test_bnb_bounce_constants(self):
+        from trading_config import BNB_BOUNCE_MA_BUF
+        self.assertGreater(BNB_BOUNCE_MA_BUF, 0)
 
     def test_bear_short_constants(self):
         from trading_config import BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL
@@ -387,28 +387,30 @@ class TestTradingRules(unittest.TestCase):
         self.assertFalse(detect_bear_short(False, True, "ETH"))   # BTC bull
         self.assertFalse(detect_bear_short(False, False, "BNB"))  # not ETH
 
-    def test_detect_eth_bounce(self):
-        from scripts.trading_rules import detect_eth_bounce
-        self.assertTrue(detect_eth_bounce("ETH", btc_bull=False))
-        self.assertFalse(detect_eth_bounce("ETH", btc_bull=True))
-        self.assertFalse(detect_eth_bounce("BNB", btc_bull=False))
+    def test_detect_bounce(self):
+        from scripts.trading_rules import detect_bounce
+        self.assertTrue(detect_bounce("ETH", btc_bull=False))
+        self.assertTrue(detect_bounce("BNB", btc_bull=False))
+        self.assertTrue(detect_bounce("TRX", btc_bull=False))
+        self.assertFalse(detect_bounce("ETH", btc_bull=True))
+        self.assertFalse(detect_bounce("BTC", btc_bull=False))
 
     def test_get_entry_rule_safe_mode(self):
         from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, bm, sf, *_ = get_entry_rule(True, False, False, False, True, False, 80)
+        mp, lev, sl, bm, sf, *_ = get_entry_rule(True, False, False, True, False, 80)
         self.assertEqual(lev, 1.5)  # safe mode = 1.5x
         self.assertEqual(mp, 0.035)  # 3.5% entry
         self.assertTrue(sf)  # safe flag
 
     def test_get_entry_rule_bear_short(self):
         from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, _, _, _, _, shf = get_entry_rule(False, True, False, False, False, True, 70)
+        mp, lev, sl, _, _, _, shf = get_entry_rule(False, True, False, False, True, 70)
         self.assertEqual(lev, 3.5)  # aggressive
         self.assertTrue(shf)  # short flag
 
     def test_get_entry_rule_bull(self):
         from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, bm, *_ = get_entry_rule(False, False, False, False, True, False, 80)
+        mp, lev, sl, bm, *_ = get_entry_rule(False, False, False, True, False, 80)
         self.assertEqual(lev, 3.5)
         self.assertTrue(bm)  # bull mode
 
