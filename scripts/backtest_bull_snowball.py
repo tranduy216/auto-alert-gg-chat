@@ -223,8 +223,8 @@ def backtest_coin(args_tuple):
         max_ms = MAX_POS_PCT / hybrid_profile["lev"] * pos_mult
 
         go_cash = False
-        # TRX: go to cash when BTC bear or coin bear
-        if coin == "TRX" and (not is_bull or not btc_bull):
+        # TRX: no longs in BTC bear. No shorts anywhere (all shorts blocked below)
+        if coin == "TRX" and not btc_bull:
             go_cash = True
         if go_cash:
             if entries:
@@ -506,6 +506,9 @@ def backtest_coin(args_tuple):
         # BNB: block bull entries when BTC bear
         if coin == "BNB" and not btc_bull and is_bull:
             can_l = False
+        # No shorts in BTC bull (counter-trend shorts are too risky)
+        if btc_bull:
+            can_s = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
         if can_l and btc_safe and not bnb_bear:
             if ma50_pc <= ma120_pc * (1 + SAFE_MA_BUF):
