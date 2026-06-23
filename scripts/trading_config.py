@@ -81,7 +81,7 @@ BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
 COIN_CONFIG = {
-    "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 60, "entry_score": 65},
+    "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 65, "entry_score": 65},
     "BNB": {"bull_mode": True, "bear_short": False, "adx_min": 15, "snowball_min_score": 65, "entry_score": 65, "ma_buffer": 0.01},
     "TRX": {"bull_mode": True, "bear_short": False, "adx_min": 20, "snowball_min_score": 65, "entry_score": 65, "ma_buffer": 0.01},
 }
