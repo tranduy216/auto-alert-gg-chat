@@ -8,7 +8,7 @@
 
 | BTC State | Condition | Long | Short |
 |-----------|-----------|------|-------|
-| **Bull** | ADX ≥ 22, MA50 > MA120 | 3.5x snowball 3 lvls, staggered TP 10/20/30%, trail 11%/50% | Blocked |
+| **Bull** | ADX ≥ 22, MA50 > MA120 | 3.5x snowball 3 lvls, staggered TP 10/20/30%, trail 11% | Blocked |
 | **Bear** | ADX ≥ 22, MA50 < MA120 | ETH: 2x trail7%/TP40%. BNB/TRX: SAFE isolated | ETH: 3.5x snowball, score≥70 |
 | **Safe** | ADX < 22 | 1.5x, 3.5% entry, SL 3.3%, SAFE TP, MA buf 2% | 1.5x isolated |
 
@@ -20,9 +20,7 @@
 | Bull SL | no SL (max 5%) | 20% | 12% |
 | Entry size | 8% × 1.3 | 25% × 1.3 | 25% × 1.3 |
 | Snowball | 3 lvls × 0.06 | 3 lvls × 0.06 | 3 lvls × 0.06 |
-| Staggered TP | 10/10, 20/10, 30/10% | same | same |
-| Trail | 11% @40% close 50% | same | same |
-| ADX min | 12 | 15 | 18 |
+| ADX min | 12 | 15 | **20** |
 | Short | Yes (score≥70) | No | No |
 | Bear long | 2x/trail7%/TP40% | SAFE isolated | Cash |
 | Cooldown | 3 bars | 1 bar | 1 bar |
@@ -33,23 +31,25 @@ Safe mode: 1.5x, SL 3.3%, entry 3.5%, TP sum=100%, peak DD 5%, MA buf 2%.
 
 | Year | ETH | BNB | TRX | Avg |
 |------|----:|----:|----:|----:|
-| 2021 | +140% | +187% | +142% | +156% |
-| 2022 | +10% | -0.5% | -12% | -1% |
-| 2023 | +26% | +5% | +36% | +22% |
-| 2024 | +52% | +99% | +81% | +77% |
-| 2025 | +10% | +28% | +11% | +16% |
-| **CAGR** | **+38.2%** | **+43.6%** | **+38.0%** | **+39.9%** |
+| 2021 | +140% | +187% | +157% | +161% |
+| 2022 | +10% | -0.5% | -9% | +0% |
+| 2023 | +26% | +5% | +22% | +18% |
+| 2024 | +52% | +99% | +95% | +82% |
+| 2025 | +10% | +28% | +4% | +14% |
+| **CAGR** | **+38.2%** | **+43.6%** | **+39.7%** | **+40.5%** |
 
 | Coin | Max DD | Final ($10K→) |
 |------|:------:|:-------------:|
 | ETH | 50.4% | $57,419 |
 | BNB | 41.7% | $72,109 |
-| TRX | 53.6% | $54,840 |
-| **Avg** | **48.6%** | **$61,456** |
+| TRX | **41.6%** (was 53.6%) | $57,781 |
+| **Avg** | **44.6%** (was 48.6%) | **$62,436** |
+
+Improvement: TRX ADX min 12→20, DD reduced 12%, CAGR same. 57/57 tests.
 
 ## Usage
 
 ```bash
-python3 -m unittest tests.test_crypto_trading tests.test_utils -v  # 57/57
-python3 scripts/backtest_bull_snowball.py --parallel   # ~27s
+python3 -m unittest tests.test_crypto_trading tests.test_utils -v
+python3 scripts/backtest_bull_snowball.py --parallel
 ```
