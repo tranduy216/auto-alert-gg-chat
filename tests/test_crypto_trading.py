@@ -371,5 +371,59 @@ class TestAdditionalFunctions(unittest.TestCase):
         self.assertGreater(score, 50)  # strong signal
 
 
+class TestTradingRules(unittest.TestCase):
+    """Test unified trading rules"""
+
+    def test_detect_btc_safe(self):
+        from scripts.trading_rules import detect_btc_safe
+        self.assertTrue(detect_btc_safe(15))   # ADX < 22 → safe
+        self.assertFalse(detect_btc_safe(25))  # ADX ≥ 22 → aggressive
+
+    def test_detect_bear_short(self):
+        from scripts.trading_rules import detect_bear_short
+        # Only ETH, ADX≥22, BTC bear
+        self.assertTrue(detect_bear_short(False, False, "ETH"))
+        self.assertFalse(detect_bear_short(True, False, "ETH"))   # safe mode
+        self.assertFalse(detect_bear_short(False, True, "ETH"))   # BTC bull
+        self.assertFalse(detect_bear_short(False, False, "BNB"))  # not ETH
+
+    def test_detect_eth_bear(self):
+        from scripts.trading_rules import detect_eth_bear
+        self.assertTrue(detect_eth_bear("ETH", btc_bull=False))
+        self.assertFalse(detect_eth_bear("ETH", btc_bull=True))
+        self.assertFalse(detect_eth_bear("BNB", btc_bull=False))
+
+    def test_get_entry_rule_safe_mode(self):
+        from scripts.trading_rules import get_entry_rule
+        mp, lev, sl, bm, sf, *_ = get_entry_rule(True, False, False, False, True, False, 80)
+        self.assertEqual(lev, 1.5)  # safe mode = 1.5x
+        self.assertEqual(mp, 0.035)  # 3.5% entry
+        self.assertTrue(sf)  # safe flag
+
+    def test_get_entry_rule_bear_short(self):
+        from scripts.trading_rules import get_entry_rule
+        mp, lev, sl, _, _, _, _, shf = get_entry_rule(False, True, False, False, False, True, 70)
+        self.assertEqual(lev, 3.5)  # aggressive
+        self.assertTrue(shf)  # short flag
+
+    def test_get_entry_rule_bull(self):
+        from scripts.trading_rules import get_entry_rule
+        mp, lev, sl, bm, *_ = get_entry_rule(False, False, False, False, True, False, 80)
+        self.assertEqual(lev, 3.5)
+        self.assertTrue(bm)  # bull mode
+
+    def test_process_bull_exit(self):
+        from scripts.trading_rules import process_bull_exit
+        r = process_bull_exit(15, 0.15, None, 110, 100, 0, 1.0, False, 10, False)
+        self.assertFalse(r['removed'])
+        self.assertLess(r['rem'], 1.0)  # TP should close partial
+
+    def test_process_safe_exit_sl(self):
+        from scripts.trading_rules import process_safe_exit
+        r = process_safe_exit(-10, 0, 1.0, False, 0, [(5, 1.0)], 5, 5)
+        self.assertTrue(r['removed'])
+        self.assertIn('SL', r['exits'])
+
+
 if __name__ == '__main__':
     unittest.main()
