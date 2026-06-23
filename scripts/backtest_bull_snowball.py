@@ -223,7 +223,7 @@ def backtest_coin(args_tuple):
         max_ms = MAX_POS_PCT / hybrid_profile["lev"] * pos_mult
 
         go_cash = False
-        # TRX: no longs in BTC bear. No shorts anywhere (all shorts blocked below)
+        # TRX: go to cash in BTC bear (counter-trend too lossy for TRX)
         if coin == "TRX" and not btc_bull:
             go_cash = True
         if go_cash:
