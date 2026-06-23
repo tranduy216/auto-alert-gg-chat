@@ -4,15 +4,15 @@
 
 ## Strategy
 
-3-tier based on BTC trend strength (MA50 vs MA120):
+3-tier based on BTC trend strength (MA50 vs MA120, ADX):
 
 | BTC State | Condition | Long | Short |
 |-----------|-----------|------|-------|
 | **Bull (strong)** | ADX ≥ 22, MA50 > MA120 | 3.5x snowball, staggered TP 10/20/30%, trail 11%/50% | Blocked |
-| **Bear (strong)** | ADX ≥ 22, MA50 < MA120 | ETH: 2x trail7%/TP40%. BNB: isolated 2x | 3.5x snowball + trail (ETH) |
+| **Bear (strong)** | ADX ≥ 22, MA50 < MA120 | ETH: 2x trail7%/TP40%. BNB: isolated 2x. TRX: cash | 3.5x snowball + trail (ETH, score≥70) |
 | **Safe (weak)** | ADX < 22 | 1.5x, 3.5% entry, SL 3.3%, MA buf 2%, isolated | 1.5x isolated |
 
-BNB bear: 2x, 5% entry, SL 4.5%, TP sum=100% (3/7/20/25/30%), peak DD 5%.
+Counter-trend (BNB long in BTC bear): isolated 2x, 5% entry, SL 4.5%, TP sum=100%, peak DD 5%.
 
 ---
 
@@ -20,13 +20,13 @@ BNB bear: 2x, 5% entry, SL 4.5%, TP sum=100% (3/7/20/25/30%), peak DD 5%.
 
 | Coin | ADX | MA buf | Snow score | Entry | Short | Bear long |
 |------|:---:|:------:|:----------:|:-----:|:-----:|:---------:|
-| ETH | 12 | 0% | 60 | 65 | Yes | 2x/7%/trail7%/TP40% |
+| ETH | 12 | 0% | 60 | 65 | Yes (score≥70) | 2x/7%/trail7%/TP40% |
 | BNB | 15 | 1% | 65 | 65 | No | 2x/4.5%/isolated TP 100% |
 | TRX | 18 | 1% | 65 | 65 | No | Cash |
 
 Snowball: 4 levels (5/10/15/20%), 0.07 each, init 0.10. Pos 1.3x.
 Safe: 1.5x, SL 3.3%, entry 3.5%, TP sum=100%, peak DD 5%.
-Cooldown: ETH=3, BNB=1, TRX=1 bars.
+Cooldown: ETH=3, BNB=1, TRX=1.
 
 ## Performance
 

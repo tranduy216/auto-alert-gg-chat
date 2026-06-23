@@ -85,6 +85,7 @@ BTC_ADX_SAFE    = 22      # BTC ADX < 22 → safe mode for all coins
 BEAR_SHORT_LEV      = 3.5
 BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
+BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 60, "entry_score": 65},

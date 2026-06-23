@@ -38,7 +38,7 @@ from trading_config import (
     BNB_BEAR_LEV, BNB_BEAR_SL, BNB_BEAR_ENTRY, BNB_BEAR_TP, BNB_BEAR_PEAK_DD, BNB_BEAR_ENTRY_SCORE,
     BNB_BEAR_ADX, BNB_BEAR_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
-    BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL,
+    BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
 )
 
 # All constants imported from trading_config.py
@@ -302,6 +302,7 @@ def backtest_coin(args_tuple):
                 tp_schedule = BNB_BEAR_TP if ent.get('bnb_bear') else SAFE_TP
                 peak_roi = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_roi
+                ent['_peak_roi'] = peak_roi
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
                     trades.append({'t':'SL','dir':'S' if is_sh else 'L'})
@@ -538,7 +539,7 @@ def backtest_coin(args_tuple):
             # Aggressive bear short snowball
             if bear_short and has_s and not has_l:
                 sc_snow = _entry_score_v7_short(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1,ds)
-                if sc_snow >= cfg.get("snowball_min_score", 65):
+                if sc_snow >= BEAR_SHORT_SCORE:
                     for ent in entries:
                         if not ent.get('is_short', False): continue
                         ent_ep = ent['ep']
@@ -607,11 +608,11 @@ def backtest_coin(args_tuple):
                         lev_entry = BEAR_SHORT_LEV; sl_entry = BEAR_SHORT_SL
                         bull_entry = False; short_flag = True; safe_flag = False
                         mp = BULL_INITIAL_SIZE  # same entry size as longs
-                    # BNB BTC bear long: minimum risk, isolated, no snowball
+                    # BNB BTC bear long: tuned isolated params
                     elif bnb_bear and not is_sh:
                         if sc < BNB_BEAR_ENTRY_SCORE: mp = 0
                         lev_entry = BNB_BEAR_LEV; sl_entry = BNB_BEAR_SL
-                        bull_entry = False; ct_flag = False; eth_flag = False
+                        bull_entry = False; bnb_flag = True
                         mp = BNB_BEAR_ENTRY
                     elif eth_bear and not is_sh:
                         lev_entry = 2.0; sl_entry = 7
