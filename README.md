@@ -1,6 +1,6 @@
 # Crypto Trading Alert System — v13
 
-BTC ADX-safe 3-tier strategy. 57/57 tests.
+BTC ADX-safe 3-tier strategy. 57/57 tests. 40.5% avg CAGR.
 
 | Coin | CAGR | Max DD | 2022 | Final |
 |------|------|--------|------|-------|
@@ -14,3 +14,5 @@ pip install -r requirements.txt
 python3 -m unittest tests.test_crypto_trading tests.test_utils -v
 python3 scripts/backtest_bull_snowball.py --parallel
 ```
+
+Full spec: [CryptoTrading.md](CryptoTrading.md)

@@ -50,11 +50,10 @@ from trading_config import (  # centralized config
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
     BULL_TP_SCHEDULE,
-    COIN_CONFIG, SF, SHORT_ALLOWED, BTC_BEAR_OVERRIDE,
+    COIN_CONFIG, SF,
+    SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
-    SAFE_TP, SAFE_PEAK_DD, BTC_ADX_SAFE, SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_ENTRY_SCORE,
-    BEAR_SHORT_LEV, BEAR_SHORT_SL,
 )
 
 
