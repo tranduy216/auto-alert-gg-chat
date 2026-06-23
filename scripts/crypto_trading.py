@@ -1985,13 +1985,13 @@ def main() -> None:
     else:
         print("[crypto_trading] Kill switch not triggered.")
 
-    # BTC regime filter (MA50 vs MA200 on daily)
+    # BTC regime filter (MA50 vs MA120 on daily — matches backtest)
     _btc_closes = [c["close"] for c in btc_candles]
     _btc_ma50 = (sma(_btc_closes, 50)[-1] or _btc_closes[-1])
-    _btc_ma200 = (sma(_btc_closes, 200)[-1] or _btc_closes[-1])
-    _btc_bull = _btc_ma50 > _btc_ma200
+    _btc_ma120 = (sma(_btc_closes, 120)[-1] or _btc_closes[-1])
+    _btc_bull = _btc_ma50 > _btc_ma120
     print(f"[crypto_trading] BTC regime: {'BULL' if _btc_bull else 'BEAR'} "
-          f"(MA50={_btc_ma50:.0f} MA200={_btc_ma200:.0f})")
+          f"(MA50={_btc_ma50:.0f} MA120={_btc_ma120:.0f})")
 
     # Time filter: avoid economic events
     _current_hour = now_vnt.hour
