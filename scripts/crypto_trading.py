@@ -2055,7 +2055,7 @@ def main() -> None:
 
     # Decide notification timing
     all_wait = all(r['action'] == 'NO_TRADE' for r in results)
-    scheduled_hours = {10, 15, 21}
+    scheduled_hours = {6, 8, 10, 15, 21}
     is_scheduled = now_vnt.hour in scheduled_hours
 
     if all_wait and not is_scheduled and not metadata_alerts:
