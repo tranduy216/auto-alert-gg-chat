@@ -25,7 +25,7 @@ from crypto_trading import (
     _fib_cooldown_bars, compute_adx,
 )
 from trading_config import (
-    SF, BASE, ENTRY_MIN_SCORE, INITIAL, TP_SCHEDULE, FEE_RATE,
+    SF, BASE, ENTRY_MIN_SCORE, TP_SCHEDULE, FEE_RATE,
     SHORT_ALLOWED, MAX_POS_PCT,
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
@@ -35,7 +35,7 @@ from trading_config import (
     SL_ROLLING_CAP, SL_ROLLING_LOCK_BARS, SL_ROLLING_FIB, SIDEWAY_MAX_SCORE,
     get_profile, _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     BTC_BEAR_OVERRIDE,
-    BNB_BEAR_ADX, BNB_BEAR_MA_BUF,
+    BNB_BEAR_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
 )
@@ -207,7 +207,7 @@ def backtest_coin(args_tuple):
             continue
 
         vm2 = sma(v1, int(20*SF))[-1] or v1[-1]
-        v5a = sum(v1[-(int(6*SF)):-1])/(int(5*SF)) if len(v1)>=int(6*SF) else v1[-1]
+        v5a = sum(v1[-int(5*SF):])/(int(5*SF)) if len(v1)>=int(5*SF) else v1[-1]
         vs = compute_volume_score(v1[-1], vm2)
         rsi1 = compute_rsi(c1, int(14*SF))
 

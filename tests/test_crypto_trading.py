@@ -175,7 +175,7 @@ class TestCoinProfiles(unittest.TestCase):
 
     def test_get_profile_bull(self):
         """get_profile should return BULL profile when is_bull=True"""
-        from trading_config import get_profile, PROFILES_BULL
+        from trading_config import get_profile
         profile = get_profile("ETH", is_bull=True)
         self.assertEqual(profile["lev"], 3.5)
         self.assertEqual(profile["sl"], 10)
@@ -290,8 +290,7 @@ class TestSafeMode(unittest.TestCase):
         self.assertLess(total, 0.4)  # 30% total before trail
 
     def test_bnb_bear_constants(self):
-        from trading_config import BNB_BEAR_ADX, BNB_BEAR_MA_BUF
-        self.assertGreaterEqual(BNB_BEAR_ADX, 20)
+        from trading_config import BNB_BEAR_MA_BUF
         self.assertGreater(BNB_BEAR_MA_BUF, 0)
 
     def test_bear_short_constants(self):
@@ -303,6 +302,73 @@ class TestSafeMode(unittest.TestCase):
         from trading_config import BTC_BEAR_OVERRIDE
         self.assertGreater(BTC_BEAR_OVERRIDE["adx_min"], 15)
         self.assertLess(BTC_BEAR_OVERRIDE["bull_lev"], 4.0)
+
+
+class TestAdditionalFunctions(unittest.TestCase):
+    """Test newly covered edge cases"""
+
+    def test_compute_volume_score_normal(self):
+        from crypto_trading import compute_volume_score
+        self.assertEqual(compute_volume_score(200, 100), 1.0)  # 2x avg
+        self.assertEqual(compute_volume_score(150, 100), 0.8)  # 1.5x avg
+        self.assertEqual(compute_volume_score(110, 100), 0.4)  # 1.1x avg
+        self.assertEqual(compute_volume_score(50, 100), 0.2)   # below avg
+
+    def test_compute_volume_score_zero_division(self):
+        from crypto_trading import compute_volume_score
+        self.assertEqual(compute_volume_score(100, 0), 0.2)  # no crash
+        self.assertEqual(compute_volume_score(0, 0), 0.2)    # no crash
+
+    def test_evaluate_trend_3d_bullish(self):
+        from crypto_trading import evaluate_trend_3d
+        label, score = evaluate_trend_3d(110, 105, 100)
+        self.assertEqual(score, 3)
+        self.assertEqual(label, "BULLISH")
+
+    def test_evaluate_trend_3d_bearish(self):
+        from crypto_trading import evaluate_trend_3d
+        label, score = evaluate_trend_3d(90, 95, 100)
+        self.assertEqual(score, -3)
+        self.assertEqual(label, "BEARISH")
+
+    def test_evaluate_trend_3d_sideway(self):
+        from crypto_trading import evaluate_trend_3d
+        label, score = evaluate_trend_3d(100.1, 100, 100)
+        self.assertEqual(score, 0)
+        self.assertEqual(label, "SIDEWAY")
+
+    def test_resolve_action_v6_flat_long(self):
+        from crypto_trading import resolve_action_v6
+        state, action = resolve_action_v6(3, True, False, "FLAT")
+        self.assertEqual(action, "OPEN_LONG_ENTRY_1")
+
+    def test_resolve_action_v6_flat_short(self):
+        from crypto_trading import resolve_action_v6
+        state, action = resolve_action_v6(-3, False, True, "FLAT")
+        self.assertEqual(action, "OPEN_SHORT_ENTRY_1")
+
+    def test_resolve_action_v6_no_trade(self):
+        from crypto_trading import resolve_action_v6
+        state, action = resolve_action_v6(0, False, False, "FLAT")
+        self.assertEqual(action, "NO_TRADE")
+
+    def test_approx_equal(self):
+        from crypto_trading import _approx_equal
+        self.assertTrue(_approx_equal(100, 100.1, 0.005))
+        self.assertFalse(_approx_equal(100, 101, 0.005))
+
+    def test_rsi_all_equal(self):
+        from crypto_trading import compute_rsi
+        rsi = compute_rsi([100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
+        self.assertEqual(rsi, 100.0)  # all equal = RSI 100
+
+    def test_entry_score_v7_long(self):
+        from crypto_trading import _entry_score_v7_long
+        candles = [{'close': 100.0, 'high': 101, 'low': 99, 'open': 100, 'volume': 1000}] * 50
+        score = _entry_score_v7_long(
+            3, 105, 103, 102, 100, 98, 101, 100, 0.6, 1200, 1000, 45
+        )
+        self.assertGreater(score, 50)  # strong signal
 
 
 if __name__ == '__main__':

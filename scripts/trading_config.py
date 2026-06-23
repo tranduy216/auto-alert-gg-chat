@@ -62,7 +62,6 @@ BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
 
 # BNB BTC bear: counter-trend uses safe isolated (same as SAFE mode)
-BNB_BEAR_ADX       = 22      # ADX >= 22
 BNB_BEAR_MA_BUF    = 0.025   # MA50 > MA120 * 1.025
 
 # Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)

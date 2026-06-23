@@ -21,7 +21,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 import requests
@@ -94,7 +94,7 @@ CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
 BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
 BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
 
-MAX_PER_COIN_PCT = 1.20  # matches MAX_POS_PCT
+MAX_PER_COIN_PCT = MAX_POS_PCT
 
 # ── Risk Management ─────────────────────────────────────────────────
 MAX_CONCURRENT_POSITIONS = 5     # 5 coins, 5 positions max
@@ -1091,15 +1091,6 @@ def _action_text(result: dict) -> str:
     return a
 
 
-    if p < 0.50:
-        return "No action"
-    if p < 0.70:
-        return "Watch"
-    if p < 0.85:
-        return "Execute"
-    return "High conv."
-
-
 # ---------------------------------------------------------------------------
 # Per-coin analysis pipeline
 # ---------------------------------------------------------------------------
@@ -1206,7 +1197,7 @@ def analyse_coin(
     volume_score = compute_volume_score(last_volume, vol_ma20_12h)
 
     # v7: volume 5d average for expansion filter
-    vol_5d_avg = sum(volumes_12h[-int(6 * SF):-1]) / (5 * SF) if len(volumes_12h) >= 6 * SF else last_volume
+    vol_5d_avg = sum(volumes_12h[-int(5 * SF):]) / int(5 * SF) if len(volumes_12h) >= int(5 * SF) else last_volume
 
     # v6 entry signals (per-coin profile)
     entry_long = compute_entry_v6_long(
@@ -1328,7 +1319,6 @@ def analyse_coin(
                         exit_reasons.append(f"Bull Trail: {last_close:.2f} <= {tstop:.2f} (closed {BULL_TRAIL_CLOSE*100:.0f}%)")
                         tstop = last_close * (1 - BULL_TRAIL_DISTANCE)
                         ent["trailing_stop"] = tstop
-                        from datetime import timedelta
                         ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=BULL_TRAIL_COOLDOWN_BARS * 12)).isoformat()
                         if rem <= 0.001:
                             removed = True
@@ -1394,13 +1384,11 @@ def analyse_coin(
                     consec_s += 1
                     cd_bars_fib = _fib_cooldown_bars(consec_s, 0)
                     if cd_bars_fib > 0:
-                        from datetime import timedelta
                         cd_s_until = (_now_vnt() + timedelta(hours=cd_bars_fib * 12)).isoformat()
                 else:
                     consec_l += 1
                     cd_bars_fib = _fib_cooldown_bars(consec_l, 0)
                     if cd_bars_fib > 0:
-                        from datetime import timedelta
                         cd_l_until = (_now_vnt() + timedelta(hours=cd_bars_fib * 12)).isoformat()
                 
                 # 3SL Rolling Fibonacci Lock (separated per direction)
@@ -1411,7 +1399,6 @@ def analyse_coin(
                         if SL_ROLLING_FIB:
                             extra = rolling_sl_short - SL_ROLLING_CAP
                             lock_bars = _fib_cooldown_bars(SL_ROLLING_CAP + extra, 0)
-                        from datetime import timedelta
                         rolling_lock_until_short = (_now_vnt() + timedelta(hours=lock_bars * 12)).isoformat()
                 else:
                     rolling_sl_long += 1
@@ -1420,7 +1407,6 @@ def analyse_coin(
                         if SL_ROLLING_FIB:
                             extra = rolling_sl_long - SL_ROLLING_CAP
                             lock_bars = _fib_cooldown_bars(SL_ROLLING_CAP + extra, 0)
-                        from datetime import timedelta
                         rolling_lock_until_long = (_now_vnt() + timedelta(hours=lock_bars * 12)).isoformat()
             else:
                 # Win resets all counters
@@ -1598,8 +1584,6 @@ def analyse_coin(
                         "trailing_stop": None,
                         "lev": profile_lev,
                         "sl_roi": profile_sl,
-                        "snowball_levels": profile["snowball_levels"],
-                        "trail_activation": profile["trail_activation"],
                     })
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
