@@ -269,5 +269,43 @@ class TestBULLStrategy(unittest.TestCase):
         self.assertGreaterEqual(COIN_CONFIG["TRX"]["snowball_min_score"], 65)
 
 
+class TestSafeMode(unittest.TestCase):
+    """Test safe mode and new strategy configs"""
+
+    def test_safe_mode_constants(self):
+        from trading_config import SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE
+        self.assertEqual(SAFE_LEV, 1.5)
+        self.assertEqual(SAFE_SL, 3.3)
+        self.assertLess(SAFE_ENTRY, 0.05)  # small entry for safety
+        self.assertGreater(SAFE_ENTRY_SCORE, 70)  # strong signal
+        self.assertGreater(BTC_ADX_SAFE, 15)  # reasonable ADX threshold
+
+    def test_bull_tp_schedule(self):
+        from trading_config import BULL_TP_SCHEDULE
+        self.assertEqual(len(BULL_TP_SCHEDULE), 3)
+        self.assertEqual(BULL_TP_SCHEDULE[0], (10, 0.10))
+        self.assertEqual(BULL_TP_SCHEDULE[2], (30, 0.10))
+        # Verify total close ≤ 100%
+        total = sum(cf for _, cf in BULL_TP_SCHEDULE)
+        self.assertLess(total, 0.4)  # 30% total before trail
+
+    def test_bnb_bear_constants(self):
+        from trading_config import BNB_BEAR_LEV, BNB_BEAR_SL, BNB_BEAR_ENTRY, BNB_BEAR_ENTRY_SCORE
+        self.assertLessEqual(BNB_BEAR_LEV, 2.0)  # conservative leverage
+        self.assertLess(BNB_BEAR_SL, 6)  # tight SL
+        self.assertLess(BNB_BEAR_ENTRY, 0.06)  # small entry
+        self.assertGreater(BNB_BEAR_ENTRY_SCORE, 65)
+
+    def test_bear_short_constants(self):
+        from trading_config import BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL
+        self.assertEqual(BEAR_SHORT_LEV, 3.5)
+        self.assertTrue(BEAR_SHORT_SNOWBALL)
+
+    def test_btc_bear_override(self):
+        from trading_config import BTC_BEAR_OVERRIDE
+        self.assertGreater(BTC_BEAR_OVERRIDE["adx_min"], 15)
+        self.assertLess(BTC_BEAR_OVERRIDE["bull_lev"], 4.0)
+
+
 if __name__ == '__main__':
     unittest.main()

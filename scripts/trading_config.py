@@ -28,11 +28,11 @@ TP_SCHEDULE = [(8.0, 0.10), (15.0, 0.15), (25.0, 0.20), (40.0, 0.25)]
 SHORT_ALLOWED = {"ETH", "TRX"}
 
 PROFILES_BULL = {
-    "ETH": {"lev": 3.5, "sl": 10, "pos_mult": 0.8, "trail": 0.11, "initial_exposure": 0.08,
+    "ETH": {"lev": 3.5, "sl": 10, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.08,
             "trail_activation": 0.30, "no_sl": True, "max_loss": 0.05},
-    "BNB": {"lev": 3.5, "sl": 20, "pos_mult": 1.2, "trail": 0.11, "initial_exposure": 0.25,
+    "BNB": {"lev": 3.5, "sl": 20, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
             "trail_activation": 0.30, "no_sl": False, "max_loss": 0.20},
-    "TRX": {"lev": 3.5, "sl": 12, "pos_mult": 1.2, "trail": 0.11, "initial_exposure": 0.25,
+    "TRX": {"lev": 3.5, "sl": 12, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
             "trail_activation": 0.30, "no_sl": False, "max_loss": 0.12},
 }
 
@@ -55,15 +55,36 @@ BULL_TRAIL_COOLDOWN_BARS = 5
 BULL_NO_SL = True
 BULL_MAX_LOSS = 0.10
 
+# Staggered partial TP before trail (ROI%, close_fraction)
+BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
+
 # BTC bear override (only for BNB in BTC bear)
 BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
 
-# Counter-trend (BNB only): long in BTC bear
-CT_LEVERAGE = 2.0
-CT_STOP_LOSS = 9
-CT_TP_SCHEDULE = [(7, 0.10), (15, 0.15), (25, 0.20), (40, 0.25)]  # staggered TP 70%
-CT_TRAIL = 0.07
-CT_ENTRY_SCORE = 75
+# BNB BTC bear long: minimum risk, isolated entries, no snowball
+BNB_BEAR_LEV       = 2.0
+BNB_BEAR_SL        = 4.5     # stop loss ROI %
+BNB_BEAR_ENTRY     = 0.05    # 5% equity including margin
+BNB_BEAR_TP        = [(3, 0.07), (7, 0.13), (20, 0.30), (25, 0.25), (30, 0.25)]  # sum=100%
+BNB_BEAR_PEAK_DD   = 5       # close all if ROI drops 5% from peak
+BNB_BEAR_ENTRY_SCORE = 70
+BNB_BEAR_ADX       = 22      # ADX >= 22
+BNB_BEAR_MA_BUF    = 0.025   # MA50 > MA120 * 1.025
+
+# Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)
+SAFE_LEV        = 1.5
+SAFE_SL         = 3.3     # tight stop loss %
+SAFE_ENTRY      = 0.035   # 3.5% equity including margin
+SAFE_TP         = [(3, 0.07), (7, 0.13), (20, 0.30), (25, 0.25), (30, 0.25)]
+SAFE_PEAK_DD    = 5
+SAFE_ENTRY_SCORE = 75
+SAFE_MA_BUF     = 0.02    # MA50 > MA120 * 1.02 to confirm trend
+BTC_ADX_SAFE    = 22      # BTC ADX < 22 → safe mode for all coins
+
+# Aggressive bear short: snowball + trailing like long, in BTC strong bear
+BEAR_SHORT_LEV      = 3.5
+BEAR_SHORT_SL       = 12
+BEAR_SHORT_SNOWBALL = True
 
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 60, "entry_score": 65},
