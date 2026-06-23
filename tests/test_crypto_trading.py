@@ -387,11 +387,11 @@ class TestTradingRules(unittest.TestCase):
         self.assertFalse(detect_bear_short(False, True, "ETH"))   # BTC bull
         self.assertFalse(detect_bear_short(False, False, "BNB"))  # not ETH
 
-    def test_detect_eth_bear(self):
-        from scripts.trading_rules import detect_eth_bear
-        self.assertTrue(detect_eth_bear("ETH", btc_bull=False))
-        self.assertFalse(detect_eth_bear("ETH", btc_bull=True))
-        self.assertFalse(detect_eth_bear("BNB", btc_bull=False))
+    def test_detect_eth_bounce(self):
+        from scripts.trading_rules import detect_eth_bounce
+        self.assertTrue(detect_eth_bounce("ETH", btc_bull=False))
+        self.assertFalse(detect_eth_bounce("ETH", btc_bull=True))
+        self.assertFalse(detect_eth_bounce("BNB", btc_bull=False))
 
     def test_get_entry_rule_safe_mode(self):
         from scripts.trading_rules import get_entry_rule

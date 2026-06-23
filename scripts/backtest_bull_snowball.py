@@ -38,6 +38,7 @@ from trading_config import (
     BNB_BEAR_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
+    ETH_BOUNCE_TP, ETH_BOUNCE_SL, ETH_BOUNCE_PEAK_DD,
 )
 
 # All constants imported from trading_config.py
@@ -235,7 +236,7 @@ def backtest_coin(args_tuple):
             bull_max_loss_use = BTC_BEAR_OVERRIDE.get("max_loss", BULL_MAX_LOSS)
 
         # ETH bear mode: 2x, SL 7%, trail 7%, TP 40%/50%
-        eth_bear = (coin == "ETH" and not btc_bull)
+        eth_bounce = (coin == "ETH" and not btc_bull)
         # BNB CT: counter-trend long in BTC bear
         bnb_bear = (coin == "BNB" and not btc_bull)
         # Aggressive bear short: snowball + trail like longs, when BTC strong bear
@@ -376,23 +377,29 @@ def backtest_coin(args_tuple):
                 continue
 
             # ETH bear: 2x, SL 7%, trail 7%, TP 40%/50%
-            if ent.get('eth_bear', False):
+            if ent.get('eth_bounce', False):
+                peak_r = max(ent.get('_peak_roi', -999), raw_roi)
+                ent['_peak_roi'] = peak_r
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
                     trades.append({'t':'SL','dir':'L'})
                     consec_l += 1; rolling_sl_long += 1
                 elif not rm:
-                    if not ent.get('_tp_done') and raw_roi >= 40.0:
-                        cf = 0.50 * rem2; eq += raw_roi * cf / 100 * ent_ff
-                        rem2 -= cf; ent['rem'] = rem2; ent['_tp_done'] = True
-                        trades.append({'t':'TP','dir':'L'})
-                        consec_l = 0; rolling_sl_long = 0
-                        if rem2 <= 0.001: rm = True
-                    tstop = max(ent.get('tstop') or cc*0.93, hi*0.93)
-                    if bl <= tstop:
+                    tp_s = ent.get('tp', 0)
+                    if tp_s < len(ETH_BOUNCE_TP):
+                        trg, cf_pct = ETH_BOUNCE_TP[tp_s]
+                        if raw_roi >= trg:
+                            cf = cf_pct * rem2
+                            eq += raw_roi * cf / 100 * ent_ff
+                            rem2 -= cf; ent['rem'] = rem2; ent['tp'] = tp_s + 1
+                            ent['_peak_roi'] = raw_roi
+                            trades.append({'t':'TP','dir':'L'})
+                            consec_l = 0; rolling_sl_long = 0
+                            if rem2 <= 0.001: rm = True
+                    # Peak DD: close remaining if ROI drops 5.5% from peak
+                    if not rm and raw_roi <= peak_r - ETH_BOUNCE_PEAK_DD:
                         eq += raw_roi * rem2 / 100 * ent_ff; rm = True
-                        trades.append({'t':'TRAIL','dir':'L'})
-                        consec_l = 0; rolling_sl_long = 0
+                        trades.append({'t':'PEAK_DD','dir':'L'})
                 if not rm: ne.append(ent)
                 continue
 
@@ -670,8 +677,8 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; bnb_flag = True
                         mp = SAFE_ENTRY
-                    elif eth_bear and not is_sh:
-                        lev_entry = 2.0; sl_entry = 7
+                    elif eth_bounce and not is_sh:
+                        lev_entry = 2.0; sl_entry = ETH_BOUNCE_SL
                         bull_entry = False; eth_flag = True
                         mp = 0.10 * 0.70
                     elif is_bull and not is_sh:
@@ -690,7 +697,7 @@ def backtest_coin(args_tuple):
                                     'lev': lev_entry,
                                     'sl': sl_entry,
                                     'bull_mode': bull_entry,
-                                    'ct_mode': False, 'eth_bear': eth_flag, 'bnb_bear': bnb_bear,
+                                    'ct_mode': False, 'eth_bounce': eth_flag, 'bnb_bear': bnb_bear,
                                     'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
                             'snowball_stage': 0})
                         lei = idx

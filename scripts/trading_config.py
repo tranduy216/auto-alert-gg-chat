@@ -80,6 +80,11 @@ BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
+# ETH bounce TP schedule: fixed ROI levels, no trailing, 80% in 5-15% range
+ETH_BOUNCE_TP   = [(3, 0.05), (5, 0.10), (8, 0.20), (12, 0.25), (15, 0.25), (20, 0.10), (25, 0.05)]
+ETH_BOUNCE_SL   = 5.5    # stop loss %
+ETH_BOUNCE_PEAK_DD = 5.5  # close remaining if ROI drops 5.5% from peak
+
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 65, "entry_score": 65},
     "BNB": {"bull_mode": True, "bear_short": False, "adx_min": 15, "snowball_min_score": 65, "entry_score": 65, "ma_buffer": 0.01},

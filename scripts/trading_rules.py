@@ -20,7 +20,7 @@ def detect_bear_short(btc_safe: bool, btc_bull: bool, coin: str) -> bool:
     """Aggressive bear short: only ETH, strong BTC bear (ADX≥22)"""
     return not btc_safe and not btc_bull and coin == "ETH" and BEAR_SHORT_SNOWBALL
 
-def detect_eth_bear(coin: str, btc_bull: bool) -> bool:
+def detect_eth_bounce(coin: str, btc_bull: bool) -> bool:
     """ETH long in BTC bear: 2x, SL 7%, trail 7%, TP 40%/50%"""
     return coin == "ETH" and not btc_bull
 
@@ -38,7 +38,7 @@ def detect_trx_cash(coin: str, btc_bull: bool, is_bull: bool) -> bool:
 # ═══════════════════════════════════════════════
 
 def get_entry_rule(
-    btc_safe: bool, bear_short: bool, bnb_bear: bool, eth_bear: bool,
+    btc_safe: bool, bear_short: bool, bnb_bear: bool, eth_bounce: bool,
     is_bull: bool, is_sh: bool, sc: float,
     bnb_flag_def: bool = False
 ):
@@ -49,7 +49,7 @@ def get_entry_rule(
     1. Safe mode (btc_safe) → for ALL if not bear_short
     2. Aggressive bear short (bear_short and is_sh)
     3. BNB bear (bnb_bear and not is_sh)
-    4. ETH bear (eth_bear and not is_sh)
+    4. ETH bear (eth_bounce and not is_sh)
     5. Bull (is_bull and not is_sh)
     6. Default (bear mode)
     """
@@ -77,7 +77,7 @@ def get_entry_rule(
         lev = SAFE_LEV; sl = SAFE_SL
         bnb_flag = True
 
-    elif eth_bear and not is_sh:
+    elif eth_bounce and not is_sh:
         # ETH bear: 2x, SL 7%, fixed size
         mp = 0.10 * 0.70; lev = 2.0; sl = 7
         eth_flag = True
@@ -183,32 +183,37 @@ def process_safe_exit(
     return result
 
 
-def process_eth_bear_exit(
-    roi: float, rem: float, hi: float, cc: float,
-    ent: dict, sl: float
+def process_eth_bounce_exit(
+    roi: float, peak_roi: float, rem: float, tp_s: int, sl: float
 ) -> dict:
     """
-    ETH bear mode: SL 7%, TP 50% at 40%, trail 7%.
+    ETH bounce: SL 5.5%, fixed TP schedule (3/5/8/12/15/20/25%),
+    close remaining if ROI drops 5.5% from peak, no trail.
     """
-    result = {'removed': False, 'rem': rem, 'exits': []}
+    result = {'removed': False, 'rem': rem, 'tp': tp_s,
+              'peak_roi': max(peak_roi, roi), 'exits': []}
 
     if roi <= -sl:
         result['removed'] = True
         result['exits'].append('SL')
         return result
 
-    if not ent.get('_tp_done') and roi >= 40.0:
-        cf = 0.50 * rem
-        result['rem'] = rem - cf
-        result['exits'].append('ETH_TP_40%')
-        if result['rem'] <= 0.001:
-            result['removed'] = True
-            return result
+    # Staggered TP
+    if tp_s < len(ETH_BOUNCE_TP):
+        trg, cf_pct = ETH_BOUNCE_TP[tp_s]
+        if roi >= trg:
+            cf = cf_pct * rem
+            result['rem'] = rem - cf
+            result['tp'] = tp_s + 1
+            result['peak_roi'] = roi  # reset peak after TP
+            result['exits'].append(f'BOUNCE_TP@{trg}%')
+            if result['rem'] <= 0.001:
+                result['removed'] = True
+                return result
 
-    # Trail 7%
-    tstop = max(ent.get('trailing_stop') or cc * 0.93, hi * 0.93)
-    if cc <= tstop:
+    # Peak DD: close remaining if roi drops ETH_BOUNCE_PEAK_DD from peak
+    if roi <= result['peak_roi'] - ETH_BOUNCE_PEAK_DD:
         result['removed'] = True
-        result['exits'].append('ETH_TRAIL_7%')
+        result['exits'].append('BOUNCE_PEAK_DD')
 
     return result
