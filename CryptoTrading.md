@@ -4,31 +4,37 @@
 
 ## Strategy
 
-3-tier based on BTC trend strength (MA50 vs MA120, ADX):
+3-tier based on BTC trend strength (MA50 vs MA120, ADX 14):
 
 | BTC State | Condition | Long | Short |
 |-----------|-----------|------|-------|
-| **Bull (strong)** | ADX ≥ 22, MA50 > MA120 | 3.5x snowball, staggered TP 10/20/30%, trail 11%/50% | Blocked |
-| **Bear (strong)** | ADX ≥ 22, MA50 < MA120 | ETH: 2x trail7%/TP40%. BNB: isolated 2x. TRX: cash | 3.5x snowball + trail (ETH, score≥70) |
-| **Safe (weak)** | ADX < 22 | 1.5x, 3.5% entry, SL 3.3%, MA buf 2%, isolated | 1.5x isolated |
-
-Counter-trend (BNB long in BTC bear): isolated 2x, 5% entry, SL 4.5%, TP sum=100%, peak DD 5%.
+| **Bull** | ADX ≥ 22, MA50 > MA120 | 3.5x snowball 4 lvls, staggered TP 10/20/30%, trail 11%/50% | Blocked |
+| **Bear** | ADX ≥ 22, MA50 < MA120 | ETH: 2x trail7%/TP40%. BNB/TRX: SAFE isolated | ETH: 3.5x snowball, score≥70 |
+| **Safe** | ADX < 22 | 1.5x, 3.5% entry, SL 3.3%, SAFE TP, MA buf 2% | 1.5x isolated |
 
 ---
 
-## Config
+## Per-Coin Config
 
-| Coin | ADX | MA buf | Snow score | Entry | Short | Bear long |
-|------|:---:|:------:|:----------:|:-----:|:-----:|:---------:|
-| ETH | 12 | 0% | 60 | 65 | Yes (score≥70) | 2x/7%/trail7%/TP40% |
-| BNB | 15 | 1% | 65 | 65 | No | 2x/4.5%/isolated TP 100% |
-| TRX | 18 | 1% | 65 | 65 | No | Cash |
+| | ETH | BNB | TRX |
+|---|:---:|:---:|:---:|
+| Bull lev | 3.5x | 3.5x | 3.5x |
+| Bull SL | no SL (max 5%) | 20% | 12% |
+| Entry size | 8% × 1.3 | 25% × 1.3 | 25% × 1.3 |
+| Snowball | 4 lvls 0.07 | 4 lvls 0.07 | 4 lvls 0.07 |
+| ADX min | 12 | 15 | 18 |
+| Snow score | 60 | 65 | 65 |
+| Entry score | 65 | 65 | 65 |
+| MA buffer | 0% | 1% | 1% |
+| Short | Yes (score≥70) | No | No |
+| Bear long | 2x/trail7%/TP40% | SAFE isolated | Cash |
+| Cooldown | 3 bars | 1 bar | 1 bar |
 
-Snowball: 4 levels (5/10/15/20%), 0.07 each, init 0.10. Pos 1.3x.
-Safe: 1.5x, SL 3.3%, entry 3.5%, TP sum=100%, peak DD 5%.
-Cooldown: ETH=3, BNB=1, TRX=1.
+Global: MAX_POS 120%, init 0.10, trail 11% @40% close 50%, cooldown 5 bars.
 
-## Performance
+Safe: 1.5x, SL 3.3%, entry 3.5%, TP 3/7/20/25/30%(sum=100%), peak DD 5%.
+
+## Performance (2021–2025)
 
 | Year | ETH | BNB | TRX | Avg |
 |------|----:|----:|----:|----:|
@@ -41,10 +47,10 @@ Cooldown: ETH=3, BNB=1, TRX=1.
 
 | Coin | Max DD | Final ($10K→) |
 |------|:------:|:-------------:|
-| ETH | 50.8% | $162,408 |
-| BNB | 46.6% | $119,784 |
-| TRX | 55.1% | $100,963 |
-| **Avg** | **50.8%** | **$127,718** |
+| ETH | 50.8% | $58,273 |
+| BNB | 46.6% | $64,968 |
+| TRX | 55.1% | $53,859 |
+| **Avg** | **50.8%** | **$59,033** |
 
 ## Usage
 
