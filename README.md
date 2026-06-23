@@ -1,13 +1,13 @@
 # Crypto Trading Alert System — v13
 
-BTC ADX-based 3-tier strategy. 57/57 tests. 39.1% avg CAGR.
+BTC ADX-safe 3-tier strategy. 57/57 tests. 2.5x faster backtest (27s).
 
 | Coin | CAGR | Max DD | 2022 | Final |
 |------|------|--------|------|-------|
-| ETH | +38.8% | 51.4% | +12.8% | $58K |
-| BNB | +41.7% | 46.6% | -0.6% | $65K |
-| TRX | +36.9% | 55.1% | -12.9% | $54K |
-| **Avg** | **+39.1%** | **51.0%** | **-0.2%** | **$59K** |
+| ETH | +38.2% | 50.4% | +10.3% | $57K |
+| BNB | +43.6% | 41.7% | -0.5% | $72K |
+| TRX | +38.0% | 53.6% | -11.7% | $55K |
+| **Avg** | **+39.9%** | **48.6%** | **-0.6%** | **$61K** |
 
 ```bash
 pip install -r requirements.txt

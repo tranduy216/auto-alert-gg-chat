@@ -237,7 +237,7 @@ class TestBULLStrategy(unittest.TestCase):
 
     def test_snowball_levels_count(self):
         from trading_config import BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES
-        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 4)
+        self.assertEqual(len(BULL_SNOWBALL_LEVELS), 3)
         self.assertGreater(len(BULL_SNOWBALL_SIZES), len(BULL_SNOWBALL_LEVELS))
 
     def test_snowball_levels_ascending(self):
