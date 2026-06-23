@@ -329,16 +329,19 @@ def backtest_coin(args_tuple):
             if ent.get('eth_bear', False):
                 if raw_roi <= -ent_sl:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
+                    trades.append({'t':'SL','dir':'L'})
                     consec_l += 1; rolling_sl_long += 1
                 elif not rm:
                     if not ent.get('_tp_done') and raw_roi >= 40.0:
                         cf = 0.50 * rem2; eq += raw_roi * cf / 100 * ent_ff
                         rem2 -= cf; ent['rem'] = rem2; ent['_tp_done'] = True
+                        trades.append({'t':'TP','dir':'L'})
                         consec_l = 0; rolling_sl_long = 0
                         if rem2 <= 0.001: rm = True
                     tstop = max(ent.get('tstop') or cc*0.93, hi*0.93)
                     if bl <= tstop:
                         eq += raw_roi * rem2 / 100 * ent_ff; rm = True
+                        trades.append({'t':'TRAIL','dir':'L'})
                         consec_l = 0; rolling_sl_long = 0
                 if not rm: ne.append(ent)
                 continue
@@ -619,7 +622,7 @@ def backtest_coin(args_tuple):
                         mp = SAFE_ENTRY
                     elif eth_bear and not is_sh:
                         lev_entry = 2.0; sl_entry = 7
-                        bull_entry = False; ct_flag = False; eth_flag = True
+                        bull_entry = False; eth_flag = True
                         mp = 0.10 * 0.70
                     elif is_bull and not is_sh:
                         lev_entry = bull_lev_use
