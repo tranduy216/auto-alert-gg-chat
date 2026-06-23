@@ -49,9 +49,12 @@ from trading_config import (  # centralized config
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
-    COIN_CONFIG, SF, SHORT_ALLOWED,
+    BULL_TP_SCHEDULE,
+    COIN_CONFIG, SF, SHORT_ALLOWED, BTC_BEAR_OVERRIDE,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
+    SAFE_TP, SAFE_PEAK_DD, BTC_ADX_SAFE, SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_ENTRY_SCORE,
+    BEAR_SHORT_LEV, BEAR_SHORT_SL,
 )
 
 
@@ -1293,40 +1296,42 @@ def analyse_coin(
         removed = False
         ent_is_bull_long = ent_lev > 2.5 and not is_sh  # bull long: classified by entry leverage
 
-        # ── BULL mode: snowball trailing (no SL, no TP, 30% close + cooldown) ──
+        # ── BULL mode: staggered TP + trailing (matches backtest) ──
         if ent_is_bull_long and BULL_NO_SL:
-            # Safety: close if loss > 30% even in bull
             if roi <= -BULL_MAX_LOSS * 100:
                 total_pnl += roi * rem / 100
-                exit_reasons.append(f"Bull Max Loss: ROI {roi:.1f}% <= -{BULL_MAX_LOSS*100:.0f}%")
+                exit_reasons.append(f"Bull Max Loss: ROI {roi:.1f}%")
                 removed = True
-            else:
-                pnl_from_entry = (last_close - ep) / ep
-                trail_cd_until = ent.get("trail_cooldown_until", 0)
-                in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
-
-                if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
-                    if tstop is None:
-                        tstop = last_close * (1 - BULL_TRAIL_DISTANCE)
-                    tstop = max(tstop, hi * (1 - BULL_TRAIL_DISTANCE))
-                    ent["trailing_stop"] = tstop
-
-                    if last_close <= tstop:
-                        cf = BULL_TRAIL_CLOSE * rem
+            elif not removed:
+                tp_s = ent.get("tp_stage", 0)
+                if tp_s < len(BULL_TP_SCHEDULE):
+                    trg, cf_pct = BULL_TP_SCHEDULE[tp_s]
+                    if roi >= trg:
+                        cf = cf_pct * rem
                         total_pnl += roi * cf / 100
-                        rem -= cf
-                        ent["remaining_size"] = rem
-                        exit_reasons.append(f"Bull Trail: {last_close:.2f} <= {tstop:.2f} (closed {BULL_TRAIL_CLOSE*100:.0f}%)")
-                        tstop = last_close * (1 - BULL_TRAIL_DISTANCE)
+                        rem -= cf; ent["remaining_size"] = rem
+                        ent["tp_stage"] = tp_s + 1
+                        exit_reasons.append(f"Bull TP: ROI {roi:.1f}%")
+                        if rem <= 0.001: removed = True
+                if tp_s >= len(BULL_TP_SCHEDULE) and not removed:
+                    pnl_from_entry = (last_close - ep) / ep
+                    trail_cd_until = ent.get("trail_cooldown_until", 0)
+                    in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
+                    if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
+                        tstop = max(ent.get("trailing_stop") or last_close * (1 - BULL_TRAIL_DISTANCE), hi * (1 - BULL_TRAIL_DISTANCE))
                         ent["trailing_stop"] = tstop
-                        ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=BULL_TRAIL_COOLDOWN_BARS * 12)).isoformat()
-                        if rem <= 0.001:
-                            removed = True
-
+                        if last_close <= tstop:
+                            cf = BULL_TRAIL_CLOSE * rem
+                            total_pnl += roi * cf / 100
+                            rem -= cf; ent["remaining_size"] = rem
+                            exit_reasons.append(f"Bull Trail: closed {BULL_TRAIL_CLOSE*100:.0f}%")
+                            ent["trailing_stop"] = last_close * (1 - BULL_TRAIL_DISTANCE)
+                            ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=BULL_TRAIL_COOLDOWN_BARS * 12)).isoformat()
+                            if rem <= 0.001: removed = True
                 # Regime change exit for bull longs
                 if not removed and not _coin_bull:
                     total_pnl += roi * rem / 100
-                    exit_reasons.append(f"Bull regime exit: MA50 cross MA120")
+                    exit_reasons.append("Bull regime exit")
                     removed = True
 
         # ── BEAR mode: standard SL + TP + trail ──
