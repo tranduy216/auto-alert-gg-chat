@@ -189,7 +189,7 @@ def backtest_coin(args_tuple):
         # BNB CT: counter-trend long in BTC bear
         bnb_bear = (coin == "BNB" and not btc_bull)
         # Aggressive bear short: snowball + trail like longs, when BTC strong bear
-        bear_short = (not btc_safe and not btc_bull and allow_short and BEAR_SHORT_SNOWBALL)
+        bear_short = (not btc_safe and not btc_bull and coin == "ETH" and BEAR_SHORT_SNOWBALL)
 
         # --- Year filter: go to cash if year not selected ---
         if selected_years and cur_year not in selected_years:
@@ -223,7 +223,7 @@ def backtest_coin(args_tuple):
         max_ms = MAX_POS_PCT / hybrid_profile["lev"] * pos_mult
 
         go_cash = False
-        # TRX: go to cash in BTC bear (counter-trend too lossy for TRX)
+        # TRX: go to cash in BTC bear — safest for TRX
         if coin == "TRX" and not btc_bull:
             go_cash = True
         if go_cash:
@@ -297,8 +297,8 @@ def backtest_coin(args_tuple):
                 if cc < hi: hi = cc; ent['hi'] = hi
             rm = False
 
-            # BNB bear / Safe mode: SL, staggered TP, peak DD 5%
-            if ent.get('bnb_bear', False) or ent.get('safe_mode', False):
+            # BNB bear / Safe mode / TRX safe: SL, staggered TP, peak DD 5%
+            if ent.get('bnb_bear', False) or ent.get('safe_mode', False) or ent.get('trx_safe', False):
                 tp_schedule = BNB_BEAR_TP if ent.get('bnb_bear') else SAFE_TP
                 peak_roi = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_roi
@@ -530,7 +530,7 @@ def backtest_coin(args_tuple):
                 use_ma200_filter=False,use_pullback_filter=False,
                 use_volume_expan=False,
                 min_entry_score=prof.get('short_min_entry_score',ENTRY_MIN_SCORE),
-                candles_12h=ds) if (allow_short and can_s and (cfg["bear_short"] or is_bull)) else False
+                candles_12h=ds) if (allow_short and can_s and (cfg["bear_short"] or is_bull or (coin == "TRX" and not btc_bull))) else False
             if el and has_s: el = False
             if es_ and has_l: es_ = False
 
@@ -559,7 +559,7 @@ def backtest_coin(args_tuple):
                                     trades.append({'t':'SNOWBALL','dir':'S'})
                                 break
             # Bull snowball
-            if is_bull and has_l and not has_s:
+            if is_bull and has_l and not has_s and not (coin == "TRX" and not btc_bull):
                 sc_snow = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
                 if sc_snow >= bull_cfg["snowball_min_score"]:
                     for ent in entries:
@@ -593,8 +593,7 @@ def backtest_coin(args_tuple):
                     mp = initial_exposure * pos_mult
                     mp *= 1.0 if strong else 0.7
 
-                    safe_flag = False; eth_flag = False; bnb_flag = False
-                    short_flag = False
+                    safe_flag = False; eth_flag = False; bnb_flag = False; short_flag = False; is_trx_safe = False
                     # BTC safe mode: weak trend → isolated safe entries for both long and short
                     if btc_safe:
                         if is_sh: sc = _entry_score_v7_short(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1,ds)
@@ -608,6 +607,12 @@ def backtest_coin(args_tuple):
                         lev_entry = BEAR_SHORT_LEV; sl_entry = BEAR_SHORT_SL
                         bull_entry = False; short_flag = True; safe_flag = False
                         mp = BULL_INITIAL_SIZE  # same entry size as longs
+                    # TRX safe isolated short in BTC bear
+                    elif coin == "TRX" and not btc_bull and is_sh:
+                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        lev_entry = SAFE_LEV; sl_entry = SAFE_SL
+                        bull_entry = False; safe_flag = True; is_trx_safe = True
+                        mp = SAFE_ENTRY
                     # BNB BTC bear long: tuned isolated params
                     elif bnb_bear and not is_sh:
                         if sc < BNB_BEAR_ENTRY_SCORE: mp = 0
@@ -635,7 +640,7 @@ def backtest_coin(args_tuple):
                                     'sl': sl_entry,
                                     'bull_mode': bull_entry,
                                     'ct_mode': False, 'eth_bear': eth_flag, 'bnb_bear': bnb_bear,
-                                    'safe_mode': btc_safe, 'short_agg': short_flag,
+                                    'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
                             'snowball_stage': 0})
                         lei = idx
 
