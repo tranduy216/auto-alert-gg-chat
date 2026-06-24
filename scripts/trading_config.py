@@ -81,7 +81,7 @@ BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
-# Bounce: 3 same-sized entries, 80% TP 5→30%, peak DD 7%, 7% trailing on remaining 20%
+# Bounce: 3 same-sized entries, 80% TP 5→25%, peak DD 7%, 3% price trail on remaining
 BOUNCE_ENTRY_SIZE = 0.09
 BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]

@@ -10,7 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 
 from crypto_trading import (
-    get_snowball_size,
     _fib_cooldown_bars,
     compute_adx,
     compute_sideway_score,
@@ -20,26 +19,9 @@ from crypto_trading import (
     _coin_lev,
     _coin_sl_roi,
     _coin_trail,
-    _entry_margin,
     _coin_cap,
     get_coin_profile
 )
-
-
-class TestPositionSizing(unittest.TestCase):
-    """Test position sizing functions"""
-
-    def test_get_snowball_size_first_entry(self):
-        """First entry should return 0 (snowball starts from entry 2)"""
-        size = get_snowball_size(1, entry_score=80)
-        self.assertEqual(size, 0)  # Entry 1 is base, not snowball
-
-    def test_get_snowball_size_second_entry(self):
-        """Second entry should return snowball size"""
-        size1 = get_snowball_size(1, entry_score=80)
-        size2 = get_snowball_size(2, entry_score=80)
-        self.assertEqual(size1, 0)  # Entry 1 is base
-        self.assertGreater(size2, 0)  # Entry 2 is snowball
 
 
 class TestCooldown(unittest.TestCase):
@@ -154,12 +136,6 @@ class TestCoinProfiles(unittest.TestCase):
         trail = _coin_trail("BTC")
         self.assertGreater(trail, 0)
         self.assertLess(trail, 1)
-
-    def test_entry_margin_strong(self):
-        """Strong entry should have larger margin"""
-        margin_strong = _entry_margin("BTC", strong=True)
-        margin_weak = _entry_margin("BTC", strong=False)
-        self.assertGreater(margin_strong, margin_weak)
 
     def test_coin_cap_btc(self):
         """BTC should have reasonable cap"""
@@ -420,6 +396,51 @@ class TestTradingRules(unittest.TestCase):
         r = process_bull_exit(15, 0.15, None, 110, 100, 0, 1.0, False, 10, False)
         self.assertFalse(r['removed'])
         self.assertLess(r['rem'], 1.0)  # TP should close partial
+
+    def test_bull_exit_sl(self):
+        """Per-coin SL should close position"""
+        from scripts.trading_rules import process_bull_exit
+        r = process_bull_exit(-10, 0, None, 100, 90, 0, 1.0, False, 10, False, coin_sl=8)
+        self.assertTrue(r['removed'])
+        self.assertIn('SL', r['exits'])
+
+    def test_bull_exit_peak_dd(self):
+        """Per-coin peak DD should close position"""
+        from scripts.trading_rules import process_bull_exit
+        r = process_bull_exit(5, 0, None, 100, 90, 0, 1.0, False, 10, False, coin_peak_dd=10)
+        # peak_roi is 0 internally, roi=5, 5 - 0 = 5 < 10, so not triggered
+        self.assertFalse(r['removed'])
+
+    def test_bounce_entry_per_coin(self):
+        """Bounce entry should use per-coin lev for TRX"""
+        from scripts.trading_rules import get_entry_rule
+        mp, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="TRX")
+        self.assertEqual(lev, 2.8)  # COIN_BOUNCE_LEV for TRX
+        self.assertTrue(bf)  # bounce flag
+
+    def test_bounce_entry_default_lev(self):
+        """Bounce entry for ETH should use default 2.0 lev"""
+        from scripts.trading_rules import get_entry_rule
+        _, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="ETH")
+        self.assertEqual(lev, 2.0)
+        self.assertTrue(bf)
+
+    def test_process_bounce_exit_per_coin_peak_dd(self):
+        """Bounce exit should use per-coin peak DD"""
+        from scripts.trading_rules import process_bounce_exit
+        r = process_bounce_exit(5, 10, 1.0, 0, 5, peak_dd=3)
+        # peak_roi = max(-999, 5) = 5, roi=5, 5 - 5 = 0 < 3, no trigger
+        self.assertFalse(r['removed'])
+
+    def test_process_bounce_exit_trail_activation(self):
+        """Bounce exit should activate trail early with trail_activation param"""
+        from scripts.trading_rules import process_bounce_exit
+        # roi=15 >= trail_activation=10, trail_ready=True
+        # hi=105, tstop=max(None or 100*0.97=97, 105*0.97=101.85)=101.85
+        # cc=103 > 101.85, so no trail trigger
+        r = process_bounce_exit(15, 15, 1.0, 0, 5, hi=105, cc=103, trail_activation=10)
+        self.assertFalse(r['removed'])
+        self.assertIn('BOUNCE_TP@5%', r['exits'])  # TP fires first
 
     def test_process_safe_exit_sl(self):
         from scripts.trading_rules import process_safe_exit

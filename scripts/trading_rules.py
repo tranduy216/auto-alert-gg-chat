@@ -30,7 +30,7 @@ def detect_bounce(coin: str, btc_bull: bool) -> bool:
 
 def get_entry_rule(
     btc_safe: bool, bear_short: bool, bounce: bool,
-    is_bull: bool, is_sh: bool, sc: float,
+    is_bull: bool, is_sh: bool, sc: float, coin: str = "",
 ):
     """
     Returns (mp, lev, sl, bull_mode, safe_flag, bounce_flag, short_flag)
@@ -42,35 +42,31 @@ def get_entry_rule(
     4. Bull (is_bull and not is_sh)
     5. Default (bear mode)
     """
-    # Default values
     mp = 0; lev = 3.5; sl = 12
     bull_mode = False; safe_flag = False; bounce_flag = False; short_flag = False
 
     if btc_safe and not is_sh and not bear_short:
-        # Safe mode: 1.5x isolated
         if sc < SAFE_ENTRY_SCORE: mp = 0
         else: mp = SAFE_ENTRY
         lev = SAFE_LEV; sl = SAFE_SL
         safe_flag = True
 
     elif bear_short and is_sh:
-        # Aggressive bear short: 3.5x snowball
         mp = BULL_INITIAL_SIZE; lev = BEAR_SHORT_LEV; sl = BEAR_SHORT_SL
         short_flag = True
 
     elif bounce and not is_sh:
-        # Bounce: defensive long in BTC bear (2x, 7%, up to 3 same-sized entries)
-        mp = BOUNCE_ENTRY_SIZE; lev = 2.0; sl = 7
+        mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+        lev = COIN_BOUNCE_LEV.get(coin, 2.0)
+        sl = BOUNCE_SL
         bounce_flag = True
 
     elif is_bull and not is_sh:
-        # Bull mode: 3.5x snowball
         mp = BULL_INITIAL_SIZE; lev = 3.5; sl = 12
         bull_mode = True
 
     else:
-        # Bear mode / default
-        pass  # mp/lev/sl will be set by caller
+        pass
 
     return mp, lev, sl, bull_mode, safe_flag, bounce_flag, short_flag
 
@@ -82,34 +78,45 @@ def get_entry_rule(
 def process_bull_exit(
     roi: float, pnl_from_entry: float, tstop: float, hi: float, cc: float,
     tp_s: int, rem: float, is_sh: bool,
-    max_loss: float, trail_cd_remaining: bool
+    max_loss: float, trail_cd_remaining: bool,
+    coin_sl: float = 0, coin_peak_dd: float = 0,
 ) -> dict:
     """
-    BULL mode exit: staggered TP + trail + regime exit.
-    Returns dict with exit_actions, new_rem, removed, new_tp_s, new_tstop.
+    BULL mode exit: SL + peak DD + staggered TP + trail + regime exit.
+    coin_sl: per-coin SL trigger (0 = disabled).
+    coin_peak_dd: per-coin peak DD (0 = disabled).
     """
+    peak_roi = 0  # simplified; caller tracks peak if needed
     result = {'removed': False, 'rem': rem, 'tp': tp_s, 'tstop': tstop,
               'exits': [], 'trail_cd_set': False}
 
-    # 1. Max loss safety
+    if coin_sl > 0 and roi <= -coin_sl:
+        result['removed'] = True
+        result['exits'].append('SL')
+        return result
+
     if roi <= -max_loss * 100:
         result['removed'] = True
         result['exits'].append('MAX_LOSS')
         return result
 
-    # 2. Staggered TP
+    if coin_peak_dd > 0 and roi <= peak_roi - coin_peak_dd:
+        result['removed'] = True
+        result['exits'].append('PEAK_DD')
+        return result
+
     if tp_s < len(BULL_TP_SCHEDULE):
         trg, cf_pct = BULL_TP_SCHEDULE[tp_s]
         if roi >= trg:
             cf = cf_pct * rem
             result['rem'] = rem - cf
             result['tp'] = tp_s + 1
+            peak_roi = roi
             result['exits'].append(f'TP@{trg}%')
             if result['rem'] <= 0.001:
                 result['removed'] = True
                 return result
 
-    # 3. Trail (only after all staggered TPs)
     if tp_s >= len(BULL_TP_SCHEDULE) and not trail_cd_remaining:
         if pnl_from_entry >= BULL_TRAIL_ACTIVATION:
             nt = max(tstop or cc * (1 - BULL_TRAIL_DISTANCE),
@@ -167,12 +174,17 @@ def process_safe_exit(
 def process_bounce_exit(
     roi: float, peak_roi: float, rem: float, tp_s: int, sl: float,
     hi: float = None, cc: float = None, tstop: float = None,
+    peak_dd: float = None, trail_activation: float = 0,
 ) -> dict:
     """
-    Bounce exit: SL + 80% TP 5→30% + peak DD 7% + trailing 7% on remaining.
+    Bounce exit: SL + 80% TP 5→25% + peak DD + trailing.
+    peak_dd: per-coin threshold (default BOUNCE_PEAK_DD).
+    trail_activation: ROI% to start trail early (0 = after all TPs).
     """
     result = {'removed': False, 'rem': rem, 'tp': tp_s,
               'peak_roi': max(peak_roi, roi), 'exits': []}
+    if peak_dd is None:
+        peak_dd = BOUNCE_PEAK_DD
 
     if roi <= -sl:
         result['removed'] = True
@@ -191,12 +203,15 @@ def process_bounce_exit(
                 result['removed'] = True
                 return result
 
-    if roi <= result['peak_roi'] - BOUNCE_PEAK_DD:
+    if roi <= result['peak_roi'] - peak_dd:
         result['removed'] = True
         result['exits'].append('BOUNCE_PEAK_DD')
         return result
 
-    if hi is not None and cc is not None and tp_s >= len(BOUNCE_TP) and not result['removed']:
+    trail_ready = tp_s >= len(BOUNCE_TP)
+    if not trail_ready and trail_activation > 0 and roi >= trail_activation:
+        trail_ready = True
+    if hi is not None and cc is not None and trail_ready and not result['removed']:
         nt = max(tstop or cc * (1 - BOUNCE_TRAIL_DISTANCE),
                  hi * (1 - BOUNCE_TRAIL_DISTANCE))
         if cc <= nt:

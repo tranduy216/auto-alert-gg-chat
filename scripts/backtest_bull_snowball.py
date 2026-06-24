@@ -7,7 +7,7 @@ Strategy for BULL mode:
   - Trailing stop at 11% (activates at 40% ROI)
   - Exit on trend reversal (3D trend score <= 0)
   - BEAR mode uses standard HYBRID (unchanged)
-  - ETH/BNB/TRX bounce: 2x, SL 5.5%, per-coin TP, per-coin peak DD, no trail
+  - ETH/BNB/TRX bounce: per-coin lev, per-coin TP, per-coin peak DD, 3% price trail
 """
 
 import sys, json, argparse, hashlib
@@ -824,7 +824,7 @@ def main():
     print(f"BULL SNOWBALL BACKTEST - {', '.join(coins)}")
     if selected_years:
         print(f"(years: {sorted(selected_years)} | go to cash outside)")
-    print("(snowball entries | NO SL in bull | trailing 11% at 40% ROI | trend reversal exit | bounce: per-coin TP, peak DD)")
+    print("(snowball entries | NO SL in bull | trailing 11% at 40% ROI | trend reversal exit | bounce: per-coin TP, peak DD, trail)")
     print("=" * 80)
 
     print("\nLoading data...")

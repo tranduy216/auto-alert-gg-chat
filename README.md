@@ -1,22 +1,23 @@
-# Crypto Trading Alert System — Baseline v15
+# Crypto Trading Alert System — v15
 
-BTC ADX-safe 3-tier strategy + Bear Short Hedge. 39.1% avg CAGR.
+Double-snowball (bull + bounce) with per-coin config tuning. 41.3% avg CAGR.
 
 ## Results (2021-2025)
 
 | Coin | CAGR | Max DD | 2022 | Final |
 |------|------|--------|------|-------|
-| ETH | **+38.9%** | 45.1% | +54% | $58,235 |
-| BNB | **+42.8%** | 41.4% | -0.5% | $67,541 |
-| TRX | **+35.7%** | 36.7% | -12% | $51,391 |
-| **Avg** | **+39.1%** | **41.1%** | **+14%** | **$59,056** |
+| ETH | **+43.6%** | 39.5% | +72% | $69,651 |
+| BNB | **+42.8%** | 41.4% | -0.5% | $67,673 |
+| TRX | **+37.4%** | 33.9% | -9.8% | $54,872 |
+| **Avg** | **+41.3%** | **38.3%** | — | **$64,065** |
 
 ## Key Features
 
-- **Bear Short Hedge**: Protective ETH short during BTC bear (2x, 6% SL) — eliminated 2022 losses
-- Snowball compounding entries with staggered TP (10/20/30%) + 11% trailing stop
-- 3-mode system: Bull/Bear (ADX >= 22), Safe (ADX < 22), Bounce (BTC bear long)
-- Per-coin config tuning (TP schedules, peak DD thresholds, MA buffers)
+- **Bull snowball**: 4-stage entries (0.10 + 3×0.06) at 3.5x with staggered TP (10/20/30%) + 11% trailing
+- **Bounce snowball**: 3 same-sized entries (0.09 each) at per-coin lev (TRX 2.8x) with 80% TP 5→25% + 3% price trail
+- **Bear Short Hedge**: ETH-only 3.5x short during BTC bear (12% SL, snowball trailing)
+- **Safe mode** (backtest-only): 1.5x isolated entries on weak BTC trend (ADX < 22)
+- Per-coin peak DD, MA buffers, trail activation configs
 
 ```bash
 pip install -r requirements.txt

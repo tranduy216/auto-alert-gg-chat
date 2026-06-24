@@ -3,10 +3,10 @@
 ## Overview
 
 3-tier BTC ADX-based strategy for ETH, BNB, TRX perpetual futures on OKX.
-- **Bull/Bear (strong trend):** ADX >= 22 — normal aggressive strategy with snowball entries and trailing
-- **Safe mode (weak/choppy):** ADX < 22 — isolated entries with per-coin config (leverage, SL, TP, peak DD)
-- **Bounce mode (BTC bear):** Defensive long in BTC bear with per-coin TP schedule and peak DD
-- **Bear Short Hedge:** Protective short on ETH during BTC bear (ts <= -2) with 2x lev, 6% SL, 30% position
+- **Bull/Bear (strong trend):** ADX >= 22 — snowball entries (initial + 3 adds) at 3.5x with staggered TP (10/20/30%) + 11% trailing
+- **Safe mode (weak/choppy, backtest only):** ADX < 22 — 1.5x isolated entries with tight SL/TP/peak DD
+- **Bounce mode (BTC bear):** Defensive long in BTC bear with per-coin lev, TP 5→25%, peak DD, 3% price trail
+- **Bear Short Hedge:** Protective short on ETH during BTC bear (ts <= -2) with 3.5x lev, 12% SL, snowball trailing
 - **Position limit:** 120% of capital per coin (MAX_POS_PCT)
 - **Max open positions:** 5 concurrent
 
@@ -25,7 +25,7 @@ scripts/
 │   ├── okx_utils.py           ← OKX exchange API
 │   └── firebase_utils.py      ← State persistence
 tests/
-├── test_crypto_trading.py     ← 61 unit tests
+├── test_crypto_trading.py     ← 60 unit tests
 └── test_utils.py              ← Utility tests
 ```
 
@@ -46,14 +46,14 @@ tests/
 | `trail` | 0.11 | 0.11 | 0.11 |
 | `trail_activation` (price fraction) | 0.30 | 0.30 | 0.30 |
 | `no_sl` | True (uses max_loss) | False | False |
-| `max_loss` (ROI loss limit) | 0.05 | 0.20 | 0.12 |
+| `max_loss` (ROI loss limit) | 0.10 | 0.20 | 0.12 |
 
 ### Per-Coin Signals (`COIN_CONFIG`)
 
 | Field | ETH | BNB | TRX |
 |-------|:---:|:---:|:---:|
 | `adx_min` | 12 | 15 | 20 |
-| `snowball_min_score` | 60 | 65 | 65 |
+| `snowball_min_score` | 65 | 65 | 65 |
 | `entry_score` | 65 | 65 | 65 |
 | `ma_buffer` | 0% | 1% | 1% |
 | `bear_short` | True | False | False |
@@ -84,35 +84,27 @@ tests/
 - Applied when BTC bear AND coin ≠ ETH
 - Tightens BNB bull entries during BTC bear
 
-### Safe Mode (BTC ADX < 22) — Default Config
+### Safe Mode (BTC ADX < 22) — Default Config (backtest only)
 ```
-lev = 2.0, sl = 5.0%, entry = 4.0%
+lev = 1.5, sl = 3.3%, entry = 3.5%
 TP = [(3, 10%), (5, 20%), (8, 25%), (12, 25%), (20, 20%)]  (80% at 3-12%, max 20%)
-peak_drawdown = 4.0% (close all if ROI drops 4% from peak)
+peak_drawdown = 2.8% (close all if ROI drops 2.8% from peak)
 ma_buffer = 2% (MA50 > MA120 * 1.02)
 ```
 
-### Per-Coin Safe Mode Overrides
-
-| Coin | Lev | SL | Entry | TP | Peak DD | Entry Score |
-|------|:---:|:--:|:-----:|:--:|:-------:|:----------:|
-| BNB  | 1.5 | 7% | 3.5% | 80% at 5-12%, max 20% | 5.5% | 75 (default) |
-| TRX  | 2.0 | 7.5% | 4.0% | default | 6.0% | 78 |
-| ETH  | 2.0 | 5.0% | 4.0% | default | 3.5% | 75 (default) |
+> Note: Safe mode is implemented in the backtest only. Production `analyse_coin()` lacks BTC ADX detection and does not have safe mode. This is a known architectural gap.
 
 ### Bounce Mode (ETH/BNB/TRX — BTC bear)
 ```
-lev = 2.0, sl = 5.5%, entry = 7.0%
+lev = per-coin (default 2.0, TRX=2.8), sl = 6.5%, entry = 9.0%
+TP = [(5, 10%), (10, 20%), (15, 25%), (20, 15%), (25, 10%)]  (80% at 5→25%)
+peak_dd = per-coin (ETH=3.5, BNB=7.0, TRX=7.0)
+trail = 3% price (6% ROI at 2x), activates after all TPs or at per-coin ROI (TRX=10%)
+snowball: 3 same-sized entries (0.09 each) at +5%/+10% price levels
 ```
-Per-coin TP schedule:
-- **ETH** (default): `[(3,5%), (5,10%), (8,20%), (12,25%), (15,25%), (20,10%), (25,5%)]`
-- **BNB**: `[(5,5%), (7,10%), (10,15%), (14,20%), (18,15%), (21,15%), (25,10%)]`
-- **TRX**: same as BNB
 
-Per-coin Peak DD (`COIN_PEAK_DD`): ETH=3.5%, BNB=6.0%, TRX=6.0%
-
-### BNB Bounce MA Buffer
-`BNB_BOUNCE_MA_BUF = 0.024` — BNB bounce requires MA50 > MA120 * 1.024
+### BNB/TRX Bounce MA Buffer
+`BNB_BOUNCE_MA_BUF = 0.018`, `TRX_BOUNCE_MA_BUF = 0.018` — MA50 > MA120 * 1.018 required for bounce entry
 
 ---
 
@@ -159,7 +151,7 @@ Entry score must be ≥ `entry_score` in COIN_CONFIG. Safe mode requires ≥ `SA
 2. Staggered TP: if ROI >= 10/20/30% → close 10% each
 3. Trail: if pnl_from_entry >= 0.40 AND not in cooldown:
    - tstop = max(high * 0.89, current * 0.89)
-   - if low <= tstop: close 50% of remaining
+   - if low <= tstop: close 60% of remaining
 4. Regime exit: if coin regime flips to bear → close all
 ```
 
@@ -170,19 +162,20 @@ Entry score must be ≥ `entry_score` in COIN_CONFIG. Safe mode requires ≥ `SA
 3. Trail: after all TPs done
 ```
 
-### Safe mode exit (isolated)
+### Safe mode exit (isolated, backtest only)
 ```
-1. SL: per-coin (5% ETH, 7% BNB, 7.5% TRX) — position ROI formula
-2. Staggered TP: per-coin schedule (80% at 3-12% ETH, 80% at 5-12% BNB)
-3. Peak DD: per-coin threshold (3.5% ETH, 5.5% BNB, 6% TRX)
+1. SL: 3.3% — position ROI formula
+2. Staggered TP: 80% at 3-12%, max 20% (SAFE_TP)
+3. Peak DD: close all if ROI drops 2.8% from peak (SAFE_PEAK_DD)
 ```
 
 ### Bounce exit (defensive long in BTC bear)
 ```
-1. SL: 5.5% — position ROI formula
-2. Staggered TP: per-coin schedule
-3. Peak DD: per-coin threshold (COIN_PEAK_DD)
-4. No trailing stop
+1. SL: 6.5% — position ROI formula
+2. Staggered TP: 80% at 5→25% (shared BOUNCE_TP for all coins)
+3. Peak DD: per-coin threshold (COIN_PEAK_DD: ETH=3.5, BNB=7.0, TRX=7.0)
+4. Trailing stop: 3% price, activates after all TPs or at per-coin ROI (TRX=10%)
+5. Snowball: up to 3 same-sized (0.09) entries at +5%/+10% price levels
 ```
 
 ### Trend Reversal Exit

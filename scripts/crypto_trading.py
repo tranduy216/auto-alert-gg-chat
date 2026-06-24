@@ -78,16 +78,6 @@ except ImportError:
 # Configuration — all constants imported from trading_config.py
 # ---------------------------------------------------------------------------
 
-# Runtime-only helpers (not in trading_config)
-def get_snowball_size(entry_num: int, entry_score: float) -> float:
-    if entry_num == 2:
-        return 0.034
-    elif entry_num == 3:
-        return 0.034 if entry_score >= 65 else 0.017
-    return 0
-
-def _entry_margin(coin: str, strong: bool = True) -> float:
-    return 0.09 if strong else 0.07
 
 
 # Times (VNT) when major economic events may cause volatility — no new entries ±2h
@@ -1338,7 +1328,7 @@ def analyse_coin(
                     exit_reasons.append("Bull regime exit")
                     removed = True
 
-        # ── Bounce exit: 80% TP 5→30%, peak DD 7%, trailing 7% on remaining ──
+        # ── Bounce exit: 80% TP 5→25%, peak DD 7%, trailing 3% price on remaining ──
         elif ent.get("bounce", False):
             ent_sl = ent.get("sl_roi", sl_roi)
             peak_roi = max(ent.get("_peak_roi", -999), roi)
@@ -1350,7 +1340,7 @@ def analyse_coin(
                 exit_reasons.append(f"Bounce SL: ROI {roi:.1f}%")
                 removed = True
 
-            # Staggered TP: close 80% across ROI 5→30%
+            # Staggered TP: close 80% across ROI 5→25%
             elif tp_s < len(BOUNCE_TP):
                 trg, cf_pct = BOUNCE_TP[tp_s]
                 if roi >= trg:
@@ -1369,20 +1359,25 @@ def analyse_coin(
                 exit_reasons.append(f"Bounce peak DD: ROI dropped {bounce_peak_dd:.1f}% from peak {peak_roi:.1f}%")
                 removed = True
 
-            # Trailing stop: after all TPs, remaining 20% trails at 7% ROI
-            if not removed and tp_s >= len(BOUNCE_TP):
-                trail_cd_until = ent.get("trail_cooldown_until", 0)
-                in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
-                if not in_trail_cd:
-                    tstop = max(ent.get("trailing_stop") or last_close * (1 - BOUNCE_TRAIL_DISTANCE), hi * (1 - BOUNCE_TRAIL_DISTANCE))
-                    ent["trailing_stop"] = tstop
-                    if last_close <= tstop:
-                        cf = BOUNCE_TRAIL_CLOSE * rem
-                        total_pnl += roi * cf / 100
-                        rem -= cf; ent["remaining_size"] = rem
-                        exit_reasons.append(f"Bounce Trail: closed remaining {cf*100:.0f}%")
-                        ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=12)).isoformat()
-                        if rem <= 0.001: removed = True
+            # Trailing stop (after TPs or at per-coin trail activation ROI)
+            if not removed:
+                bounce_trail_act = COIN_BOUNCE_TRAIL_ACTIVATION.get(coin, 0)
+                trail_ready = tp_s >= len(BOUNCE_TP)
+                if not trail_ready and bounce_trail_act > 0 and roi >= bounce_trail_act:
+                    trail_ready = True
+                if trail_ready:
+                    trail_cd_until = ent.get("trail_cooldown_until", 0)
+                    in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
+                    if not in_trail_cd:
+                        tstop = max(ent.get("trailing_stop") or last_close * (1 - BOUNCE_TRAIL_DISTANCE), hi * (1 - BOUNCE_TRAIL_DISTANCE))
+                        ent["trailing_stop"] = tstop
+                        if last_close <= tstop:
+                            cf = BOUNCE_TRAIL_CLOSE * rem
+                            total_pnl += roi * cf / 100
+                            rem -= cf; ent["remaining_size"] = rem
+                            exit_reasons.append(f"Bounce Trail: closed remaining {cf*100:.0f}%")
+                            ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=12)).isoformat()
+                            if rem <= 0.001: removed = True
 
         # ── BEAR mode: standard SL + TP + trail ──
         else:
