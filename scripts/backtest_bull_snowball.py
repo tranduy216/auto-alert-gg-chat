@@ -43,7 +43,7 @@ from trading_config import (
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
-    COIN_BULL_SL, COIN_BULL_PEAK_DD,)
+    COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,)
 
 # All constants imported from trading_config.py
 
@@ -649,10 +649,11 @@ def backtest_coin(args_tuple):
                                     lei = idx; did_snowball = True
                                     trades.append({'t':'SNOWBALL','dir':'S'})
                                 break
-            # Bull snowball
+            # Bull snowball (per-coin sizing)
             if is_bull and has_l and not has_s and not (coin == "TRX" and not btc_bull):
                 sc_snow = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
                 if sc_snow >= bull_cfg["snowball_min_score"]:
+                    coin_sb_sizes = COIN_BULL_SNOWBALL_SIZES.get(coin, BULL_SNOWBALL_SIZES)
                     for ent in entries:
                         if ent.get('is_short', False): continue
                         ent_ep = ent['ep']
@@ -661,7 +662,7 @@ def backtest_coin(args_tuple):
                         if snowball_idx < len(BULL_SNOWBALL_LEVELS):
                             target = BULL_SNOWBALL_LEVELS[snowball_idx]
                             if pnl_from_last >= target:
-                                add_mp = BULL_SNOWBALL_SIZES[snowball_idx + 1] if snowball_idx + 1 < len(BULL_SNOWBALL_SIZES) else BULL_INITIAL_SIZE
+                                add_mp = coin_sb_sizes[snowball_idx + 1] if snowball_idx + 1 < len(coin_sb_sizes) else BULL_INITIAL_SIZE
                                 if dep + add_mp <= coin_max_ms + 0.001:
                                     entries.append({'ep':cc,'mp':add_mp,'tp':0,'rem':1.0,'hi':cc,
                                         'tstop':None,'is_short':False,
@@ -735,7 +736,7 @@ def backtest_coin(args_tuple):
                         lev_entry = bull_lev_use
                         sl_entry = hybrid_profile['sl']
                         bull_entry = True; ct_flag = False; eth_flag = False
-                        mp = BULL_INITIAL_SIZE
+                        mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
                     else:
                         lev_entry = hybrid_profile['lev']
                         sl_entry = hybrid_profile['sl']

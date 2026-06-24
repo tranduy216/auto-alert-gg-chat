@@ -100,6 +100,10 @@ COIN_BOUNCE_ENTRY_SIZE = {}
 COIN_BOUNCE_TRAIL_ACTIVATION = {"TRX": 10}   # per-coin trail activation ROI% for bounce (0 = after all TPs)
 COIN_MAX_MARGIN = {}
 
+# Per-coin bull sizing (default BULL_INITIAL_SIZE / BULL_SNOWBALL_SIZES)
+COIN_BULL_INITIAL_SIZE = {}
+COIN_BULL_SNOWBALL_SIZES = {}
+
 # Per-coin bull SL and peak DD (% ROI)
 COIN_BULL_SL = {}  # stop loss % for bull mode (0 = use BULL_MAX_LOSS)
 COIN_BULL_PEAK_DD = {}  # peak DD % for bull mode (0 = disabled)
