@@ -16,7 +16,7 @@ Double-snowball (bull + bounce) with per-coin config tuning. 41.3% avg CAGR.
 - **Bull snowball**: 4-stage entries (0.10 + 3×0.06) at 3.5x with staggered TP (10/20/30%) + 11% trailing
 - **Bounce snowball**: 3 same-sized entries (0.09 each) at per-coin lev (TRX 2.8x) with 80% TP 5→25% + 3% price trail
 - **Bear Short Hedge**: ETH-only 3.5x short during BTC bear (12% SL, snowball trailing)
-- **Safe mode** (backtest-only): 1.5x isolated entries on weak BTC trend (ADX < 22)
+- **Safe mode**: 1.5x isolated entries on weak BTC trend (ADX < 22) — matches backtest
 - Per-coin peak DD, MA buffers, trail activation configs
 
 ```bash

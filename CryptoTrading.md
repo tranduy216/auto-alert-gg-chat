@@ -199,8 +199,9 @@ _btc_ma200 = sma(_btc_closes, 200)[-1]
 _btc_bull = _btc_ma50 > _btc_ma200
 ```
 
-Note: Production uses MA50 vs MA200 for BTC regime. Backtest uses MA50 vs MA120.
-This is the main difference between backtest and production.
+Note: Production uses `MA50 vs MA200` for BTC bull/bear detection.
+Backtest uses `MA50 vs MA120` on daily. This is the main remaining difference.
+Everything else (bounce regime, safe mode, entry priority) now matches.
 
 ---
 

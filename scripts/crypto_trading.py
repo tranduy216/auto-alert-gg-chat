@@ -1096,6 +1096,9 @@ def analyse_coin(
     coin: str,
     candles_12h: list[dict],
     kill_switch_active: bool,
+    btc_bull: bool = True,
+    btc_safe: bool = False,
+    btc_adx: float = 50,
     active_count: int = 0,
     max_positions: int = MAX_CONCURRENT_POSITIONS,
     in_event_window: bool = False,
@@ -1587,7 +1590,7 @@ def analyse_coin(
                             break
 
         # ── Bounce snowball: up to BOUNCE_MAX_ENTRIES same-sized entries ──
-        if not _coin_bull and has_active_longs and not has_active_shorts and not snowball_added:
+        if not btc_bull and has_active_longs and not has_active_shorts and not snowball_added:
             for ent in entries:
                 if not ent.get("bounce", False) or ent.get("is_short", False): continue
                 ent_ep = ent.get("entry_price", 0)
@@ -1644,22 +1647,27 @@ def analyse_coin(
                 # Get HYBRID profile based on market regime
                 profile = get_profile(coin, _coin_bull)
                 
-                # Apply profile parameters
-                if _coin_bull and not is_sh:
-                    mp = BULL_INITIAL_SIZE  # fixed snowball entry size
-                    profile_lev = 3.5  # BULL leverage
-                    profile_sl = 12  # not used (no SL in bull)
+                # Apply profile parameters (matched to backtest priority)
+                # 1. Safe mode (BTC ADX < 22) – isolated 1.5x
+                if btc_safe and not is_sh:
+                    mp = SAFE_ENTRY
+                    profile_lev = SAFE_LEV
+                    profile_sl = SAFE_SL
+                # 2. Bull mode (per-coin bull)
+                elif _coin_bull and not is_sh:
+                    mp = BULL_INITIAL_SIZE
+                    profile_lev = 3.5
+                    profile_sl = 12
+                # 3. Bounce (BTC bear, defensive long)
                 else:
                     mp = profile["initial_exposure"] * profile["pos_mult"]
                     if strong: mp *= 1.0
                     else: mp *= 0.7
                     profile_lev = profile["lev"]
-                    profile_sl = 12 if coin == "TRX" else profile["sl"]  # TRX wider SL
+                    profile_sl = 12 if coin == "TRX" else profile["sl"]
 
-                    # Bounce: coin bear + long → defensive entry (per-coin params)
-                    is_bounce = coin in ("ETH", "BNB", "TRX") and not _coin_bull and not is_sh
+                    is_bounce = coin in ("ETH", "BNB", "TRX") and not btc_bull and not is_sh
                     if is_bounce:
-                        # BNB/TRX need MA confirmation (1.8% buffer) for bounce
                         if coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
                             is_bounce = False
                         if coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
@@ -2079,13 +2087,16 @@ def main() -> None:
     else:
         print("[crypto_trading] Kill switch not triggered.")
 
-    # BTC regime filter (MA50 vs MA120 on daily — matches backtest)
+    # BTC regime filter + ADX (matches backtest)
     _btc_closes = [c["close"] for c in btc_candles]
     _btc_ma50 = (sma(_btc_closes, 50)[-1] or _btc_closes[-1])
     _btc_ma120 = (sma(_btc_closes, 120)[-1] or _btc_closes[-1])
     _btc_bull = _btc_ma50 > _btc_ma120
+    _btc_adx = compute_adx(btc_candles, 14)
+    _btc_safe = _btc_adx < BTC_ADX_SAFE
     print(f"[crypto_trading] BTC regime: {'BULL' if _btc_bull else 'BEAR'} "
-          f"(MA50={_btc_ma50:.0f} MA120={_btc_ma120:.0f})")
+          f"(MA50={_btc_ma50:.0f} MA120={_btc_ma120:.0f}) "
+          f"ADX={_btc_adx:.0f} {'SAFE' if _btc_safe else 'AGGR'}")
 
     # Time filter: avoid economic events
     _current_hour = now_vnt.hour
@@ -2119,6 +2130,7 @@ def main() -> None:
         print(f"[crypto_trading] Analysing {coin}\u2026")
         result = analyse_coin(
             coin, candles_12h, kill_switch,
+            btc_bull=_btc_bull, btc_safe=_btc_safe, btc_adx=_btc_adx,
             active_count=_active_positions,
             in_event_window=_in_event_window,
         )
