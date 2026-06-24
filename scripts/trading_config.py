@@ -61,8 +61,9 @@ BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 # BTC bear override (only for BNB in BTC bear)
 BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
 
-# BNB bounce: MA confirmation buffer before entering
-BNB_BOUNCE_MA_BUF = 0.024   # MA50 > MA120 * 1.024
+# BNB/TRX bounce: MA confirmation buffer before entering
+BNB_BOUNCE_MA_BUF = 0.018   # 1.8%
+TRX_BOUNCE_MA_BUF = 0.018   # 1.8%
 
 # Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)
 SAFE_LEV        = 1.5
@@ -80,19 +81,31 @@ BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 
-# Bounce TP schedule: shared by ETH (default), per-coin for BNB/TRX
-BOUNCE_TP       = [(3, 0.05), (5, 0.10), (8, 0.20), (12, 0.25), (15, 0.25), (20, 0.10), (25, 0.05)]
-BOUNCE_SL       = 5.5    # stop loss %
-BOUNCE_PEAK_DD  = 5.5    # default
+# Bounce: 3 same-sized entries, 80% TP 5→30%, peak DD 7%, 7% trailing on remaining 20%
+BOUNCE_ENTRY_SIZE = 0.09
+BOUNCE_MAX_ENTRIES = 3
+BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
+BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
 
-# Per-coin peak DD (applies to both safe & bounce)
-COIN_PEAK_DD = {"ETH": 3.5, "BNB": 6.0, "TRX": 6.0}
+BOUNCE_TP  = [(5, 0.10), (10, 0.20), (15, 0.25), (20, 0.15), (25, 0.10)]
+BOUNCE_SL  = 6.5
+BOUNCE_PEAK_DD = 7.0
+BOUNCE_TRAIL_DISTANCE = 0.03   # 6% ROI at 2x = 3% price trail on remaining 20% after all TPs
+BOUNCE_TRAIL_CLOSE = 1.0
+BOUNCE_TRAIL_ACTIVATION = 0      # global (unused when per-coin active)
 
-# Per-coin bounce TP (BNB/TRX: 5%→5%, 75% in 7-21%, 10%→25%, ~10% via peak DD)
-COIN_BOUNCE_TP = {
-    "BNB": [(5, 0.05), (7, 0.10), (10, 0.15), (14, 0.20), (18, 0.15), (21, 0.15), (25, 0.10)],
-    "TRX": [(5, 0.05), (7, 0.10), (10, 0.15), (14, 0.20), (18, 0.15), (21, 0.15), (25, 0.10)],
-}
+# Per-coin bounce overrides
+COIN_BOUNCE_LEV = {"TRX": 2.8}
+COIN_BOUNCE_ENTRY_SIZE = {}
+COIN_BOUNCE_TRAIL_ACTIVATION = {"TRX": 10}   # per-coin trail activation ROI% for bounce (0 = after all TPs)
+COIN_MAX_MARGIN = {}
+
+# Per-coin bull SL and peak DD (% ROI)
+COIN_BULL_SL = {}  # stop loss % for bull mode (0 = use BULL_MAX_LOSS)
+COIN_BULL_PEAK_DD = {}  # peak DD % for bull mode (0 = disabled)
+
+# Per-coin peak DD (applies to bounce; BOUNCE_PEAK_DD used as fallback)
+COIN_PEAK_DD = {"ETH": 3.5, "BNB": 7.0, "TRX": 7.0}
 
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 65, "entry_score": 65},

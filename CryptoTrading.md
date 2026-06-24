@@ -1,10 +1,12 @@
-# Crypto Trading Strategy — Specification v13
+# Crypto Trading Strategy — Specification v15 (Bear Short Hedge)
 
 ## Overview
 
 3-tier BTC ADX-based strategy for ETH, BNB, TRX perpetual futures on OKX.
-- **Bull/Bear (strong trend):** ADX ≥ 22 — normal aggressive strategy
-- **Safe mode (weak/choppy):** ADX < 22 — isolated safe entries only
+- **Bull/Bear (strong trend):** ADX >= 22 — normal aggressive strategy with snowball entries and trailing
+- **Safe mode (weak/choppy):** ADX < 22 — isolated entries with per-coin config (leverage, SL, TP, peak DD)
+- **Bounce mode (BTC bear):** Defensive long in BTC bear with per-coin TP schedule and peak DD
+- **Bear Short Hedge:** Protective short on ETH during BTC bear (ts <= -2) with 2x lev, 6% SL, 30% position
 - **Position limit:** 120% of capital per coin (MAX_POS_PCT)
 - **Max open positions:** 5 concurrent
 
@@ -14,15 +16,16 @@
 
 ```
 scripts/
-├── trading_config.py          ← Single source of truth for ALL constants
+├── trading_config.py          ← Single source of truth for ALL constants (incl. per-coin overrides)
+├── trading_rules.py           ← Unified entry/exit logic (detect_bounce, get_entry_rule, process_*_exit)
 ├── backtest_bull_snowball.py  ← Backtest engine (precomputed indicators, ~27s)
-├── crypto_trading.py          ← Live production (same logic)
+├── crypto_trading.py          ← Live production (same logic + OKX integration)
 ├── utils/
 │   ├── discord_webhook.py     ← Discord notifications
 │   ├── okx_utils.py           ← OKX exchange API
 │   └── firebase_utils.py      ← State persistence
 tests/
-├── test_crypto_trading.py     ← 57 unit tests
+├── test_crypto_trading.py     ← 61 unit tests
 └── test_utils.py              ← Utility tests
 ```
 
@@ -81,25 +84,58 @@ tests/
 - Applied when BTC bear AND coin ≠ ETH
 - Tightens BNB bull entries during BTC bear
 
-### Safe Mode (BTC ADX < 22)
+### Safe Mode (BTC ADX < 22) — Default Config
 ```
-lev = 1.5, sl = 3.3%, entry = 3.5%, trail = none
-TP = [(3, 0.07), (7, 0.13), (20, 0.30), (25, 0.25), (30, 0.25)]  (sum=100%)
-peak_drawdown = 5% (close all if ROI drops 5% from peak)
-ma_buffer = 2%
+lev = 2.0, sl = 5.0%, entry = 4.0%
+TP = [(3, 10%), (5, 20%), (8, 25%), (12, 25%), (20, 20%)]  (80% at 3-12%, max 20%)
+peak_drawdown = 4.0% (close all if ROI drops 4% from peak)
+ma_buffer = 2% (MA50 > MA120 * 1.02)
 ```
+
+### Per-Coin Safe Mode Overrides
+
+| Coin | Lev | SL | Entry | TP | Peak DD | Entry Score |
+|------|:---:|:--:|:-----:|:--:|:-------:|:----------:|
+| BNB  | 1.5 | 7% | 3.5% | 80% at 5-12%, max 20% | 5.5% | 75 (default) |
+| TRX  | 2.0 | 7.5% | 4.0% | default | 6.0% | 78 |
+| ETH  | 2.0 | 5.0% | 4.0% | default | 3.5% | 75 (default) |
+
+### Bounce Mode (ETH/BNB/TRX — BTC bear)
+```
+lev = 2.0, sl = 5.5%, entry = 7.0%
+```
+Per-coin TP schedule:
+- **ETH** (default): `[(3,5%), (5,10%), (8,20%), (12,25%), (15,25%), (20,10%), (25,5%)]`
+- **BNB**: `[(5,5%), (7,10%), (10,15%), (14,20%), (18,15%), (21,15%), (25,10%)]`
+- **TRX**: same as BNB
+
+Per-coin Peak DD (`COIN_PEAK_DD`): ETH=3.5%, BNB=6.0%, TRX=6.0%
+
+### BNB Bounce MA Buffer
+`BNB_BOUNCE_MA_BUF = 0.024` — BNB bounce requires MA50 > MA120 * 1.024
+
+---
+
+## ROI Formula
+
+### Isolated mode (safe, bounce entries)
+`roi = price_change% × leverage` — position-level ROI, used for SL/TP/peak DD checks.
+
+### Non-isolated mode (bull, bear entries)
+`roi = price_change% × position_pct × coin_cap × leverage / BASE` — equity-level ROI (legacy formula).
 
 ---
 
 ## Entry Logic (Backtest → Production)
 
 ### Entry Priority (evaluated in order)
-1. **Safe mode** (`btc_safe`): 1.5x, 3.5% entry, SL 3.3%, SAFE TP
-2. **Bear short** (`bear_short`): 3.5x, BULL_INITIAL_SIZE, same as BULL for shorts
-3. **BNB bear** (`bnb_bear`): SAFE isolated params
-4. **ETH bear** (`eth_bear`): 2x, 7% SL, entry 0.07
-5. **Bull** (`_coin_bull`): 3.5x, snowball, staggered TP, trail
-6. **Bear (default)**: PROFILE_BEAR or PROFILE_BULL
+1. **Safe mode** (`btc_safe`): per-coin config (lev/SL/entry/TP/peak DD), score >= per-coin threshold
+2. **Bear short** (`bear_short`): 3.5x, BULL_INITIAL_SIZE, snowball + trail like longs (ETH only, BTC strong bear)
+3. **Bear Short Hedge**: 2x, 6% SL, 30% position (ETH only, BTC bear, ts <= -2) — protective hedge against drawdowns
+4. **TRX safe short**: 2x, SL 7.5%, entry 4%, TRX only in BTC bear
+5. **Bounce** (`bounce`): 2x, SL 5.5%, per-coin TP schedule, peak DD, no trailing
+6. **Bull** (`is_bull`): 3.5x, snowball, staggered TP, trail
+7. **Bear (default)**: PROFILE_BEAR or PROFILE_BULL
 
 ### Entry Signal: `_entry_score_v7_long/short()`
 ```
@@ -111,7 +147,7 @@ Components (0-100 scale):
 - Volume composite: 12 pts  
 - RSI neutral zone: 8 pts
 ```
-Entry score must be ≥ `entry_score` in COIN_CONFIG.
+Entry score must be ≥ `entry_score` in COIN_CONFIG. Safe mode requires ≥ `SAFE_ENTRY_SCORE` (75 default, 78 for TRX).
 
 ---
 
@@ -134,24 +170,24 @@ Entry score must be ≥ `entry_score` in COIN_CONFIG.
 3. Trail: after all TPs done
 ```
 
-### ETH bear exit
+### Safe mode exit (isolated)
 ```
-1. SL: 7% ROI
-2. TP: 50% at 40% ROI
-3. Trail: 7% from highest price
+1. SL: per-coin (5% ETH, 7% BNB, 7.5% TRX) — position ROI formula
+2. Staggered TP: per-coin schedule (80% at 3-12% ETH, 80% at 5-12% BNB)
+3. Peak DD: per-coin threshold (3.5% ETH, 5.5% BNB, 6% TRX)
 ```
 
-### Safe / BNB bear exit
+### Bounce exit (defensive long in BTC bear)
 ```
-1. SL: 3.3% ROI
-2. Staggered TP: 3/7/20/25/30% sum=100%
-3. Peak DD: close all if ROI drops 5% from peak
+1. SL: 5.5% — position ROI formula
+2. Staggered TP: per-coin schedule
+3. Peak DD: per-coin threshold (COIN_PEAK_DD)
+4. No trailing stop
 ```
 
 ### Trend Reversal Exit
-- Here `trend_score` uses `evaluate_trend_3d(mf, mm, ms)`:
-  - Short: close if ts >= 2 (bullish reversal)
-  - Long: close if ts <= -2 (bearish reversal)
+- Short: close if ts >= 2 (bullish reversal)
+- Long: close if ts <= -2 (bearish reversal)
 
 ---
 
@@ -163,7 +199,7 @@ btc_bull = sma(btc_close, 50) > sma(btc_close, 120)
 btc_safe = compute_adx(btc_data, 14) < BTC_ADX_SAFE  # 22
 ```
 
-Production (main):
+Production:
 ```python
 _btc_ma50 = sma(_btc_closes, 50)[-1]
 _btc_ma200 = sma(_btc_closes, 200)[-1]
@@ -175,59 +211,38 @@ This is the main difference between backtest and production.
 
 ---
 
-## Backtest Precomputation (Speed Optimization)
+## Performance (2021–2025, v15 baseline)
 
-The backtest precomputes ALL indicators once before the main loop, making it O(n) instead of O(n²):
-
-```python
-# Precompute before loop (runs once)
-pre12 = {p: sma(closes_12h, p) for p in [18,37,30,14,20,400,50,120,40]}
-pre_rsi = [compute_rsi(closes_12h[:i+1], 28) for i in range(28, n)]
-pre_adx = [compute_adx(da[:i+1], 28) for i in range(29, n)]
-pre_sw  = [compute_sideway_score(da[:i+1], SF) for i in range(1, n)]
-
-# In loop (O(1) lookup):
-mf = pre24[TMA_F][idx//2] or ct_c[idx//2]
-ef = pre12[18][idx] or closes_12h[idx]
-rsi1 = pre_rsi[idx]
-adx_val = pre_adx[idx]
-```
-
-This gives 2.5x speedup (68s → 27s for 3 coins).
-
----
-
-## Performance (2021–2025)
+### Yearly ROI
 
 | Year | ETH | BNB | TRX | Avg |
 |------|----:|----:|----:|----:|
-| 2021 | +151% | +192% | +205% | +183% |
-| 2022 | +4% | -0.5% | -10% | -2% |
-| 2023 | +27% | +5% | +28% | +20% |
-| 2024 | +53% | +95% | +69% | +72% |
-| 2025 | +10% | +27% | +10% | +16% |
-| **CAGR** | **+38.2%** | **+43.8%** | **+41.1%** | **+41.0%** |
+| 2021 | +159% | +193% | +212% | +188% |
+| 2022 | +54% | -0.5% | -12% | +14% |
+| 2023 | +9% | +5% | +24% | +13% |
+| 2024 | +15% | +88% | +37% | +47% |
+| 2025 | -2% | +28% | +12% | +13% |
 
-| Coin | Max DD | Final ($10K→) |
-|------|:------:|:-------------:|
-| ETH | 47.1% | $55,897 |
-| BNB | 41.1% | $76,194 |
-| TRX | 40.0% | $65,739 |
-| **Avg** | **42.7%** | **$65,943** |
+### Final Equity ($10K ->)
 
----
+| Coin | CAGR | Final | Max DD | SL Rate |
+|------|-----:|:----:|:------:|:------:|
+| ETH  | +38.9% | $58,235 | 45.1% | 2.0% |
+| BNB  | +42.8% | $67,541 | 41.4% | 2.6% |
+| TRX  | +35.7% | $51,391 | 36.7% | 5.1% |
+| **Avg** | **+39.1%** | **$59,056** | **41.1%** | **3.3%** |
 
-## Edge Cases & Limitations
+### Per-Mode Stats
 
-1. **ADX threshold whipsaw (12% of bars):** When BTC ADX oscillates near 22, strategy flips between safe and aggressive mode frequently. Managed by min bar threshold.
-
-2. **Safe mode dominance (42% of BTC bars):** Conservative mode half the time limits upside in strong trends. Acceptable tradeoff for crash protection.
-
-3. **TRX 2022: -9.2%** — no shorts, no counter-trend longs. TRX sits in cash during BTC bear, missing bounces. But this beats holding (-28%) and counter-trend approaches (-35% to -57%).
-
-4. **ETH max_loss 5%:** Very tight. With 3.5x, 1.4% price drop = stop. This prevents ETH from snowballing in volatile conditions but also caps profits.
-
-5. **Production vs Backtest gap:** Production doesn't have ETH bear mode, safe mode, or BNB bear exit modes. Only the BULL staggered TP + trail is aligned. The backtest's extra modes simulate better protection but aren't live.
+| Mode | ETH | BNB | TRX |
+|------|:---:|:---:|:---:|
+| Safe entries | 33 | 23 | 44 |
+| Safe SL rate | 39.4% | 65.2% | 36.4% |
+| Safe TP rate | 142.4% | 56.5% | 202.3% |
+| Bounce entries | 20 | — | 17 |
+| Bounce SL rate | 75.0% | — | 29.4% |
+| Bull entries | 22 | 32 | 26 |
+| Bear entries | 17 | 19 | 5 |
 
 ---
 
@@ -237,7 +252,7 @@ This gives 2.5x speedup (68s → 27s for 3 coins).
 # Install
 pip install -r requirements.txt
 
-# Test (57/57)
+# Test (61/61)
 python3 -m unittest tests.test_crypto_trading tests.test_utils -v
 
 # Backtest (3 coins, full 5 years, ~27s)

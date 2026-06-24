@@ -54,8 +54,10 @@ from trading_config import (  # centralized config
     SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
-    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD,
-    COIN_PEAK_DD, COIN_BOUNCE_TP,
+    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES,
+    BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
+    COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD,
 )
 
@@ -1336,11 +1338,9 @@ def analyse_coin(
                     exit_reasons.append("Bull regime exit")
                     removed = True
 
-        # ── Bounce exit: per-coin TP, peak DD, no trailing ──
+        # ── Bounce exit: 80% TP 5→30%, peak DD 7%, trailing 7% on remaining ──
         elif ent.get("bounce", False):
             ent_sl = ent.get("sl_roi", sl_roi)
-            bounce_tp = COIN_BOUNCE_TP.get(coin, BOUNCE_TP)
-            bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
             peak_roi = max(ent.get("_peak_roi", -999), roi)
             ent["_peak_roi"] = peak_roi
 
@@ -1350,9 +1350,9 @@ def analyse_coin(
                 exit_reasons.append(f"Bounce SL: ROI {roi:.1f}%")
                 removed = True
 
-            # Per-coin staggered TP
-            elif tp_s < len(bounce_tp):
-                trg, cf_pct = bounce_tp[tp_s]
+            # Staggered TP: close 80% across ROI 5→30%
+            elif tp_s < len(BOUNCE_TP):
+                trg, cf_pct = BOUNCE_TP[tp_s]
                 if roi >= trg:
                     cf = cf_pct * rem
                     total_pnl += roi * cf / 100
@@ -1362,11 +1362,27 @@ def analyse_coin(
                     exit_reasons.append(f"Bounce TP@{trg}%: ROI {roi:.1f}%")
                     if rem <= 0.001: removed = True
 
-            # Peak DD (close remaining if ROI drops from peak)
+            # Peak DD (per-coin)
+            bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
             if not removed and roi <= peak_roi - bounce_peak_dd:
                 total_pnl += roi * rem / 100
                 exit_reasons.append(f"Bounce peak DD: ROI dropped {bounce_peak_dd:.1f}% from peak {peak_roi:.1f}%")
                 removed = True
+
+            # Trailing stop: after all TPs, remaining 20% trails at 7% ROI
+            if not removed and tp_s >= len(BOUNCE_TP):
+                trail_cd_until = ent.get("trail_cooldown_until", 0)
+                in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
+                if not in_trail_cd:
+                    tstop = max(ent.get("trailing_stop") or last_close * (1 - BOUNCE_TRAIL_DISTANCE), hi * (1 - BOUNCE_TRAIL_DISTANCE))
+                    ent["trailing_stop"] = tstop
+                    if last_close <= tstop:
+                        cf = BOUNCE_TRAIL_CLOSE * rem
+                        total_pnl += roi * cf / 100
+                        rem -= cf; ent["remaining_size"] = rem
+                        exit_reasons.append(f"Bounce Trail: closed remaining {cf*100:.0f}%")
+                        ent["trail_cooldown_until"] = (_now_vnt() + timedelta(hours=12)).isoformat()
+                        if rem <= 0.001: removed = True
 
         # ── BEAR mode: standard SL + TP + trail ──
         else:
@@ -1575,6 +1591,39 @@ def analyse_coin(
                                 snowball_added = True
                             break
 
+        # ── Bounce snowball: up to BOUNCE_MAX_ENTRIES same-sized entries ──
+        if not _coin_bull and has_active_longs and not has_active_shorts and not snowball_added:
+            for ent in entries:
+                if not ent.get("bounce", False) or ent.get("is_short", False): continue
+                ent_ep = ent.get("entry_price", 0)
+                if ent_ep <= 0: continue
+                pnl_from_last = (last_close - ent_ep) / ent_ep
+                sb_stage = ent.get("snowball_stage", 0)
+                total_bounce = sum(1 for e in entries if e.get("bounce", False))
+                if total_bounce >= BOUNCE_MAX_ENTRIES: break
+                if sb_stage < len(BOUNCE_SNOWBALL_LEVELS):
+                    if pnl_from_last >= BOUNCE_SNOWBALL_LEVELS[sb_stage]:
+                        add_mp = BOUNCE_SNOWBALL_SIZES[sb_stage + 1] if sb_stage + 1 < len(BOUNCE_SNOWBALL_SIZES) else BOUNCE_ENTRY_SIZE
+                        if deployed + add_mp <= max_margin_pct + 0.001:
+                            entries.append({
+                                "entry_price": last_close,
+                                "margin_pct": add_mp,
+                                "is_short": False,
+                                "tp_stage": 0,
+                                "remaining_size": 1.0,
+                                "highest_since_entry": last_close,
+                                "trailing_stop": None,
+                                "lev": COIN_BOUNCE_LEV.get(coin, 2.0),
+                                "sl_roi": BOUNCE_SL,
+                                "bounce": True,
+                                "snowball_stage": sb_stage + 1,
+                                "is_snowball": True,
+                            })
+                            entry_action = "ADD_LONG_SNOWBALL"
+                            last_entry_ts = now_ts
+                            snowball_added = True
+                        break
+
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             is_sh = act.startswith("OPEN_SHORT")
@@ -1612,12 +1661,18 @@ def analyse_coin(
                     profile_lev = profile["lev"]
                     profile_sl = 12 if coin == "TRX" else profile["sl"]  # TRX wider SL
 
-                    # Bounce: coin bear + long → defensive entry (2x, fixed TP, peak DD)
+                    # Bounce: coin bear + long → defensive entry (per-coin params)
                     is_bounce = coin in ("ETH", "BNB", "TRX") and not _coin_bull and not is_sh
                     if is_bounce:
-                        profile_lev = 2.0
+                        # BNB/TRX need MA confirmation (1.8% buffer) for bounce
+                        if coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
+                            is_bounce = False
+                        if coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
+                            is_bounce = False
+                    if is_bounce:
+                        profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)
                         profile_sl = BOUNCE_SL
-                        mp = 0.10 * 0.70  # 7% entry
+                        mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
 
                 if deployed + mp <= max_margin_pct + 0.001:
                     entries.append({
@@ -1631,6 +1686,7 @@ def analyse_coin(
                         "lev": profile_lev,
                         "sl_roi": profile_sl,
                         "bounce": is_bounce if not is_sh else False,
+                        "snowball_stage": 0,
                     })
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts

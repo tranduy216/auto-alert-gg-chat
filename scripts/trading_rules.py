@@ -59,8 +59,8 @@ def get_entry_rule(
         short_flag = True
 
     elif bounce and not is_sh:
-        # Bounce: defensive long in BTC bear (2x, fixed TP, peak DD)
-        mp = 0.10 * 0.70; lev = 2.0; sl = 7
+        # Bounce: defensive long in BTC bear (2x, 7%, up to 3 same-sized entries)
+        mp = BOUNCE_ENTRY_SIZE; lev = 2.0; sl = 7
         bounce_flag = True
 
     elif is_bull and not is_sh:
@@ -166,17 +166,11 @@ def process_safe_exit(
 
 def process_bounce_exit(
     roi: float, peak_roi: float, rem: float, tp_s: int, sl: float,
-    tp_schedule: list = None, peak_dd: float = None,
+    hi: float = None, cc: float = None, tstop: float = None,
 ) -> dict:
     """
-    Bounce exit: SL + per-coin staggered TP + per-coin peak DD, no trail.
-    Uses COIN_BOUNCE_TP / COIN_PEAK_DD per coin if available.
+    Bounce exit: SL + 80% TP 5→30% + peak DD 7% + trailing 7% on remaining.
     """
-    if tp_schedule is None:
-        tp_schedule = BOUNCE_TP
-    if peak_dd is None:
-        peak_dd = BOUNCE_PEAK_DD
-
     result = {'removed': False, 'rem': rem, 'tp': tp_s,
               'peak_roi': max(peak_roi, roi), 'exits': []}
 
@@ -185,9 +179,8 @@ def process_bounce_exit(
         result['exits'].append('SL')
         return result
 
-    # Staggered TP
-    if tp_s < len(tp_schedule):
-        trg, cf_pct = tp_schedule[tp_s]
+    if tp_s < len(BOUNCE_TP):
+        trg, cf_pct = BOUNCE_TP[tp_s]
         if roi >= trg:
             cf = cf_pct * rem
             result['rem'] = rem - cf
@@ -198,9 +191,16 @@ def process_bounce_exit(
                 result['removed'] = True
                 return result
 
-    # Peak DD: close remaining if roi drops from peak
-    if roi <= result['peak_roi'] - peak_dd:
+    if roi <= result['peak_roi'] - BOUNCE_PEAK_DD:
         result['removed'] = True
         result['exits'].append('BOUNCE_PEAK_DD')
+        return result
+
+    if hi is not None and cc is not None and tp_s >= len(BOUNCE_TP) and not result['removed']:
+        nt = max(tstop or cc * (1 - BOUNCE_TRAIL_DISTANCE),
+                 hi * (1 - BOUNCE_TRAIL_DISTANCE))
+        if cc <= nt:
+            result['removed'] = True
+            result['exits'].append('BOUNCE_TRAIL')
 
     return result

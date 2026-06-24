@@ -290,8 +290,9 @@ class TestSafeMode(unittest.TestCase):
         self.assertLess(total, 0.4)  # 30% total before trail
 
     def test_bnb_bounce_constants(self):
-        from trading_config import BNB_BOUNCE_MA_BUF
+        from trading_config import BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF
         self.assertGreater(BNB_BOUNCE_MA_BUF, 0)
+        self.assertGreater(TRX_BOUNCE_MA_BUF, 0)
 
     def test_bear_short_constants(self):
         from trading_config import BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL
