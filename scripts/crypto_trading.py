@@ -1531,6 +1531,9 @@ def analyse_coin(
     # No shorts in BTC bull (matches backtest)
     if btc_bull:
         can_enter_short = False
+    # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
+    if can_enter_short and not btc_bull and btc_safe:
+        can_enter_short = False
 
     # Short entry regime restriction (matches backtest)
     if can_enter_short and not is_sh:
@@ -1540,9 +1543,6 @@ def analyse_coin(
 
     # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
     if coin == "BNB" and not btc_bull and _coin_bull:
-        can_enter_long = False
-    # Strong bear: no longs at all
-    if can_enter_long and not btc_bull:
         can_enter_long = False
 
     if can_enter_long or can_enter_short:
@@ -1686,14 +1686,14 @@ def analyse_coin(
                 elif not btc_bull and not is_sh:
                     is_bounce = coin in ("ETH", "BNB", "TRX")
                     if is_bounce:
-                        if coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
+                        if not btc_safe:
+                            is_bounce = False  # no bounce in strong bear
+                        elif coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
                             is_bounce = False
-                        if coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
+                        elif coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
                             is_bounce = False
                     if is_bounce:
                         bounce_min_sc = BOUNCE_MIN_SCORE
-                        if not btc_bull and btc_adx >= BTC_ADX_SAFE:
-                            bounce_min_sc = 90
                         if sc < bounce_min_sc: mp = 0
                         else:
                             profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)

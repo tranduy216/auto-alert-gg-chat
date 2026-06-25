@@ -600,11 +600,14 @@ def backtest_coin(args_tuple):
         # No shorts in BTC bull (counter-trend shorts are too risky)
         if btc_bull:
             can_s = False
+        # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
+        if can_s and not btc_bull and btc_safe:
+            can_s = False
         # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
         if coin == "BNB" and not btc_bull and is_bull:
             can_l = False
-        # Strong bear: no longs at all
-        if can_l and not btc_bull:
+        # Block bounce long in strong bear (BTC bear + ADX >= 22)
+        if can_l and bounce and not btc_safe:
             can_l = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
         if can_l and btc_safe and not bounce and not bear_short:
@@ -735,10 +738,6 @@ def backtest_coin(args_tuple):
                     # Bounce: defensive long in BTC bear (2.5x, really strong signal req)
                     elif bounce and not is_sh:
                         bounce_min_sc = BOUNCE_MIN_SCORE
-                        # Tighten bounce score in strong bear (BTC bear + ADX >= 22)
-                        btc_adx_v = btc_adx[idx] if idx < len(btc_adx) and btc_adx[idx] is not None else 50
-                        if not btc_bull and btc_adx_v >= BTC_ADX_SAFE:
-                            bounce_min_sc = 90
                         if sc < bounce_min_sc: mp = 0
                         else:
                             lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
