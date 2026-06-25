@@ -39,6 +39,7 @@ from trading_config import (
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
+    WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_SCORE, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD,
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION,
 
@@ -347,10 +348,10 @@ def backtest_coin(args_tuple):
                 if cc < hi: hi = cc; ent['hi'] = hi
             rm = False
 
-            # Safe mode: SL, staggered TP, peak DD
+            # Safe mode: SL, staggered TP, peak DD (supports entry overrides)
             if ent.get('safe_mode', False):
-                tp_schedule = SAFE_TP
-                dd_threshold = COIN_PEAK_DD.get(coin, SAFE_PEAK_DD)
+                tp_schedule = ent.get('_tp_s', SAFE_TP)
+                dd_threshold = ent.get('_dd_t', COIN_PEAK_DD.get(coin, SAFE_PEAK_DD))
                 peak_roi = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_roi
                 if raw_roi <= -ent_sl:
@@ -708,15 +709,19 @@ def backtest_coin(args_tuple):
                     mp *= 1.0 if strong else 0.7
 
                     safe_flag = False; eth_flag = False; bnb_flag = False; short_flag = False; is_trx_safe = False
-                    # BTC safe mode: weak trend → isolated safe entries for both long and short
-                    if btc_safe:
+                    # BTC weak trend: safe long OR weak short
+                    if btc_safe and not is_sh:
                         if is_sh: sc = _entry_score_v7_short(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1,ds)
                         else: sc = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
                         if sc < SAFE_ENTRY_SCORE: mp = 0
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True
                         mp = SAFE_ENTRY
-                    # Aggressive bear short: snowball + trail like longs
+                    # Weak short: isolated 1.5x short in choppy trend (BTC ADX < 22)
+                    elif btc_safe and is_sh:
+                        lev_entry = WEAK_SHORT_LEV; sl_entry = WEAK_SHORT_SL
+                        bull_entry = False; safe_flag = True; short_flag = True
+                        mp = WEAK_SHORT_ENTRY
                     elif bear_short and is_sh:
                         lev_entry = BEAR_SHORT_LEV; sl_entry = BEAR_SHORT_SL
                         bull_entry = False; short_flag = True; safe_flag = False
@@ -743,14 +748,18 @@ def backtest_coin(args_tuple):
                         bull_entry = False; ct_flag = False; eth_flag = False
 
                     if mp > 0 and dep + mp <= coin_max_ms + 0.001:
-                        entries.append({'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
+                        entry = {'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
                             'tstop':None,'is_short':is_sh,
                                     'lev': lev_entry,
                                     'sl': sl_entry,
                                     'bull_mode': bull_entry,
                                     'ct_mode': False, 'bounce': bounce,
                                     'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
-                            'snowball_stage': 0})
+                            'snowball_stage': 0}
+                        if short_flag and btc_safe:
+                            entry['_tp_s'] = WEAK_SHORT_TP
+                            entry['_dd_t'] = WEAK_SHORT_PEAK_DD
+                        entries.append(entry)
                         lei = idx
 
         # --- Equity tracking ---

@@ -82,6 +82,14 @@ BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 BEAR_SHORT_MAX_LOSS = 0.10    # 10% ROI loss limit
 
+# Weak short: isolated 1.5x for choppy/weak trend (BTC ADX < 22)
+WEAK_SHORT_LEV      = 1.5
+WEAK_SHORT_SL       = 3.3
+WEAK_SHORT_ENTRY    = 0.035   # 3.5% equity per entry
+WEAK_SHORT_SCORE    = 1       # any signal fires
+WEAK_SHORT_TP       = [(3, 0.10), (5, 0.20), (8, 0.25), (12, 0.25), (15, 0.20)]  # 80% at 3-15%
+WEAK_SHORT_PEAK_DD  = 3.0     # close remaining if profit drops 3% from peak
+
 # Bounce: 3 same-sized entries, 80% TP 5→25%, peak DD 7%, 3% price trail on remaining
 BOUNCE_ENTRY_SIZE = 0.09
 BOUNCE_MAX_ENTRIES = 3

@@ -60,6 +60,7 @@ from trading_config import (  # centralized config
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
+    WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_SCORE, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD,
     BTC_BEAR_OVERRIDE,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,
 )
@@ -1660,12 +1661,17 @@ def analyse_coin(
                 profile = get_profile(coin, _coin_bull)
                 
                 # Apply profile parameters (matched to backtest priority)
-                # 1. Safe mode (BTC ADX < 22) – isolated 1.5x
+                # 1. Safe mode (BTC ADX < 22) – isolated 1.5x long
                 if btc_safe and not is_sh:
                     if sc < SAFE_ENTRY_SCORE: mp = 0
                     else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
+                # 1b. Weak short (BTC ADX < 22) – isolated 1.5x short
+                elif btc_safe and is_sh:
+                    mp = WEAK_SHORT_ENTRY
+                    profile_lev = WEAK_SHORT_LEV
+                    profile_sl = WEAK_SHORT_SL
                 # 2. Bear short (aggressive ETH short)
                 elif cfg.get("bear_short", False) and is_sh:
                     mp = BULL_INITIAL_SIZE
