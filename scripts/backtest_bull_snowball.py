@@ -599,6 +599,9 @@ def backtest_coin(args_tuple):
         # No shorts in BTC bull (counter-trend shorts are too risky)
         if btc_bull:
             can_s = False
+        # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
+        if coin == "BNB" and not btc_bull and is_bull:
+            can_l = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
         if can_l and btc_safe and not bounce and not bear_short:
             if ma50_pc <= ma120_pc * (1 + SAFE_MA_BUF):

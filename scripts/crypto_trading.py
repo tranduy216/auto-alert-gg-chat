@@ -1534,9 +1534,13 @@ def analyse_coin(
 
     # Short entry regime restriction (matches backtest)
     if can_enter_short and not is_sh:
-        allow_short = coin in SHORT_ALLOWED and (cfg.get("bear_short", False) or _coin_bull or (coin == "TRX" and not btc_bull))
+        allow_short = coin in SHORT_ALLOWED and ((cfg.get("bear_short", False) and not _coin_bull) or _coin_bull or (coin == "TRX" and not btc_bull))
         if not allow_short:
             can_enter_short = False
+
+    # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
+    if coin == "BNB" and not btc_bull and _coin_bull:
+        can_enter_long = False
 
     if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
