@@ -665,9 +665,6 @@ def backtest_coin(args_tuple):
         # No shorts in BTC bull (counter-trend shorts are too risky)
         if btc_bull:
             can_s = False
-        # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
-        if can_s and not btc_bull and btc_safe:
-            can_s = False
         # Block bull mode when BTC is bear (false signals in bear market)
         if can_l and is_bull and not btc_bull:
             can_l = False
@@ -796,7 +793,7 @@ def backtest_coin(args_tuple):
                         mp = SAFE_ENTRY
                     # Safe short: isolated 1.5x short in BTC bear (any ADX)
                     elif not btc_bull and is_sh:
-                        lev_entry = SAFE_SHORT_LEV; sl_entry = SAFE_SHORT_SL
+                        lev_entry = SAFE_SHORT_LEV; sl_entry = 99 if btc_safe else SAFE_SHORT_SL
                         bull_entry = False; safe_flag = True; short_flag = True
                         mp = SAFE_SHORT_ENTRY
                     # TRX safe isolated short in BTC bear
@@ -830,7 +827,7 @@ def backtest_coin(args_tuple):
 
                     # Mode-specific entry limit: bounce bear & safe long capped at 3
                     mode_max = MAX_ENTRIES_PER_COIN
-                    if (bounce and btc_safe) or (safe_flag and not short_flag and not is_sh):
+                    if (bounce and btc_safe) or (safe_flag and not short_flag and not is_sh) or (short_flag and btc_safe and is_sh):
                         mode_max = 4
                     if mp > 0 and len(entries) < mode_max and dep + mp <= coin_max_ms + 0.001:
                         entry = {'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
@@ -854,6 +851,8 @@ def backtest_coin(args_tuple):
                         lei = idx
                         if bounce and btc_safe:
                             cd_l_until = idx + BOUNCE_CD_BEAR
+                        if short_flag and btc_safe and is_sh:
+                            cd_s_until = idx + BOUNCE_CD_BEAR
 
         # --- Equity tracking ---
         ureal = 0

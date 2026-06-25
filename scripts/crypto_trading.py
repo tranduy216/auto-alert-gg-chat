@@ -1537,9 +1537,6 @@ def analyse_coin(
     # No shorts in BTC bull (matches backtest)
     if btc_bull:
         can_enter_short = False
-    # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
-    if can_enter_short and not btc_bull and btc_safe:
-        can_enter_short = False
 
     # Short entry regime restriction (matches backtest)
     if can_enter_short and not is_sh:
@@ -1692,7 +1689,7 @@ def analyse_coin(
                 elif not btc_bull and is_sh:
                     mp = SAFE_SHORT_ENTRY
                     profile_lev = SAFE_SHORT_LEV
-                    profile_sl = SAFE_SHORT_SL
+                    profile_sl = 99 if btc_safe else SAFE_SHORT_SL
                 # 2. TRX safe short in BTC bear
                 elif coin == "TRX" and not btc_bull and is_sh:
                     mp = SAFE_ENTRY
@@ -1730,7 +1727,7 @@ def analyse_coin(
 
                     # Mode-specific entry limit: bounce & safe long capped at 3
                     mode_max = MAX_ENTRIES_PER_COIN
-                    if is_bounce or is_safe_long:
+                    if is_bounce or is_safe_long or (is_sh and btc_safe):
                         mode_max = 4
                     if deployed + mp <= max_margin_pct + 0.001 and len(entries) < mode_max:
                         entry = {
@@ -1752,11 +1749,16 @@ def analyse_coin(
                             entry["_trail_dist"] = BOUNCE_TRAIL_DISTANCE_CHOPPY
                             entry["_trail_close"] = BOUNCE_TRAIL_CLOSE_CHOPPY
                             entry["_trail_act"] = BOUNCE_TRAIL_ACTIVATION_CHOPPY
+                        if is_sh and btc_safe:
+                            entry["_tp_s"] = SAFE_SHORT_TP
+                            entry["_dd_t"] = SAFE_SHORT_PEAK_DD
                     entries.append(entry)
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
                     if entry.get("bounce", False):
                         cd_l_until = (_now_vnt() + timedelta(hours=BOUNCE_CD_BEAR * 6)).isoformat()
+                    if entry.get("is_short", False) and btc_safe:
+                        cd_s_until = (_now_vnt() + timedelta(hours=BOUNCE_CD_BEAR * 6)).isoformat()
 
     # Determine overall action
     if exit_reasons:
