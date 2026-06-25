@@ -1,8 +1,8 @@
 """
 Simple Bull Market Long Engine
-- BTC Bull: Close > MA (test 200/180/150)
+- BTC Bull: Close > MA200
 - Entry: Coin Close > MA50 > MA100
-- Exit: MA20 < MA50 cross, OR take-profit 35% at 25% ROI, OR -15% hard stop
+- Exit: MA20 < MA50 cross, OR staged TP 40% (10/20/30%), OR trail 60% (20% retracement)
 - Leverage 2x
 """
 
@@ -15,12 +15,11 @@ BASE = 10000
 LEV = 2.0
 ENTRY_SIZE = 0.10
 
-# Configurable BTC MA period for bull filter
-BTC_MA_PERIOD = 200  # test: 200, 180, 150
+BTC_MA_PERIOD = 200
+TRAIL_RETRACE = 0.80  # trail at 80% of highest (20% retracement)
 
-TP_ROI = 25    # take profit at 25% ROI
-TP_CLOSE = 0.35  # close 35% of remaining at TP
-HARD_STOP = -15  # close all if position drops 15% from entry
+# Staged TP for 40% of position: 13.3% each at 10/20/30% ROI
+TP_SCHEDULE = [(10, 0.133), (20, 0.133), (30, 0.134)]
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -94,7 +93,11 @@ def backtest_coin(coin, da, btc_da, selected_years):
         if btc_idx >= BTC_MA_PERIOD and btc_ma[btc_idx]:
             btc_bull = btc_closes[btc_idx] > btc_ma[btc_idx]
 
-        # Exit: MA20 crosses below MA50
+        # Update highest price for trailing
+        for e in entries:
+            e['hi'] = max(e.get('hi', cc), hi)
+
+        # Exit: MA20 crosses below MA50 (closes ALL remaining)
         for e in entries[:]:
             if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
                 if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
@@ -102,25 +105,31 @@ def backtest_coin(coin, da, btc_da, selected_years):
                     eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # Take-profit: at 25% ROI, close 35% of remaining
+        # Staged TP: 40% of position at 10/20/30% ROI
         for e in entries[:]:
             roi = (cc - e['ep']) / e['ep'] * 100 * LEV
-            if roi >= TP_ROI:
-                rem = e.get('rem', 1.0)
-                close_pct = TP_CLOSE * rem
-                raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                eq += raw * close_pct / 100 * (1 - 2 * 0.0005 * LEV)
-                rem -= close_pct
-                e['rem'] = rem
-                if rem <= 0.001:
-                    entries.remove(e)
+            tp_stage = e.get('tp_stage', 0)
+            while tp_stage < len(TP_SCHEDULE):
+                trg, cf = TP_SCHEDULE[tp_stage]
+                if roi >= trg:
+                    rem = e.get('rem', 1.0)
+                    close_pct = cf / rem  # fraction of remaining position to close
+                    close_pct = min(close_pct, rem)
+                    raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
+                    eq += raw * close_pct / 100 * (1 - 2 * 0.0005 * LEV)
+                    rem -= close_pct
+                    e['rem'] = rem
+                    e['tp_stage'] = tp_stage + 1
+                    if rem <= 0.001:
+                        entries.remove(e)
+                        break
+                tp_stage += 1
 
-        # Hard stop: -15% from entry (protect against major drops)
+        # Trailing stop: 60% remaining, close if drop 20% from high
         for e in entries[:]:
-            roi = (cc - e['ep']) / e['ep'] * 100 * LEV
-            if roi <= HARD_STOP:
+            if e.get('rem', 1.0) > 0 and cc <= e['hi'] * TRAIL_RETRACE:
                 raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                eq += raw * e['rem'] / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
 
         # Entry: only when BTC Bull Strong
@@ -129,7 +138,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
             if (dep < 0.80 and len(entries) < 8 and
                 ma50[idx] and ma100[idx] and
                 cc > ma50[idx] and cc > ma100[idx]):
-                entries.append({'ep': cc, 'mp': ENTRY_SIZE, 'rem': 1.0})
+                entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE, 'rem': 1.0, 'tp_stage': 0})
 
         # Track equity
         ureal = 0
