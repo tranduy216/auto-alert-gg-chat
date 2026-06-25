@@ -271,12 +271,12 @@ class TestSafeMode(unittest.TestCase):
         self.assertGreater(TRX_BOUNCE_MA_BUF, 0)
 
     def test_bear_short_constants(self):
-        from trading_config import WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD
-        self.assertEqual(WEAK_SHORT_LEV, 2.0)
-        self.assertGreater(WEAK_SHORT_SL, 0)
-        self.assertGreater(WEAK_SHORT_ENTRY, 0)
-        self.assertGreater(len(WEAK_SHORT_TP), 0)
-        self.assertGreater(WEAK_SHORT_PEAK_DD, 0)
+        from trading_config import SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD
+        self.assertEqual(SAFE_SHORT_LEV, 2.0)
+        self.assertGreater(SAFE_SHORT_SL, 0)
+        self.assertGreater(SAFE_SHORT_ENTRY, 0)
+        self.assertGreater(len(SAFE_SHORT_TP), 0)
+        self.assertGreater(SAFE_SHORT_PEAK_DD, 0)
 
     def test_btc_bear_override(self):
         from trading_config import BTC_BEAR_OVERRIDE
@@ -415,14 +415,14 @@ class TestTradingRules(unittest.TestCase):
         """Bounce entry should use per-coin lev for TRX"""
         from scripts.trading_rules import get_entry_rule
         mp, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="TRX")
-        self.assertEqual(lev, 1.5)  # default bounce lev now 1.5
+        self.assertEqual(lev, 2.5)  # default bounce lev now 2.5
         self.assertTrue(bf)  # bounce flag
 
     def test_bounce_entry_default_lev(self):
         """Bounce entry for ETH should use default 2.0 lev"""
         from scripts.trading_rules import get_entry_rule
         _, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="ETH")
-        self.assertEqual(lev, 1.5)  # default bounce lev now 1.5
+        self.assertEqual(lev, 2.5)  # default bounce lev now 2.5
         self.assertTrue(bf)
 
     def test_process_bounce_exit_per_coin_peak_dd(self):
@@ -440,7 +440,7 @@ class TestTradingRules(unittest.TestCase):
         # cc=103 > 101.85, so no trail trigger
         r = process_bounce_exit(15, 15, 1.0, 0, 5, hi=105, cc=103, trail_activation=10)
         self.assertFalse(r['removed'])
-        self.assertIn('BOUNCE_TP@5%', r['exits'])  # TP fires first
+        self.assertIn('BOUNCE_TP@4%', r['exits'])  # TP fires first
 
     def test_process_safe_exit_sl(self):
         from scripts.trading_rules import process_safe_exit

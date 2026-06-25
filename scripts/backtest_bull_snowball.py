@@ -39,9 +39,9 @@ from trading_config import (
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
-    WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_SCORE, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD,
+    SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,)
@@ -706,7 +706,7 @@ def backtest_coin(args_tuple):
                     mp *= 1.0 if strong else 0.7
 
                     safe_flag = False; eth_flag = False; bnb_flag = False; short_flag = False; is_trx_safe = False
-                    # BTC weak trend: safe long OR weak short
+                    # BTC weak trend: safe long OR safe short
                     if btc_safe and not is_sh:
                         if is_sh: sc = _entry_score_v7_short(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1,ds)
                         else: sc = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
@@ -714,22 +714,22 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True
                         mp = SAFE_ENTRY
-                    # Weak short: isolated 1.5x short in BTC bear (any ADX)
+                    # Safe short: isolated 1.5x short in BTC bear (any ADX)
                     elif not btc_bull and is_sh:
-                        lev_entry = WEAK_SHORT_LEV; sl_entry = WEAK_SHORT_SL
+                        lev_entry = SAFE_SHORT_LEV; sl_entry = SAFE_SHORT_SL
                         bull_entry = False; safe_flag = True; short_flag = True
-                        mp = WEAK_SHORT_ENTRY
+                        mp = SAFE_SHORT_ENTRY
                     # TRX safe isolated short in BTC bear
                     elif coin == "TRX" and not btc_bull and is_sh:
                         if sc < SAFE_ENTRY_SCORE: mp = 0
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True; is_trx_safe = True
                         mp = SAFE_ENTRY
-                    # Bounce: defensive long in BTC bear (strong signal req, 1.5x)
+                    # Bounce: defensive long in BTC bear (2.5x, really strong signal req)
                     elif bounce and not is_sh:
-                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        if sc < BOUNCE_MIN_SCORE: mp = 0
                         else:
-                            lev_entry = COIN_BOUNCE_LEV.get(coin, 1.5); sl_entry = BOUNCE_SL
+                            lev_entry = COIN_BOUNCE_LEV.get(coin, 2.5); sl_entry = BOUNCE_SL
                             bull_entry = False; eth_flag = True
                             mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     elif is_bull and not is_sh:
@@ -752,8 +752,8 @@ def backtest_coin(args_tuple):
                                     'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
                             'snowball_stage': 0}
                         if short_flag:
-                            entry['_tp_s'] = WEAK_SHORT_TP
-                            entry['_dd_t'] = WEAK_SHORT_PEAK_DD
+                            entry['_tp_s'] = SAFE_SHORT_TP
+                            entry['_dd_t'] = SAFE_SHORT_PEAK_DD
                         entries.append(entry)
                         lei = idx
 

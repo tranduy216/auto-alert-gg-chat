@@ -57,7 +57,7 @@ def get_entry_rule(
 
     elif bounce and not is_sh:
         mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
-        lev = COIN_BOUNCE_LEV.get(coin, 1.5)
+        lev = COIN_BOUNCE_LEV.get(coin, 2.5)
         sl = BOUNCE_SL
         bounce_flag = True
 

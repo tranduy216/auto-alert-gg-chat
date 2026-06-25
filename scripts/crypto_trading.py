@@ -55,12 +55,12 @@ from trading_config import (  # centralized config
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
-    WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_SCORE, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD,
+    SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BTC_BEAR_OVERRIDE,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,
 )
@@ -1665,11 +1665,11 @@ def analyse_coin(
                     else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
-                # 1b. Weak short (BTC bear) – isolated 1.5x short
+                # 1b. Safe short (BTC bear) – isolated 1.5x short
                 elif not btc_bull and is_sh:
-                    mp = WEAK_SHORT_ENTRY
-                    profile_lev = WEAK_SHORT_LEV
-                    profile_sl = WEAK_SHORT_SL
+                    mp = SAFE_SHORT_ENTRY
+                    profile_lev = SAFE_SHORT_LEV
+                    profile_sl = SAFE_SHORT_SL
                 # 2. TRX safe short in BTC bear
                 elif coin == "TRX" and not btc_bull and is_sh:
                     mp = SAFE_ENTRY
