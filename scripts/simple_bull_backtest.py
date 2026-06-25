@@ -16,10 +16,7 @@ LEV = 1.5
 ENTRY_SIZE = 0.10  # 10% of capital per entry (10 entries max at 1.5x = 150% position)
 
 BTC_MA_PERIOD = 200
-TRAIL_RETRACE = 0.80  # trail at 80% of highest (20% retracement)
-
-# Staged TP for 30% of position: 10% each at 30/50/80% ROI
-TP_SCHEDULE = [(30, 0.10), (50, 0.10), (80, 0.10)]
+TRAIL_RETRACE = 0.80  # trail at 80% of highest (20% retracement), 100% of position
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -97,39 +94,19 @@ def backtest_coin(coin, da, btc_da, selected_years):
         for e in entries:
             e['hi'] = max(e.get('hi', cc), hi)
 
-        # Exit: MA20 crosses below MA50 (closes ALL remaining)
+        # Exit: MA20 crosses below MA50
         for e in entries[:]:
             if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
                 if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
                     raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                    eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                    eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # Staged TP: 40% of position at 10/20/30% ROI
+        # Trailing stop: close if drop 20% from highest
         for e in entries[:]:
-            roi = (cc - e['ep']) / e['ep'] * 100 * LEV
-            tp_stage = e.get('tp_stage', 0)
-            while tp_stage < len(TP_SCHEDULE):
-                trg, cf = TP_SCHEDULE[tp_stage]
-                if roi >= trg:
-                    rem = e.get('rem', 1.0)
-                    close_pct = cf / rem  # fraction of remaining position to close
-                    close_pct = min(close_pct, rem)
-                    raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                    eq += raw * close_pct / 100 * (1 - 2 * 0.0005 * LEV)
-                    rem -= close_pct
-                    e['rem'] = rem
-                    e['tp_stage'] = tp_stage + 1
-                    if rem <= 0.001:
-                        entries.remove(e)
-                        break
-                tp_stage += 1
-
-        # Trailing stop: 60% remaining, close if drop 20% from high
-        for e in entries[:]:
-            if e.get('rem', 1.0) > 0 and cc <= e['hi'] * TRAIL_RETRACE:
+            if cc <= e['hi'] * TRAIL_RETRACE:
                 raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                eq += raw * e['rem'] / 100 * (1 - 2 * 0.0005 * LEV)
+                eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
 
         # Entry: only when BTC Bull Strong
@@ -138,7 +115,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
             if (dep < 1.0 and len(entries) < 10 and
                 ma50[idx] and ma100[idx] and
                 cc > ma50[idx] and cc > ma100[idx]):
-                entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE, 'rem': 1.0, 'tp_stage': 0})
+                entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE})
 
         # Track equity
         ureal = 0
