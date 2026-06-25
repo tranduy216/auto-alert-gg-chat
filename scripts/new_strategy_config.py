@@ -1,27 +1,35 @@
-"""New Strategy v2: 1d, limit entry near MA5-MA25 zone, 2x lev"""
+"""New Strategy v3: 1d, ADX/RSI/volume optimized, multi-resistance entries"""
 
 # ── Risk ──
 BASE = 10000
-MAX_COIN_EQ_PCT = 0.70   # max 70% equity deployed per coin
-MAX_ENTRIES = 20         # max concurrent entries
+MAX_COIN_EQ_PCT = 0.70
+MAX_ENTRIES = 20
 LEV = 2.0
-ENTRY_SIZE = 0.035       # 3.5% original capital per entry (20 entries × 3.5% = 70%)
+ENTRY_SIZE = 0.035
 
 # ── Entry MAs ──
 MA5 = 5
+MA10 = 10
+MA15 = 15
+MA20 = 20
 MA25 = 25
 MA100 = 100
 
-# ── Entry conditions ──
-# Buy when: price > MA5 (short-term up) AND price < MA25 (pullback)
-# At strong resistance: the MA25 acts as resistance, buying below it
+# ── Entry filters ──
+ADX_MIN = 20        # minimum ADX — avoid ultra-choppy
+RSI_MIN = 30        # minimum RSI — not oversold
+RSI_MAX = 55        # maximum RSI — not overbought
+VOL_MIN_RATIO = 0.8 # minimum volume vs 20d avg (0.8 = 80%)
+VOL_MAX_RATIO = 3.0 # max volume ratio (cap to avoid spike noise)
+
+# ── Resistance levels (MA5 to MA25 step 5) ──
+# Entry triggers when price crosses any level from below
+RESISTANCE_LEVELS = [5, 10, 15, 20, 25]
 
 # ── Exit ──
-# 60% of position: staged TP from 7% to 50% ROI
-TP_60 = [(7, 0.15), (15, 0.15), (25, 0.15), (35, 0.15)]  # 60% total
-# 40% of position: trailing after all TPs
-SL = 25        # 25% ROI stop loss
-TRAIL_ACT = 50  # trail activates at 50% ROI (after TPs finish)
-TRAIL_DIST = 0.09  # 9% price trail = 18% ROI at 2x
-TRAIL_CLOSE = 1.0  # close all remaining on trail hit
-PEAK_DD = 18   # 18% ROI peak drawdown — close remaining if profit drops 18% from peak
+TP_60 = [(7, 0.15), (15, 0.15), (25, 0.15), (35, 0.15)]
+SL = 25
+TRAIL_ACT = 50
+TRAIL_DIST = 0.09
+TRAIL_CLOSE = 1.0
+PEAK_DD = 18

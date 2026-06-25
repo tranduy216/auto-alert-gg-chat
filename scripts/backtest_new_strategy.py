@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from trading_config import BASE, FEE_RATE, SF
 from new_strategy_config import *
-from crypto_trading import sma, compute_rsi
+from crypto_trading import sma, compute_rsi, compute_adx
 
 
 def fetch(data_cache, symbol):
@@ -50,13 +50,13 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
 
     # ── Indicators ──
     def rsi_at(idx, period=14):
-        if idx < period:
-            return 50.0
+        if idx < period: return 50.0
         return compute_rsi(closes[:idx+1], period)
+    def adx_at(idx, period=14):
+        if idx < period * 2: return 25.0
+        return compute_adx(da[:idx+1], period)
 
-    ma5 = sma(closes, MA5)
-    ma25 = sma(closes, MA25)
-    ma100 = sma(closes, MA100)
+    mas = {p: sma(closes, p) for p in [MA5, MA10, MA15, MA20, MA25, MA100]}
     vol_ma20 = sma([c['volume'] for c in da], 20)
 
     # ── State ──
@@ -64,10 +64,11 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
     eq = 1.0
     curve = []
     yearly_eq = {}
-    lei = -999  # last entry index
+    lei = -999
+    yearly_entries = {}
 
     # ── Main loop ──
-    for idx in range(max(MA100 + 10, 150), n):
+    for idx in range(150, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
         d_cur = __import__('datetime').datetime.fromtimestamp(da[idx]['open_time'] / 1000)
         cur_year = d_cur.year
@@ -84,8 +85,9 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             continue
 
         # ── Entry logic ──
-        m5_v = ma5[idx]; m25_v = ma25[idx]; m100_v = ma100[idx]
-        if None in (m5_v, m25_v, m100_v):
+        m5 = mas[MA5][idx]; m10 = mas[MA10][idx]; m15 = mas[MA15][idx]
+        m20 = mas[MA20][idx]; m25 = mas[MA25][idx]; m100 = mas[MA100][idx]
+        if None in (m5, m25, m100):
             curve.append(eq)
             if d_cur.month == 12: yearly_eq[cur_year] = eq
             continue
@@ -93,15 +95,48 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
         dep = sum(e['mp'] for e in entries)
         can_enter = dep < MAX_COIN_EQ_PCT and (idx - lei >= 3)
 
-        if can_enter and len(entries) < MAX_ENTRIES:
-            # Buy when: price > MA5 (short-term up) AND price < MA25 (pullback from resistance)
-            if cc > m5_v and cc < m25_v * 1.01:
-                entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
-                         'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
-                         'tp_sched': TP_60,
-                         'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
-                         'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
-                entries.append(entry); lei = idx
+        if can_enter and len(entries) < MAX_ENTRIES and idx >= 30:
+            rsi_v = rsi_at(idx)
+            adx_v = adx_at(idx)
+            vol = da[idx]['volume']
+            vol_avg = vol_ma20[idx] if vol_ma20[idx] and vol_ma20[idx] > 0 else vol
+            vol_ratio = min(max(vol / vol_avg, 0), VOL_MAX_RATIO) if vol_avg > 0 else 0
+
+            # Filters: ADX, RSI, volume
+            good_filters = adx_v >= ADX_MIN and RSI_MIN <= rsi_v <= RSI_MAX and vol_ratio >= VOL_MIN_RATIO
+            if good_filters:
+                # Entry type 1: cross resistance from below (pullback entry)
+                for p in RESISTANCE_LEVELS:
+                    ma_v = mas[p][idx]
+                    if ma_v and idx > 0 and mas[p][idx-1]:
+                        prev_close = closes[idx-1]
+                        if prev_close < ma_v and cc >= ma_v:
+                            entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
+                                     'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
+                                     'tp_sched': TP_60,
+                                     'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                                     'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                            entries.append(entry); lei = idx
+                            yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
+                            break
+
+                # Entry type 3: trend-following — confirmed bull, green day, any trend
+                if not lei == idx and m5 and m25 and m100:
+                    if cc > m100 and m5 > m25 and cc > da[idx]['open']:
+                        entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
+                                 'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
+                                 'tp_sched': TP_60,
+                                 'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                                 'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                        entries.append(entry); lei = idx
+                        yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
+                        entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
+                                 'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
+                                 'tp_sched': TP_60,
+                                 'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                                 'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                        entries.append(entry); lei = idx
+                        yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
 
         # ── Exit logic ──
         ne = []
@@ -157,6 +192,12 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             if not rm: ne.append(e)
         entries = ne
 
+        # Track wins/losses per year
+        if entries:
+            for e in entries[:]:
+                if e.get('_closed', False):
+                    entries.remove(e)
+
         # ── Track equity ──
         ureal = 0
         for e in entries:
@@ -189,7 +230,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
     print(f"  Max DD: {md:.2f}%")
     print(f"  Final Equity: ${teq * BASE:,.2f}")
     for yr in sorted(yearly_cagr):
-        print(f"    {yr}: {yearly_cagr[yr]:+.2f}%")
+        print(f"    {yr}: {yearly_cagr[yr]:+.2f}%  entries={yearly_entries.get(str(yr), 0)}")
 
     return coin, {'cagr': cagr, 'dd': md, 'final': teq * BASE,
                   'yearly': yearly_cagr}
