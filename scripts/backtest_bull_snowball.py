@@ -43,7 +43,7 @@ from trading_config import (
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,)
@@ -710,6 +710,11 @@ def backtest_coin(args_tuple):
 
             # Standard entry (if not already snowballed)
             if not did_snowball:
+                # Bounce in bear: relaxed signal (no uptrend required by compute_entry_v6)
+                if bounce and not el and not es_:  # only override when no short signal
+                    sc_bounce = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
+                    if sc_bounce >= BOUNCE_MIN_SCORE_BEAR:
+                        el = True
                 _, act = resolve_action_v6(ts, el, es_, 'FLAT')
                 if act in ('OPEN_LONG_ENTRY_1','OPEN_SHORT_ENTRY_1'):
                     is_sh = act.startswith('OPEN_SHORT')
@@ -781,8 +786,8 @@ def backtest_coin(args_tuple):
                             entry['_trail_dist'] = BOUNCE_TRAIL_DISTANCE_CHOPPY
                             entry['_trail_close'] = BOUNCE_TRAIL_CLOSE_CHOPPY
                             entry['_trail_act'] = BOUNCE_TRAIL_ACTIVATION_CHOPPY
-                    entries.append(entry)
-                    lei = idx
+                        entries.append(entry)
+                        lei = idx
 
         # --- Equity tracking ---
         ureal = 0

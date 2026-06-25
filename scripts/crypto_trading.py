@@ -57,7 +57,7 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
@@ -1647,6 +1647,15 @@ def analyse_coin(
                         break
 
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
+        # Bounce in bear: relaxed signal (no uptrend required by compute_entry_v6_long)
+        if act == "NO_TRADE" and not btc_bull and coin in ("ETH", "BNB", "TRX") and not es:
+            sc_bounce = _entry_score_v7_long(
+                trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
+                exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
+            )
+            if sc_bounce >= BOUNCE_MIN_SCORE_BEAR:
+                act = "OPEN_LONG_ENTRY_1"
+                is_sh = False
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             is_sh = act.startswith("OPEN_SHORT")
             # Skip new entry if snowball already added (bull mode)
