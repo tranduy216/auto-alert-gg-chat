@@ -1672,11 +1672,11 @@ def analyse_coin(
                 profile = get_profile(coin, _coin_bull)
                 
                 # Apply profile parameters (matched to backtest priority)
-                # 1. Bull mode: 3x, 15% entry, no SL, both bull + MA buffer
+                # 1. Bull mode: 3x, 15% entry, SL 30% ROI, trail 50% act, 50% close, 10% price dist
                 if _coin_bull and btc_bull and not is_sh:
                     mp = 0.15
                     profile_lev = 3.0
-                    profile_sl = 99
+                    profile_sl = 30
                 # 2. Safe long: BTC or coin ADX < 22
                 elif (btc_safe or compute_adx(candles_12h, int(14*SF)) < BTC_ADX_SAFE) and not is_sh:
                     if sc < SAFE_ENTRY_SCORE: mp = 0
@@ -1688,11 +1688,11 @@ def analyse_coin(
                     mp = SAFE_SHORT_ENTRY
                     profile_lev = SAFE_SHORT_LEV
                     profile_sl = 99
-                # 4. Bear short: 3x, 15% entry, no SL, both bear + strong ADX
+                # 4. Bear short: 3x, 15% entry, SL 30% ROI, trail 50% act, 50% close, 10% price dist
                 elif not btc_safe and not btc_bull and not _coin_bull and is_sh:
                     mp = 0.15
                     profile_lev = 3.0
-                    profile_sl = 99
+                    profile_sl = 30
                 else:
                     mp = 0; profile_lev = 1; profile_sl = 1
 

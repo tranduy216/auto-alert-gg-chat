@@ -55,7 +55,7 @@ BULL_TRAIL_ACTIVATION = 0.40
 BULL_TRAIL_CLOSE = 0.60
 BULL_TRAIL_COOLDOWN_BARS = 5
 BULL_NO_SL = True
-BULL_MAX_LOSS = 0.10
+BULL_MAX_LOSS = 0.30
 
 # Staggered partial TP before trail (ROI%, close_fraction)
 BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
@@ -82,7 +82,7 @@ BEAR_SHORT_LEV      = 3.5
 BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
-BEAR_SHORT_MAX_LOSS = 0.10    # 10% ROI loss limit
+BEAR_SHORT_MAX_LOSS = 0.30    # 30% ROI loss limit
 
 # Safe short: isolated 2x for BTC bear
 SAFE_SHORT_LEV      = 2.0

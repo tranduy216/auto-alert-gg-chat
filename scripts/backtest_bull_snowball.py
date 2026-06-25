@@ -477,15 +477,18 @@ def backtest_coin(args_tuple):
                     if tp_s >= len(BULL_TP_SCHEDULE) and not rm:
                         in_trail_cd = ent.get('_trail_cooldown', -999) > idx
                         pnl_from_entry = (ep - cc) / ep  # profit for short
-                        if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
-                            tstop = min(ent.get('tstop') or cc*(1+BULL_TRAIL_DISTANCE), hi*(1+BULL_TRAIL_DISTANCE))
+                        trail_act = ent.get('_trail_act', BULL_TRAIL_ACTIVATION)
+                        if pnl_from_entry >= trail_act and not in_trail_cd:
+                            trail_dist = ent.get('_trail_dist', BULL_TRAIL_DISTANCE)
+                            trail_close = ent.get('_trail_close', BULL_TRAIL_CLOSE)
+                            tstop = min(ent.get('tstop') or cc*(1+trail_dist), hi*(1+trail_dist))
                             ent['tstop'] = tstop
                             if bh >= tstop:
-                                cf = BULL_TRAIL_CLOSE * rem2
+                                cf = trail_close * rem2
                                 eq += raw_roi * cf / 100 * ent_ff
                                 rem2 -= cf; ent['rem'] = rem2
                                 trades.append({'t':'TRAIL','dir':'S'})
-                                ent['tstop'] = cc*(1+BULL_TRAIL_DISTANCE)
+                                ent['tstop'] = cc*(1+trail_dist)
                                 ent['_trail_cooldown'] = idx + BULL_TRAIL_COOLDOWN_BARS
                                 if rem2 <= 0.001: rm = True
                                 consec_s = 0; rolling_sl_short = 0
@@ -496,9 +499,8 @@ def backtest_coin(args_tuple):
             if ent_is_bull and not rm:
                 peak_r = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_r
-                # Per-coin SL check (tighter than MAX_LOSS)
-                coin_bull_sl = COIN_BULL_SL.get(coin, 0)
-                if coin_bull_sl > 0 and raw_roi <= -coin_bull_sl:
+                # SL: use entry SL, then per-coin SL, then MAX_LOSS
+                if raw_roi <= -ent_sl and ent_sl < 99:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
                     trades.append({'t':'SL','dir':'L'})
                     consec_l += 1; rolling_sl_long += 1
@@ -529,25 +531,28 @@ def backtest_coin(args_tuple):
                         if tp_s >= len(BULL_TP_SCHEDULE) and not rm:
                             in_trail_cd = ent.get('_trail_cooldown', -999) > idx
                             pnl_from_entry = (cc - ep) / ep if not is_sh else (ep - cc) / ep
-                            if pnl_from_entry >= BULL_TRAIL_ACTIVATION and not in_trail_cd:
+                            trail_act = ent.get('_trail_act', BULL_TRAIL_ACTIVATION)
+                            if pnl_from_entry >= trail_act and not in_trail_cd:
+                                trail_dist = ent.get('_trail_dist', BULL_TRAIL_DISTANCE)
+                                trail_close = ent.get('_trail_close', BULL_TRAIL_CLOSE)
                                 if tstop is None:
-                                    tstop = cc * (1 - BULL_TRAIL_DISTANCE) if not is_sh else cc * (1 + BULL_TRAIL_DISTANCE)
+                                    tstop = cc * (1 - trail_dist) if not is_sh else cc * (1 + trail_dist)
                                 if not is_sh:
-                                    tstop = max(tstop, hi * (1 - BULL_TRAIL_DISTANCE))
+                                    tstop = max(tstop, hi * (1 - trail_dist))
                                 else:
-                                    tstop = min(tstop, hi * (1 + BULL_TRAIL_DISTANCE))
+                                    tstop = min(tstop, hi * (1 + trail_dist))
                                 ent['tstop'] = tstop
                                 if not is_sh and bl <= tstop:
-                                    cf = BULL_TRAIL_CLOSE * rem2
+                                    cf = trail_close * rem2
                                     eq += raw_roi * cf / 100 * ent_ff
                                     rem2 -= cf; ent['rem'] = rem2
                                     trades.append({'t':'TRAIL','dir':'L'})
-                                    tstop = cc * (1 - BULL_TRAIL_DISTANCE); ent['tstop'] = tstop
+                                    tstop = cc * (1 - trail_dist); ent['tstop'] = tstop
                                     ent['_trail_cooldown'] = idx + BULL_TRAIL_COOLDOWN_BARS
                                     if rem2 <= 0.001: rm = True
                                     consec_l = 0; rolling_sl_long = 0
                                 elif is_sh and bh >= tstop:
-                                    cf = BULL_TRAIL_CLOSE * rem2
+                                    cf = trail_close * rem2
                                     eq += raw_roi * cf / 100 * ent_ff
                                     rem2 -= cf; ent['rem'] = rem2
                                     trades.append({'t':'TRAIL','dir':'S'})
@@ -687,9 +692,9 @@ def backtest_coin(args_tuple):
 
                     safe_flag = False; eth_flag = False; bnb_flag = False; short_flag = False; is_trx_safe = False
                     # ── 4 simple modes ──
-                    # 1. Bull mode: 3x, 15% entry, no SL, strong signal + MA buffer
+                    # 1. Bull mode: 3x, 15% entry, SL 30% ROI, trail 50% act, 50% close, 10% price dist
                     if btc_bull and is_bull and not is_sh and ma50_pc > ma120_pc * (1 + TREND_MA_BUF):
-                        lev_entry = 3.0; sl_entry = 99
+                        lev_entry = 3.0; sl_entry = 30
                         bull_entry = True; ct_flag = False; eth_flag = False
                         mp = 0.15
                     # 2. Safe long: BTC or coin ADX < 22 (isolated 1.5x)
@@ -703,9 +708,9 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_SHORT_LEV; sl_entry = 99
                         bull_entry = False; safe_flag = True; short_flag = True
                         mp = SAFE_SHORT_ENTRY
-                    # 4. Bear short: 3x, 15% entry, no SL, both bear + ADX >= 22
+                    # 4. Bear short: 3x, 15% entry, SL 30% ROI, trail 50% act, 50% close, 10% price dist
                     elif not btc_safe and not btc_bull and not is_bull and is_sh:
-                        lev_entry = 3.0; sl_entry = 99
+                        lev_entry = 3.0; sl_entry = 30
                         bull_entry = False; safe_flag = True; short_flag = True
                         mp = 0.15
                     else:
@@ -725,6 +730,11 @@ def backtest_coin(args_tuple):
                         if short_flag:
                             entry['_tp_s'] = SAFE_SHORT_TP
                             entry['_dd_t'] = SAFE_SHORT_PEAK_DD
+                        # Trail params for risky modes: 50% ROI act, 10% price dist, 50% close
+                        if bull_entry or (not btc_safe and not btc_bull and is_sh):
+                            entry['_trail_act'] = 0.50
+                            entry['_trail_dist'] = 0.10
+                            entry['_trail_close'] = 0.50
                     entries.append(entry)
                     lei = idx
                     # 3-day cooldown for risky modes (bull, bear short)
