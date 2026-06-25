@@ -57,10 +57,10 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR, BOUNCE_CD_BEAR,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
-    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
+    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, TREND_MA_BUF, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BTC_BEAR_OVERRIDE,
@@ -1537,6 +1537,9 @@ def analyse_coin(
     # No shorts in BTC bull (matches backtest)
     if btc_bull:
         can_enter_short = False
+    # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
+    if can_enter_short and not btc_bull and btc_safe:
+        can_enter_short = False
 
     # Short entry regime restriction (matches backtest)
     if can_enter_short and not is_sh:
@@ -1644,15 +1647,6 @@ def analyse_coin(
                         break
 
         ps_, act = resolve_action_v6(trend_score, el, es, "FLAT")
-        # Bounce in bear: relaxed signal (no uptrend required by compute_entry_v6_long)
-        if act == "NO_TRADE" and not btc_bull and coin in ("ETH", "BNB", "TRX") and not es:
-            sc_bounce = _entry_score_v7_long(
-                trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
-                exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
-            )
-            if sc_bounce >= BOUNCE_MIN_SCORE_BEAR:
-                act = "OPEN_LONG_ENTRY_1"
-                is_sh = False
         if act in ("OPEN_LONG_ENTRY_1", "OPEN_SHORT_ENTRY_1"):
             is_sh = act.startswith("OPEN_SHORT")
             # Skip new entry if snowball already added (bull mode)
@@ -1673,92 +1667,55 @@ def analyse_coin(
                         exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
                     )
                 strong = sc >= cfg["entry_score"]
-                is_bounce = False
                 
                 # Get HYBRID profile based on market regime
                 profile = get_profile(coin, _coin_bull)
                 
                 # Apply profile parameters (matched to backtest priority)
-                # 1. Safe mode (BTC ADX < 22) – isolated 1.5x long
-                if btc_safe and not is_sh:
+                # 1. Bull mode: BTC bull + coin bull
+                if _coin_bull and btc_bull and not is_sh:
+                    mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
+                    profile_lev = 3.5
+                    profile_sl = 12
+                # 2. Safe long: BTC or coin ADX < 22
+                elif (btc_safe or compute_adx(candles_12h, int(14*SF)) < BTC_ADX_SAFE) and not is_sh:
                     if sc < SAFE_ENTRY_SCORE: mp = 0
                     else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
-                # 1b. Safe short (BTC bear) – isolated 1.5x short
-                elif not btc_bull and is_sh:
+                # 3. Safe short: BTC or coin ADX < 22, no hard SL
+                elif (btc_safe or compute_adx(candles_12h, int(14*SF)) < BTC_ADX_SAFE) and is_sh:
                     mp = SAFE_SHORT_ENTRY
                     profile_lev = SAFE_SHORT_LEV
-                    profile_sl = 99 if btc_safe else SAFE_SHORT_SL
-                # 2. TRX safe short in BTC bear
-                elif coin == "TRX" and not btc_bull and is_sh:
-                    mp = SAFE_ENTRY
-                    profile_lev = SAFE_LEV
-                    profile_sl = SAFE_SL
-                # 3. Bounce (BTC bear, defensive long, strong signal req, 1.5x)
-                elif not btc_bull and not is_sh:
-                    is_bounce = coin in ("ETH", "BNB", "TRX")
-                    if is_bounce:
-                        if not btc_safe:
-                            is_bounce = False  # no bounce in strong bear
-                        elif coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
-                            is_bounce = False
-                        elif coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
-                            is_bounce = False
-                    if is_bounce:
-                        bounce_min_sc = BOUNCE_MIN_SCORE_CHOPPY
-                        if sc < bounce_min_sc: mp = 0
-                        else:
-                            profile_lev = COIN_BOUNCE_LEV.get(coin, BOUNCE_LEV_CHOPPY)
-                            profile_sl = BOUNCE_SL_CHOPPY
-                            mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
-                    else:
-                        mp = 0
-                # 4. Bull mode (per-coin bull)
-                elif _coin_bull and not is_sh:
-                    mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
-                    profile_lev = 3.5
-                    profile_sl = 12
-                # 5. Default: no trade
+                    profile_sl = 99
+                # 4. Bear short: both bear + strong ADX
+                elif not btc_safe and not btc_bull and not _coin_bull and is_sh:
+                    mp = SAFE_SHORT_ENTRY
+                    profile_lev = SAFE_SHORT_LEV
+                    profile_sl = SAFE_SHORT_SL
                 else:
-                    mp = 0
-                    profile_lev = 1
-                    profile_sl = 1
+                    mp = 0; profile_lev = 1; profile_sl = 1
 
-                    # Mode-specific entry limit: bounce & safe long capped at 3
-                    mode_max = MAX_ENTRIES_PER_COIN
-                    if is_bounce or is_safe_long or (is_sh and btc_safe):
-                        mode_max = 4
-                    if deployed + mp <= max_margin_pct + 0.001 and len(entries) < mode_max:
-                        entry = {
-                            "entry_price": last_close,
-                            "margin_pct": mp,
-                            "is_short": is_sh,
-                            "tp_stage": 0,
-                            "remaining_size": 1.0,
-                            "highest_since_entry": last_close,
-                            "trailing_stop": None,
-                            "lev": profile_lev,
-                            "sl_roi": profile_sl,
-                            "bounce": is_bounce if not is_sh else False,
-                            "snowball_stage": 0,
-                        }
-                        if is_bounce:
-                            entry["_tp_s"] = BOUNCE_TP_CHOPPY
-                            entry["_dd_t"] = BOUNCE_PEAK_DD_CHOPPY
-                            entry["_trail_dist"] = BOUNCE_TRAIL_DISTANCE_CHOPPY
-                            entry["_trail_close"] = BOUNCE_TRAIL_CLOSE_CHOPPY
-                            entry["_trail_act"] = BOUNCE_TRAIL_ACTIVATION_CHOPPY
-                        if is_sh and btc_safe:
-                            entry["_tp_s"] = SAFE_SHORT_TP
-                            entry["_dd_t"] = SAFE_SHORT_PEAK_DD
+                if deployed + mp <= max_margin_pct + 0.001 and len(entries) < MAX_ENTRIES_PER_COIN:
+                    entry = {
+                        "entry_price": last_close,
+                        "margin_pct": mp,
+                        "is_short": is_sh,
+                        "tp_stage": 0,
+                        "remaining_size": 1.0,
+                        "highest_since_entry": last_close,
+                        "trailing_stop": None,
+                        "lev": profile_lev,
+                        "sl_roi": profile_sl,
+                        "bounce": False,
+                        "snowball_stage": 0,
+                    }
+                    if is_sh:
+                        entry["_tp_s"] = SAFE_SHORT_TP
+                        entry["_dd_t"] = SAFE_SHORT_PEAK_DD
                     entries.append(entry)
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
-                    if entry.get("bounce", False):
-                        cd_l_until = (_now_vnt() + timedelta(hours=BOUNCE_CD_BEAR * 6)).isoformat()
-                    if entry.get("is_short", False) and btc_safe:
-                        cd_s_until = (_now_vnt() + timedelta(hours=BOUNCE_CD_BEAR * 6)).isoformat()
 
     # Determine overall action
     if exit_reasons:

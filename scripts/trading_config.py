@@ -12,7 +12,8 @@ MAX_POS_PCT = 1.20
 MAX_MARGIN_PER_COIN_PCT = 0.20
 MAX_ENTRIES_PER_COIN = 5    # max active entries per coin across all modes
 FEE_RATE = 0.0005
-SF = 2.0
+SF = 2.5
+TREND_MA_BUF = 0.015  # 1.5% buffer: MA50 > MA120 * (1 + buf) for strong trend
 
 ENTRY_MIN_SCORE = 65
 ENTRY_COOLDOWN_BARS = {"ETH": 3, "BNB": 1, "TRX": 1}
@@ -93,13 +94,10 @@ SAFE_SHORT_PEAK_DD  = 2.5     # close remaining if profit drops 2.5% from peak
 
 # Bounce: 3 same-sized entries, 80% TP 4→16%, peak DD 7%, 20% trails at 8% ROI
 BOUNCE_ENTRY_SIZE = 0.06   # 6% equity per entry
-BOUNCE_ENTRY_SIZE_CHOPPY = 0.035  # 3.5% for hit-and-run in weak bear
 BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
 BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
-BOUNCE_MIN_SCORE = 85    # really strong signal required (normal market)
-BOUNCE_MIN_SCORE_CHOPPY = 65  # looser in weak bear — more scalps with tight stops
-BOUNCE_MIN_SCORE_BEAR = 60   # bounce bear: _entry_score_v7_long threshold (0-100)
+BOUNCE_MIN_SCORE = 85    # really strong signal required
 
 BOUNCE_TP  = [(4, 0.50), (8, 0.30), (12, 0.25), (16, 0.20)]  # ~80% closed by 16% ROI
 BOUNCE_SL  = 9.0   # 2.0x × 4.5% price = 9% ROI stop
@@ -108,16 +106,14 @@ BOUNCE_TRAIL_DISTANCE = 0.032  # 3.2% price trail — at 2.0x = 6.4% ROI
 BOUNCE_TRAIL_CLOSE = 1.0
 BOUNCE_TRAIL_ACTIVATION = 0
 
-# Choppy bounce (weak bear — ADX < 22): hit-and-run scalp (6h bar, 1x lev)
-BOUNCE_LEV_CHOPPY      = 1.0
-BOUNCE_SL_CHOPPY       = 1.2    # 1x × 1.2% price = 1.2% ROI stop
-BOUNCE_TP_CHOPPY       = [(2, 0.20), (3, 0.20), (4, 0.20), (5, 0.20), (6, 0.20)]
-BOUNCE_PEAK_DD_CHOPPY  = 1.2    # close remaining if 1.2% from peak ROI
-BOUNCE_TRAIL_DISTANCE_CHOPPY = 0  # no trail
-BOUNCE_TRAIL_CLOSE_CHOPPY    = 0
-BOUNCE_TRAIL_ACTIVATION_CHOPPY = 99  # disabled
-BOUNCE_CD_BEAR = 12   # 3 days cooldown (12 bars at 6h)
-BOUNCE_SNOWBALL_CHOPPY = False  # no snowball for bounce bear
+# Choppy bounce (weak bear — ADX < 22): tight scalp params
+BOUNCE_LEV_CHOPPY      = 1.5
+BOUNCE_SL_CHOPPY       = 2.0    # 1.5x × 1.33% price = 2% ROI stop
+BOUNCE_TP_CHOPPY       = [(3, 0.50), (5, 0.30), (8, 0.20)]
+BOUNCE_PEAK_DD_CHOPPY  = 2.0    # close remaining if 2% from peak ROI
+BOUNCE_TRAIL_DISTANCE_CHOPPY = 0.015  # 1.5% price trail — at 1.5x = 2.25% ROI
+BOUNCE_TRAIL_CLOSE_CHOPPY    = 1.0
+BOUNCE_TRAIL_ACTIVATION_CHOPPY = 0
 
 # Per-coin bounce overrides
 COIN_BOUNCE_LEV = {}  # default 2.0
