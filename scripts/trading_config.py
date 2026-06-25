@@ -96,17 +96,17 @@ BOUNCE_ENTRY_SIZE = 0.06   # 6% equity per entry
 BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
 BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
-BOUNCE_MIN_SCORE = 80    # really strong signal required
+BOUNCE_MIN_SCORE = 85    # really strong signal required
 
 BOUNCE_TP  = [(4, 0.50), (8, 0.30), (12, 0.25), (16, 0.20)]  # ~80% closed by 16% ROI
-BOUNCE_SL  = 11.25  # 2.5x × 4.5% price = 11.25% ROI stop
+BOUNCE_SL  = 9.0   # 2.0x × 4.5% price = 9% ROI stop
 BOUNCE_PEAK_DD = 7.0
-BOUNCE_TRAIL_DISTANCE = 0.032  # 8% ROI at 2.5x = 3.2% price trail on remaining ~20%
+BOUNCE_TRAIL_DISTANCE = 0.032  # 3.2% price trail — at 2.0x = 6.4% ROI
 BOUNCE_TRAIL_CLOSE = 1.0
 BOUNCE_TRAIL_ACTIVATION = 0
 
 # Per-coin bounce overrides
-COIN_BOUNCE_LEV = {}  # default 1.5
+COIN_BOUNCE_LEV = {}  # default 2.0
 COIN_BOUNCE_ENTRY_SIZE = {}
 COIN_BOUNCE_TRAIL_ACTIVATION = {"TRX": 10}   # per-coin trail activation ROI% for bounce (0 = after all TPs)
 COIN_MAX_MARGIN = {}

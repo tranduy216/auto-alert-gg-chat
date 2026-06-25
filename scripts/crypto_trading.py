@@ -1541,6 +1541,9 @@ def analyse_coin(
     # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
     if coin == "BNB" and not btc_bull and _coin_bull:
         can_enter_long = False
+    # Strong bear: no longs at all
+    if can_enter_long and not btc_bull and not btc_safe:
+        can_enter_long = False
 
     if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
@@ -1693,7 +1696,7 @@ def analyse_coin(
                             bounce_min_sc = 90
                         if sc < bounce_min_sc: mp = 0
                         else:
-                            profile_lev = COIN_BOUNCE_LEV.get(coin, 2.5)
+                            profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)
                             profile_sl = BOUNCE_SL
                             mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     else:

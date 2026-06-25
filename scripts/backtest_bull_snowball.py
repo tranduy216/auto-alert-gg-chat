@@ -602,6 +602,9 @@ def backtest_coin(args_tuple):
         # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
         if coin == "BNB" and not btc_bull and is_bull:
             can_l = False
+        # Strong bear: no longs at all
+        if can_l and not btc_bull and not btc_safe:
+            can_l = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
         if can_l and btc_safe and not bounce and not bear_short:
             if ma50_pc <= ma120_pc * (1 + SAFE_MA_BUF):
@@ -737,7 +740,7 @@ def backtest_coin(args_tuple):
                             bounce_min_sc = 90
                         if sc < bounce_min_sc: mp = 0
                         else:
-                            lev_entry = COIN_BOUNCE_LEV.get(coin, 2.5); sl_entry = BOUNCE_SL
+                            lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
                             bull_entry = False; eth_flag = True
                             mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     elif is_bull and not is_sh:
