@@ -56,7 +56,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
         if idx < period * 2: return 25.0
         return compute_adx(da[:idx+1], period)
 
-    mas = {p: sma(closes, p) for p in [MA5, MA8, MA13, MA21, MA100]}
+    mas = {p: sma(closes, p) for p in [MA5, MA8, MA13, MA21, MA50, MA100]}
     vol_ma20 = sma([c['volume'] for c in da], 20)
 
     # ── State ──
@@ -86,8 +86,8 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
 
         # ── Entry logic ──
         m5 = mas[MA5][idx]; m8 = mas[MA8][idx]; m13 = mas[MA13][idx]
-        m21 = mas[MA21][idx]; m100 = mas[MA100][idx]
-        if None in (m5, m21, m100):
+        m21 = mas[MA21][idx]; m50 = mas[MA50][idx]; m100 = mas[MA100][idx]
+        if None in (m5, m21, m50, m100):
             curve.append(eq)
             if d_cur.month == 12: yearly_eq[cur_year] = eq
             continue
@@ -125,11 +125,11 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                             break
 
 
-            # Entry type 3: trend-following — confirmed bull, green day (no ADX/RSI filters)
-            if not lei == idx and m5 and m21 and m100:
-                if cc > m100 and m5 > m21 and cc > da[idx]['open'] and cc < m21 * 1.02:
+            # Entry type 3: trend-following — confirmed bull, green day (wider SL, deeper pullback)
+            if not lei == idx and m5 and m50 and m100:
+                if cc > m100 and m5 > m50 and cc > da[idx]['open'] and cc < m50 * 1.02:
                     entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
+                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': 50,  # wider SL for trend entries
                              'tp_sched': TP_60,
                              'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
                              'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
@@ -147,10 +147,11 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             peak_dd = e['peak_dd']
             ff = 1 - 2 * FEE_RATE * lev
             raw_roi = (cc - ep) / ep * 100 * e['mp'] * lev
+            position_roi = (cc - ep) / ep * 100 * lev  # leverage-adjusted ROI
             rm = False
 
-            # SL
-            if raw_roi <= -sl:
+            # SL (compare against position ROI, not equity ROI)
+            if position_roi <= -sl:
                 eq += raw_roi * rem / 100 * ff; rm = True
 
             # Staggered TP (60% of position)

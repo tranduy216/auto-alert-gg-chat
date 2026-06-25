@@ -12,6 +12,7 @@ MA5 = 5
 MA8 = 8
 MA13 = 13
 MA21 = 21
+MA50 = 50
 MA100 = 100
 
 # ── Entry filters ──
