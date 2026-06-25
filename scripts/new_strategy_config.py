@@ -18,7 +18,7 @@ MA100 = 100
 # ── Entry filters ──
 ADX_MIN = 20        # minimum ADX — avoid ultra-choppy
 RSI_MIN = 30        # minimum RSI — not oversold
-RSI_MAX = 55        # maximum RSI — not overbought
+RSI_MAX = 65        # maximum RSI — was 55, raised to capture bull pullbacks
 VOL_MIN_RATIO = 0.8 # minimum volume vs 20d avg (0.8 = 80%)
 VOL_MAX_RATIO = 3.0 # max volume ratio (cap to avoid spike noise)
 

@@ -106,6 +106,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             good_filters = adx_v >= ADX_MIN and RSI_MIN <= rsi_v <= RSI_MAX and vol_ratio >= VOL_MIN_RATIO
             # Bear market protection: reduce position size by half when below MA100
             entry_mp = ENTRY_SIZE * (0.5 if cc < m100 else 1.0)
+            entry_sl = 25 if cc < m100 else 40  # wider SL in bull market
 
             if good_filters:
                 # Entry type 1: cross resistance from below (pullback entry)
@@ -113,12 +114,12 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                     ma_v = mas[p][idx]
                     if ma_v and idx > 0 and mas[p][idx-1]:
                         prev_close = closes[idx-1]
-                        if prev_close < ma_v and cc >= ma_v:
+                        if prev_close < ma_v and cc >= ma_v and cc > m100 * 0.95:
                             entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                                     'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
-                                     'tp_sched': TP_60,
-                                     'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
-                                     'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                                     'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
+                                 'tp_sched': TP_60,
+                                 'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                                 'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
                             entries.append(entry); lei = idx
                             yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
                             break
@@ -127,7 +128,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                 if not lei == idx and m5 and m25 and m100:
                     if cc > m100 and m5 > m25 and cc > da[idx]['open']:
                         entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                                 'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
+                                 'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
                                  'tp_sched': TP_60,
                                  'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
                                  'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
