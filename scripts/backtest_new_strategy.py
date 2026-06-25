@@ -124,16 +124,17 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                             yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
                             break
 
-                # Entry type 3: trend-following — confirmed bull, green day, any trend
-                if not lei == idx and m5 and m25 and m100:
-                    if cc > m100 and m5 > m25 and cc > da[idx]['open']:
-                        entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                                 'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
-                                 'tp_sched': TP_60,
-                                 'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
-                                 'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
-                        entries.append(entry); lei = idx
-                        yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
+
+            # Entry type 3: trend-following — confirmed bull, green day (no ADX/RSI filters)
+            if not lei == idx and m5 and m25 and m100:
+                if cc > m100 and m5 > m25 and cc > da[idx]['open'] and cc < m25 * 1.02:
+                    entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
+                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
+                             'tp_sched': TP_60,
+                             'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                             'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                    entries.append(entry); lei = idx
+                    yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
 
         # ── Exit logic ──
         ne = []
