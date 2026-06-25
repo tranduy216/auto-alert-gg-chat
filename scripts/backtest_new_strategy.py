@@ -93,7 +93,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             continue
 
         dep = sum(e['mp'] for e in entries)
-        can_enter = dep < MAX_COIN_EQ_PCT and (idx - lei >= 3)
+        can_enter = dep < MAX_COIN_EQ_PCT and (idx - lei >= 1)  # 1-day cooldown
 
         if can_enter and len(entries) < MAX_ENTRIES and idx >= 30:
             rsi_v = rsi_at(idx)
