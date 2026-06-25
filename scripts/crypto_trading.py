@@ -1688,9 +1688,12 @@ def analyse_coin(
                         if coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
                             is_bounce = False
                     if is_bounce:
-                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        bounce_min_sc = BOUNCE_MIN_SCORE
+                        if not btc_bull and btc_adx >= BTC_ADX_SAFE:
+                            bounce_min_sc = 90
+                        if sc < bounce_min_sc: mp = 0
                         else:
-                            profile_lev = COIN_BOUNCE_LEV.get(coin, 1.5)
+                            profile_lev = COIN_BOUNCE_LEV.get(coin, 2.5)
                             profile_sl = BOUNCE_SL
                             mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     else:

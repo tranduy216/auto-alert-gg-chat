@@ -730,7 +730,12 @@ def backtest_coin(args_tuple):
                         mp = SAFE_ENTRY
                     # Bounce: defensive long in BTC bear (2.5x, really strong signal req)
                     elif bounce and not is_sh:
-                        if sc < BOUNCE_MIN_SCORE: mp = 0
+                        bounce_min_sc = BOUNCE_MIN_SCORE
+                        # Tighten bounce score in strong bear (BTC bear + ADX >= 22)
+                        btc_adx_v = btc_adx[idx] if idx < len(btc_adx) and btc_adx[idx] is not None else 50
+                        if not btc_bull and btc_adx_v >= BTC_ADX_SAFE:
+                            bounce_min_sc = 90
+                        if sc < bounce_min_sc: mp = 0
                         else:
                             lev_entry = COIN_BOUNCE_LEV.get(coin, 2.5); sl_entry = BOUNCE_SL
                             bull_entry = False; eth_flag = True
