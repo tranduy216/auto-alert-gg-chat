@@ -88,24 +88,27 @@ def backtest_coin(coin, da, btc_da, selected_years):
         if btc_idx >= 200 and btc_ma200[btc_idx]:
             btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
 
-        # Exit: MA20 crosses below MA50 (always check, regardless of BTC bull)
-        for e in entries[:]:
-            if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
-                if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
+        # If not Bull Strong → no new entries, existing positions run with trail
+        if not btc_bull:
+            pass
+        else:
+            # Trailing stop
+            for e in entries[:]:
+                loss_pct = (cc - e['hi']) / e['hi'] * 100
+                if loss_pct <= -15 or cc <= e['hi'] * TRAIL_PCT:
                     raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
                     eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # Trailing stop (always check)
-        for e in entries[:]:
-            loss_pct = (cc - e['hi']) / e['hi'] * 100
-            if loss_pct <= -15 or cc <= e['hi'] * TRAIL_PCT:
-                raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-                entries.remove(e)
+            # Exit: MA20 crosses below MA50
+            for e in entries[:]:
+                if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
+                    if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
+                        raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
+                        eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                        entries.remove(e)
 
-        # Entry: only when BTC Bull Strong
-        if btc_bull:
+            # Entry: Close > MA20 > MA50 > MA200 (uptrend confirmed)
             dep = sum(e.get('mp', ENTRY_SIZE) for e in entries)
             if (dep < 0.80 and len(entries) < 8 and
                 ma20[idx] and ma50[idx] and ma200[idx] and
