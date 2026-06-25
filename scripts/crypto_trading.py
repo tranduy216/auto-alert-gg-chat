@@ -1547,8 +1547,8 @@ def analyse_coin(
         if not allow_short:
             can_enter_short = False
 
-    # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
-    if coin == "BNB" and not btc_bull and _coin_bull:
+    # Block bull mode when BTC is bear (false signals in bear market)
+    if can_enter_long and _coin_bull and not btc_bull:
         can_enter_long = False
 
     if can_enter_long or can_enter_short:

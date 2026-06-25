@@ -608,8 +608,8 @@ def backtest_coin(args_tuple):
         # No shorts in weak bear (ADX < 22) — choppy, gets stopped out
         if can_s and not btc_bull and btc_safe:
             can_s = False
-        # BNB: block bull entries when BTC bear (causes 53% DD otherwise)
-        if coin == "BNB" and not btc_bull and is_bull:
+        # Block bull mode when BTC is bear (false signals in bear market)
+        if can_l and is_bull and not btc_bull:
             can_l = False
         # Block bounce long in strong bear (BTC bear + ADX >= 22)
         if can_l and bounce and not btc_safe:
