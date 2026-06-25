@@ -1709,7 +1709,7 @@ def analyse_coin(
                     profile_lev = 1
                     profile_sl = 1
 
-                if deployed + mp <= max_margin_pct + 0.001:
+                if deployed + mp <= max_margin_pct + 0.001 and len(entries) < MAX_ENTRIES_PER_COIN:
                     entries.append({
                         "entry_price": last_close,
                         "margin_pct": mp,

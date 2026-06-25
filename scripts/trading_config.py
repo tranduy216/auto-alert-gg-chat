@@ -10,6 +10,7 @@ BASE = 10000
 INITIAL = 75
 MAX_POS_PCT = 1.20
 MAX_MARGIN_PER_COIN_PCT = 0.20
+MAX_ENTRIES_PER_COIN = 5    # max active entries per coin across all modes
 FEE_RATE = 0.0005
 SF = 2.0
 

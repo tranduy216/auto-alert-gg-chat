@@ -27,7 +27,7 @@ from crypto_trading import (
 )
 from trading_config import (
     COINS, SF, BASE, ENTRY_MIN_SCORE, TP_SCHEDULE, FEE_RATE,
-    SHORT_ALLOWED, MAX_POS_PCT,
+    SHORT_ALLOWED, MAX_POS_PCT, MAX_ENTRIES_PER_COIN,
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
     BULL_TRAIL_CLOSE, BULL_TRAIL_COOLDOWN_BARS, BULL_NO_SL, BULL_MAX_LOSS,
@@ -750,7 +750,7 @@ def backtest_coin(args_tuple):
                         lev_entry = 1; sl_entry = 1
                         bull_entry = False; ct_flag = False; eth_flag = False
 
-                    if mp > 0 and dep + mp <= coin_max_ms + 0.001:
+                    if mp > 0 and len(entries) < MAX_ENTRIES_PER_COIN and dep + mp <= coin_max_ms + 0.001:
                         entry = {'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
                             'tstop':None,'is_short':is_sh,
                                     'lev': lev_entry,
