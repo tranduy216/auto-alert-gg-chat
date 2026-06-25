@@ -104,6 +104,7 @@ def save_cached_result(coin, config_hash, result):
 def backtest_coin(args_tuple):
     coin, data_cache, use_cache, selected_years = args_tuple
     btc_da = fetch(data_cache, "BTCUSDT")  # for BTC regime
+    btc_da = fetch(data_cache, "BTCUSDT")  # for BTC regime
 
     config_str = json.dumps({
         "coin": coin, "mode": "snowball_bull",
@@ -453,7 +454,7 @@ def backtest_coin(args_tuple):
                             trades.append({'t':'TRAIL','dir':'S'}); rm = True; consec_s = 0; rolling_sl_short = 0
 
             # Aggressive bear short: same staggered TP + trail as bull longs
-            if ent.get('short_agg', False):
+            if not rm and ent.get('short_agg', False):
                 if raw_roi <= -BEAR_SHORT_MAX_LOSS * 100:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
                     trades.append({'t':'MAX_LOSS','dir':'S'})
@@ -603,7 +604,7 @@ def backtest_coin(args_tuple):
         if coin == "BNB" and not btc_bull and is_bull:
             can_l = False
         # Strong bear: no longs at all
-        if can_l and not btc_bull and not btc_safe:
+        if can_l and not btc_bull:
             can_l = False
         # Safe mode: MA buffer 2% — confirm bounce before entry
         if can_l and btc_safe and not bounce and not bear_short:
@@ -765,10 +766,11 @@ def backtest_coin(args_tuple):
                         if short_flag:
                             entry['_tp_s'] = SAFE_SHORT_TP
                             entry['_dd_t'] = SAFE_SHORT_PEAK_DD
-                        entries.append(entry)
-                        lei = idx
+                    entries.append(entry)
+                    lei = idx
 
         # --- Equity tracking ---
+        ureal = 0
         ureal = 0
         for e in entries:
             e_lev = e.get('lev', coin_lev)

@@ -1542,7 +1542,7 @@ def analyse_coin(
     if coin == "BNB" and not btc_bull and _coin_bull:
         can_enter_long = False
     # Strong bear: no longs at all
-    if can_enter_long and not btc_bull and not btc_safe:
+    if can_enter_long and not btc_bull:
         can_enter_long = False
 
     if can_enter_long or can_enter_short:
