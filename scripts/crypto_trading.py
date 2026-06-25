@@ -58,7 +58,10 @@ from trading_config import (  # centralized config
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
-    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD,
+    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
+    BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
+    BTC_BEAR_OVERRIDE,
+    COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,
 )
 
 
@@ -88,9 +91,9 @@ ECONOMIC_EVENT_WINDOWS: list[tuple[int, int]] = [
 ]
 
 CANDLE_COUNT = 500          # 12h candles: need MA200(400) + ATR(28) buffer
-BTC_CANDLE_COUNT = 220      # 1d candles for BTC kill-switch (unchanged)
-BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
+BTC_CANDLE_COUNT = 400      # 12h candles for BTC regime (need 240+ for MA120)
 
+BTC_SYMBOL = "BTCUSDT"      # BTC symbol for kill-switch and regime detection
 MAX_PER_COIN_PCT = MAX_POS_PCT
 
 # ── Risk Management ─────────────────────────────────────────────────
@@ -1522,10 +1525,19 @@ def analyse_coin(
             can_enter_long = False
             can_enter_short = False
     
-    # TRX: go to cash in bear (no short, no entry)
-    if coin == "TRX" and not _coin_bull and not cfg["bear_short"]:
+    # No shorts in BTC bull (matches backtest)
+    if coin == "BNB" and not btc_bull and _coin_bull:
         can_enter_long = False
+
+    # No shorts in BTC bull (matches backtest)
+    if btc_bull:
         can_enter_short = False
+
+    # Short entry regime restriction (matches backtest)
+    if can_enter_short and not is_sh:
+        allow_short = coin in SHORT_ALLOWED and (cfg.get("bear_short", False) or _coin_bull or (coin == "TRX" and not btc_bull))
+        if not allow_short:
+            can_enter_short = False
 
     if can_enter_long or can_enter_short:
         el = compute_entry_v6_long(
@@ -1547,14 +1559,14 @@ def analyse_coin(
             use_volume_expan=False,
             min_entry_score=profile.get("short_min_entry_score", ENTRY_MIN_SCORE),
             candles_12h=candles_12h,
-        ) if (coin in SHORT_ALLOWED and can_enter_short) else False
+        ) if (coin in SHORT_ALLOWED and can_enter_short and (cfg.get("bear_short", False) or _coin_bull or (coin == "TRX" and not btc_bull))) else False
 
         has_active_longs = any(not e.get("is_short", False) for e in entries)
         has_active_shorts = any(e.get("is_short", False) for e in entries)
 
-        # ── BULL Snowball: add to existing bull long ──
+        # ── BULL Snowball: add to existing bull long (block TRX when BTC bear)
         snowball_added = False
-        if _coin_bull and el and has_active_longs and not has_active_shorts:
+        if _coin_bull and el and has_active_longs and not has_active_shorts and not (coin == "TRX" and not btc_bull):
             sc_snow = _entry_score_v7_long(
                 trend_score, last_close, ma7_12h, ma10_12h, exec_s, ma200_12h,
                 exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
@@ -1650,23 +1662,24 @@ def analyse_coin(
                 # Apply profile parameters (matched to backtest priority)
                 # 1. Safe mode (BTC ADX < 22) – isolated 1.5x
                 if btc_safe and not is_sh:
-                    mp = SAFE_ENTRY
+                    if sc < SAFE_ENTRY_SCORE: mp = 0
+                    else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
-                # 2. Bull mode (per-coin bull)
-                elif _coin_bull and not is_sh:
+                # 2. Bear short (aggressive ETH short)
+                elif cfg.get("bear_short", False) and is_sh:
                     mp = BULL_INITIAL_SIZE
-                    profile_lev = 3.5
-                    profile_sl = 12
-                # 3. Bounce (BTC bear, defensive long)
-                else:
-                    mp = profile["initial_exposure"] * profile["pos_mult"]
-                    if strong: mp *= 1.0
-                    else: mp *= 0.7
-                    profile_lev = profile["lev"]
-                    profile_sl = 12 if coin == "TRX" else profile["sl"]
-
-                    is_bounce = coin in ("ETH", "BNB", "TRX") and not btc_bull and not is_sh
+                    profile_lev = BEAR_SHORT_LEV
+                    profile_sl = BEAR_SHORT_SL
+                # 3. TRX safe short in BTC bear
+                elif coin == "TRX" and not btc_bull and is_sh:
+                    if sc < SAFE_ENTRY_SCORE: mp = 0
+                    else: mp = SAFE_ENTRY
+                    profile_lev = SAFE_LEV
+                    profile_sl = SAFE_SL
+                # 4. Bounce (BTC bear, defensive long)
+                elif not btc_bull and not is_sh:
+                    is_bounce = coin in ("ETH", "BNB", "TRX")
                     if is_bounce:
                         if coin == "BNB" and ma50_temp <= ma120_temp * (1 + BNB_BOUNCE_MA_BUF):
                             is_bounce = False
@@ -1676,6 +1689,20 @@ def analyse_coin(
                         profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)
                         profile_sl = BOUNCE_SL
                         mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                    elif not is_sh:
+                        mp = 0  # non-ETH/BNB/TRX coins blocked in BTC bear
+                # 5. Bull mode (per-coin bull)
+                elif _coin_bull and not is_sh:
+                    mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
+                    profile_lev = 3.5
+                    profile_sl = 12
+                # 6. Default (bear mode)
+                else:
+                    mp = profile["initial_exposure"] * profile["pos_mult"]
+                    if strong: mp *= 1.0
+                    else: mp *= 0.7
+                    profile_lev = profile["lev"]
+                    profile_sl = 12 if coin == "TRX" else profile["sl"]
 
                 if deployed + mp <= max_margin_pct + 0.001:
                     entries.append({
@@ -2075,7 +2102,7 @@ def main() -> None:
     # Kill-switch check (BTC default 1d)
     print("[crypto_trading] Fetching BTC data for kill-switch\u2026")
     try:
-        btc_candles = fetch_klines(BTC_SYMBOL, limit=BTC_CANDLE_COUNT)
+        btc_candles = fetch_klines(BTC_SYMBOL, "12h", limit=BTC_CANDLE_COUNT)
     except requests.RequestException as exc:
         print(f"[crypto_trading] Fatal: cannot fetch BTC data: {exc}",
               file=sys.stderr)

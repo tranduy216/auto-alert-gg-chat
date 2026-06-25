@@ -200,8 +200,9 @@ _btc_bull = _btc_ma50 > _btc_ma200
 ```
 
 Note: Production uses `MA50 vs MA200` for BTC bull/bear detection.
-Backtest uses `MA50 vs MA120` on daily. This is the main remaining difference.
-Everything else (bounce regime, safe mode, entry priority) now matches.
+Backtest uses `MA50 vs MA120` on daily. This is the ONLY remaining difference.
+Everything else (bounce regime, safe mode, entry priority, BNB restrictions,
+bear short, TRX restrictions, short regime gates, BTC 12h data) now matches exactly.
 
 ---
 
