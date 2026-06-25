@@ -57,10 +57,11 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_CD,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
+    BOUNCE_CD, BOUNCE_CD_WEAK,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
-    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, SAFE_CD, BTC_ADX_SAFE, SAFE_MA_BUF,
+    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, SAFE_CD, SAFE_CD_WEAK, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BTC_BEAR_OVERRIDE,
@@ -1746,9 +1747,11 @@ def analyse_coin(
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
                     if entry.get("bounce", False):
-                        cd_l_until = (_now_vnt() + timedelta(hours=BOUNCE_CD * 12)).isoformat()
+                        cd_bars = BOUNCE_CD_WEAK if btc_safe else BOUNCE_CD
+                        cd_l_until = (_now_vnt() + timedelta(hours=cd_bars * 12)).isoformat()
                     elif entry.get("safe_mode", False):
-                        cd_l_until = (_now_vnt() + timedelta(hours=SAFE_CD * 12)).isoformat()
+                        cd_bars = SAFE_CD_WEAK if btc_safe else SAFE_CD
+                        cd_l_until = (_now_vnt() + timedelta(hours=cd_bars * 12)).isoformat()
 
     # Determine overall action
     if exit_reasons:
