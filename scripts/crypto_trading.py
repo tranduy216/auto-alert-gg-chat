@@ -54,7 +54,9 @@ from trading_config import (  # centralized config
     SHORT_ALLOWED,
     _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap,
     get_profile,
-    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
+    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
+    BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
+    BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
@@ -1341,15 +1343,21 @@ def analyse_coin(
             peak_roi = max(ent.get("_peak_roi", -999), roi)
             ent["_peak_roi"] = peak_roi
 
+            bounce_tp = ent.get("_tp_s", BOUNCE_TP)
+            bounce_pdd = COIN_PEAK_DD.get(coin, ent.get("_dd_t", BOUNCE_PEAK_DD))
+            bounce_tr = ent.get("_trail_dist", BOUNCE_TRAIL_DISTANCE)
+            bounce_tc = ent.get("_trail_close", BOUNCE_TRAIL_CLOSE)
+            bounce_ta = ent.get("_trail_act", COIN_BOUNCE_TRAIL_ACTIVATION.get(coin, BOUNCE_TRAIL_ACTIVATION))
+
             # SL
             if roi <= -ent_sl:
                 total_pnl += roi * rem / 100
                 exit_reasons.append(f"Bounce SL: ROI {roi:.1f}%")
                 removed = True
 
-            # Staggered TP: close 80% across ROI 5→25%
-            elif tp_s < len(BOUNCE_TP):
-                trg, cf_pct = BOUNCE_TP[tp_s]
+            # Staggered TP
+            elif tp_s < len(bounce_tp):
+                trg, cf_pct = bounce_tp[tp_s]
                 if roi >= trg:
                     cf = cf_pct * rem
                     total_pnl += roi * cf / 100
@@ -1360,26 +1368,24 @@ def analyse_coin(
                     if rem <= 0.001: removed = True
 
             # Peak DD (per-coin)
-            bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
-            if not removed and roi <= peak_roi - bounce_peak_dd:
+            if not removed and roi <= peak_roi - bounce_pdd:
                 total_pnl += roi * rem / 100
-                exit_reasons.append(f"Bounce peak DD: ROI dropped {bounce_peak_dd:.1f}% from peak {peak_roi:.1f}%")
+                exit_reasons.append(f"Bounce peak DD: ROI dropped {bounce_pdd:.1f}% from peak {peak_roi:.1f}%")
                 removed = True
 
-            # Trailing stop (after TPs or at per-coin trail activation ROI)
+            # Trailing stop
             if not removed:
-                bounce_trail_act = COIN_BOUNCE_TRAIL_ACTIVATION.get(coin, 0)
-                trail_ready = tp_s >= len(BOUNCE_TP)
-                if not trail_ready and bounce_trail_act > 0 and roi >= bounce_trail_act:
+                trail_ready = tp_s >= len(bounce_tp)
+                if not trail_ready and bounce_ta > 0 and roi >= bounce_ta:
                     trail_ready = True
                 if trail_ready:
                     trail_cd_until = ent.get("trail_cooldown_until", 0)
                     in_trail_cd = isinstance(trail_cd_until, str) or trail_cd_until > now_ts
                     if not in_trail_cd:
-                        tstop = max(ent.get("trailing_stop") or last_close * (1 - BOUNCE_TRAIL_DISTANCE), hi * (1 - BOUNCE_TRAIL_DISTANCE))
+                        tstop = max(ent.get("trailing_stop") or last_close * (1 - bounce_tr), hi * (1 - bounce_tr))
                         ent["trailing_stop"] = tstop
                         if last_close <= tstop:
-                            cf = BOUNCE_TRAIL_CLOSE * rem
+                            cf = bounce_tc * rem
                             total_pnl += roi * cf / 100
                             rem -= cf; ent["remaining_size"] = rem
                             exit_reasons.append(f"Bounce Trail: closed remaining {cf*100:.0f}%")
@@ -1661,6 +1667,7 @@ def analyse_coin(
                         exec_f, exec_m, volume_score, last_volume, vol_5d_avg, rsi_12h,
                     )
                 strong = sc >= cfg["entry_score"]
+                is_bounce = False
                 
                 # Get HYBRID profile based on market regime
                 profile = get_profile(coin, _coin_bull)
@@ -1696,8 +1703,8 @@ def analyse_coin(
                         bounce_min_sc = BOUNCE_MIN_SCORE
                         if sc < bounce_min_sc: mp = 0
                         else:
-                            profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)
-                            profile_sl = BOUNCE_SL
+                            profile_lev = COIN_BOUNCE_LEV.get(coin, BOUNCE_LEV_CHOPPY)
+                            profile_sl = BOUNCE_SL_CHOPPY
                             mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     else:
                         mp = 0
@@ -1712,20 +1719,27 @@ def analyse_coin(
                     profile_lev = 1
                     profile_sl = 1
 
-                if deployed + mp <= max_margin_pct + 0.001 and len(entries) < MAX_ENTRIES_PER_COIN:
-                    entries.append({
-                        "entry_price": last_close,
-                        "margin_pct": mp,
-                        "is_short": is_sh,
-                        "tp_stage": 0,
-                        "remaining_size": 1.0,
-                        "highest_since_entry": last_close,
-                        "trailing_stop": None,
-                        "lev": profile_lev,
-                        "sl_roi": profile_sl,
-                        "bounce": is_bounce if not is_sh else False,
-                        "snowball_stage": 0,
-                    })
+                    if deployed + mp <= max_margin_pct + 0.001 and len(entries) < MAX_ENTRIES_PER_COIN:
+                        entry = {
+                            "entry_price": last_close,
+                            "margin_pct": mp,
+                            "is_short": is_sh,
+                            "tp_stage": 0,
+                            "remaining_size": 1.0,
+                            "highest_since_entry": last_close,
+                            "trailing_stop": None,
+                            "lev": profile_lev,
+                            "sl_roi": profile_sl,
+                            "bounce": is_bounce if not is_sh else False,
+                            "snowball_stage": 0,
+                        }
+                        if is_bounce:
+                            entry["_tp_s"] = BOUNCE_TP_CHOPPY
+                            entry["_dd_t"] = BOUNCE_PEAK_DD_CHOPPY
+                            entry["_trail_dist"] = BOUNCE_TRAIL_DISTANCE_CHOPPY
+                            entry["_trail_close"] = BOUNCE_TRAIL_CLOSE_CHOPPY
+                            entry["_trail_act"] = BOUNCE_TRAIL_ACTIVATION_CHOPPY
+                    entries.append(entry)
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
 

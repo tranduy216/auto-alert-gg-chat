@@ -41,6 +41,8 @@ from trading_config import (
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
+    BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
+    BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
@@ -378,7 +380,7 @@ def backtest_coin(args_tuple):
                 if not rm: ne.append(ent)
                 continue
 
-            # Bounce: 80% TP 5→30%, peak DD 7%, trailing 7% on remaining 20%
+            # Bounce: per-entry TP/peak DD/trail
             if ent.get('bounce', False):
                 peak_r = max(ent.get('_peak_roi', -999), raw_roi)
                 ent['_peak_roi'] = peak_r
@@ -388,8 +390,9 @@ def backtest_coin(args_tuple):
                     consec_l += 1; rolling_sl_long += 1
                 elif not rm:
                     tp_s = ent.get('tp', 0)
-                    if tp_s < len(BOUNCE_TP):
-                        trg, cf_pct = BOUNCE_TP[tp_s]
+                    bounce_tp = ent.get('_tp_s', BOUNCE_TP)
+                    if tp_s < len(bounce_tp):
+                        trg, cf_pct = bounce_tp[tp_s]
                         if raw_roi >= trg:
                             cf = cf_pct * rem2
                             eq += raw_roi * cf / 100 * ent_ff
@@ -398,21 +401,23 @@ def backtest_coin(args_tuple):
                             trades.append({'t':'TP','dir':'L'})
                             consec_l = 0; rolling_sl_long = 0
                             if rem2 <= 0.001: rm = True
-                    bounce_peak_dd = COIN_PEAK_DD.get(coin, BOUNCE_PEAK_DD)
+                    bounce_peak_dd = COIN_PEAK_DD.get(coin, ent.get('_dd_t', BOUNCE_PEAK_DD))
                     if not rm and raw_roi <= peak_r - bounce_peak_dd:
                         eq += raw_roi * rem2 / 100 * ent_ff; rm = True
                         trades.append({'t':'PEAK_DD','dir':'L'})
-                    trail_ready = tp_s >= len(BOUNCE_TP)
-                    coin_trail_act = COIN_BOUNCE_TRAIL_ACTIVATION.get(coin, 0)
-                    if not trail_ready and coin_trail_act > 0 and raw_roi >= coin_trail_act:
+                    bounce_tr = ent.get('_trail_dist', BOUNCE_TRAIL_DISTANCE)
+                    bounce_tc = ent.get('_trail_close', BOUNCE_TRAIL_CLOSE)
+                    bounce_ta = ent.get('_trail_act', COIN_BOUNCE_TRAIL_ACTIVATION.get(coin, BOUNCE_TRAIL_ACTIVATION))
+                    trail_ready = tp_s >= len(bounce_tp)
+                    if not trail_ready and bounce_ta > 0 and raw_roi >= bounce_ta:
                         trail_ready = True
                     if not rm and trail_ready:
                         if tstop is None:
-                            tstop = cc * (1 - BOUNCE_TRAIL_DISTANCE)
-                        tstop = max(tstop, hi * (1 - BOUNCE_TRAIL_DISTANCE))
+                            tstop = cc * (1 - bounce_tr)
+                        tstop = max(tstop, hi * (1 - bounce_tr))
                         ent['tstop'] = tstop
                         if bl <= tstop:
-                            cf = BOUNCE_TRAIL_CLOSE * rem2
+                            cf = bounce_tc * rem2
                             eq += raw_roi * cf / 100 * ent_ff
                             rem2 -= cf; ent['rem'] = rem2
                             trades.append({'t':'TRAIL','dir':'L'})
@@ -740,9 +745,14 @@ def backtest_coin(args_tuple):
                         bounce_min_sc = BOUNCE_MIN_SCORE
                         if sc < bounce_min_sc: mp = 0
                         else:
-                            lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
-                            bull_entry = False; eth_flag = True
-                            mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                            if btc_safe:
+                                lev_entry = COIN_BOUNCE_LEV.get(coin, BOUNCE_LEV_CHOPPY); sl_entry = BOUNCE_SL_CHOPPY
+                                bull_entry = False; eth_flag = True
+                                mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                            else:
+                                lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
+                                bull_entry = False; eth_flag = True
+                                mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     elif is_bull and not is_sh:
                         lev_entry = bull_lev_use
                         sl_entry = hybrid_profile['sl']
@@ -765,6 +775,12 @@ def backtest_coin(args_tuple):
                         if short_flag:
                             entry['_tp_s'] = SAFE_SHORT_TP
                             entry['_dd_t'] = SAFE_SHORT_PEAK_DD
+                        if bounce and btc_safe:
+                            entry['_tp_s'] = BOUNCE_TP_CHOPPY
+                            entry['_dd_t'] = BOUNCE_PEAK_DD_CHOPPY
+                            entry['_trail_dist'] = BOUNCE_TRAIL_DISTANCE_CHOPPY
+                            entry['_trail_close'] = BOUNCE_TRAIL_CLOSE_CHOPPY
+                            entry['_trail_act'] = BOUNCE_TRAIL_ACTIVATION_CHOPPY
                     entries.append(entry)
                     lei = idx
 
