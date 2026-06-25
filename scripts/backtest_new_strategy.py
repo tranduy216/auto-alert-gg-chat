@@ -56,7 +56,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
         if idx < period * 2: return 25.0
         return compute_adx(da[:idx+1], period)
 
-    mas = {p: sma(closes, p) for p in [MA5, MA10, MA15, MA20, MA25, MA100]}
+    mas = {p: sma(closes, p) for p in [MA5, MA8, MA13, MA21, MA100]}
     vol_ma20 = sma([c['volume'] for c in da], 20)
 
     # ── State ──
@@ -85,9 +85,9 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             continue
 
         # ── Entry logic ──
-        m5 = mas[MA5][idx]; m10 = mas[MA10][idx]; m15 = mas[MA15][idx]
-        m20 = mas[MA20][idx]; m25 = mas[MA25][idx]; m100 = mas[MA100][idx]
-        if None in (m5, m25, m100):
+        m5 = mas[MA5][idx]; m8 = mas[MA8][idx]; m13 = mas[MA13][idx]
+        m21 = mas[MA21][idx]; m100 = mas[MA100][idx]
+        if None in (m5, m21, m100):
             curve.append(eq)
             if d_cur.month == 12: yearly_eq[cur_year] = eq
             continue
@@ -126,8 +126,8 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
 
 
             # Entry type 3: trend-following — confirmed bull, green day (no ADX/RSI filters)
-            if not lei == idx and m5 and m25 and m100:
-                if cc > m100 and m5 > m25 and cc > da[idx]['open'] and cc < m25 * 1.02:
+            if not lei == idx and m5 and m21 and m100:
+                if cc > m100 and m5 > m21 and cc > da[idx]['open'] and cc < m21 * 1.02:
                     entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
                              'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
                              'tp_sched': TP_60,
