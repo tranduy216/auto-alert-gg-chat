@@ -82,13 +82,13 @@ BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
 BEAR_SHORT_MAX_LOSS = 0.10    # 10% ROI loss limit
 
-# Weak short: isolated 1.5x for choppy/weak trend (BTC ADX < 22)
-WEAK_SHORT_LEV      = 1.5
-WEAK_SHORT_SL       = 3.3
+# Weak short: isolated 2x for BTC bear
+WEAK_SHORT_LEV      = 2.0
+WEAK_SHORT_SL       = 7.0
 WEAK_SHORT_ENTRY    = 0.035   # 3.5% equity per entry
 WEAK_SHORT_SCORE    = 1       # any signal fires
-WEAK_SHORT_TP       = [(3, 0.10), (5, 0.20), (8, 0.25), (12, 0.25), (15, 0.20)]  # 80% at 3-15%
-WEAK_SHORT_PEAK_DD  = 3.0     # close remaining if profit drops 3% from peak
+WEAK_SHORT_TP       = [(3, 0.20), (6, 0.30), (9, 0.30), (12, 0.20)]  # 100% at 3-12%
+WEAK_SHORT_PEAK_DD  = 2.5     # close remaining if profit drops 2.5% from peak
 
 # Bounce: 3 same-sized entries, 80% TP 5→25%, peak DD 7%, 3% price trail on remaining
 BOUNCE_ENTRY_SIZE = 0.09
@@ -104,7 +104,7 @@ BOUNCE_TRAIL_CLOSE = 1.0
 BOUNCE_TRAIL_ACTIVATION = 0      # global (unused when per-coin active)
 
 # Per-coin bounce overrides
-COIN_BOUNCE_LEV = {"TRX": 2.8}
+COIN_BOUNCE_LEV = {}  # default 1.5
 COIN_BOUNCE_ENTRY_SIZE = {}
 COIN_BOUNCE_TRAIL_ACTIVATION = {"TRX": 10}   # per-coin trail activation ROI% for bounce (0 = after all TPs)
 COIN_MAX_MARGIN = {}

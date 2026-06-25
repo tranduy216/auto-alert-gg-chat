@@ -271,9 +271,12 @@ class TestSafeMode(unittest.TestCase):
         self.assertGreater(TRX_BOUNCE_MA_BUF, 0)
 
     def test_bear_short_constants(self):
-        from trading_config import BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL
-        self.assertEqual(BEAR_SHORT_LEV, 3.5)
-        self.assertTrue(BEAR_SHORT_SNOWBALL)
+        from trading_config import WEAK_SHORT_LEV, WEAK_SHORT_SL, WEAK_SHORT_ENTRY, WEAK_SHORT_TP, WEAK_SHORT_PEAK_DD
+        self.assertEqual(WEAK_SHORT_LEV, 2.0)
+        self.assertGreater(WEAK_SHORT_SL, 0)
+        self.assertGreater(WEAK_SHORT_ENTRY, 0)
+        self.assertGreater(len(WEAK_SHORT_TP), 0)
+        self.assertGreater(WEAK_SHORT_PEAK_DD, 0)
 
     def test_btc_bear_override(self):
         from trading_config import BTC_BEAR_OVERRIDE
@@ -356,12 +359,10 @@ class TestTradingRules(unittest.TestCase):
         self.assertTrue(detect_btc_safe(15))   # ADX < 22 → safe
         self.assertFalse(detect_btc_safe(25))  # ADX ≥ 22 → aggressive
 
-    def test_detect_bear_short(self):
-        from scripts.trading_rules import detect_bear_short
-        self.assertTrue(detect_bear_short(False, False, "ETH"))
-        self.assertFalse(detect_bear_short(True, False, "ETH"))   # safe mode
-        self.assertFalse(detect_bear_short(False, True, "ETH"))   # BTC bull
-        self.assertFalse(detect_bear_short(False, False, "BNB"))  # not ETH
+    def test_detect_weak_short(self):
+        from scripts.trading_rules import detect_btc_safe
+        self.assertTrue(detect_btc_safe(15))  # ADX < 22 → safe
+        self.assertFalse(detect_btc_safe(25))  # ADX ≥ 22 → aggressive
 
     def test_detect_bounce(self):
         from scripts.trading_rules import detect_bounce
@@ -414,14 +415,14 @@ class TestTradingRules(unittest.TestCase):
         """Bounce entry should use per-coin lev for TRX"""
         from scripts.trading_rules import get_entry_rule
         mp, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="TRX")
-        self.assertEqual(lev, 2.8)  # COIN_BOUNCE_LEV for TRX
+        self.assertEqual(lev, 1.5)  # default bounce lev now 1.5
         self.assertTrue(bf)  # bounce flag
 
     def test_bounce_entry_default_lev(self):
         """Bounce entry for ETH should use default 2.0 lev"""
         from scripts.trading_rules import get_entry_rule
         _, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="ETH")
-        self.assertEqual(lev, 2.0)
+        self.assertEqual(lev, 1.5)  # default bounce lev now 1.5
         self.assertTrue(bf)
 
     def test_process_bounce_exit_per_coin_peak_dd(self):

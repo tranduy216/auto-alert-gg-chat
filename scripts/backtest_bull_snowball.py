@@ -596,9 +596,6 @@ def backtest_coin(args_tuple):
         if can_l and bounce and coin == "TRX":
             if ma50_pc <= ma120_pc * (1 + TRX_BOUNCE_MA_BUF):
                 can_l = False
-        # BNB: block bull entries when BTC bear
-        if coin == "BNB" and not btc_bull and is_bull:
-            can_l = False
         # No shorts in BTC bull (counter-trend shorts are too risky)
         if btc_bull:
             can_s = False
@@ -717,34 +714,32 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True
                         mp = SAFE_ENTRY
-                    # Weak short: isolated 1.5x short in choppy trend (BTC ADX < 22)
-                    elif btc_safe and is_sh:
+                    # Weak short: isolated 1.5x short in BTC bear (any ADX)
+                    elif not btc_bull and is_sh:
                         lev_entry = WEAK_SHORT_LEV; sl_entry = WEAK_SHORT_SL
                         bull_entry = False; safe_flag = True; short_flag = True
                         mp = WEAK_SHORT_ENTRY
-                    elif bear_short and is_sh:
-                        lev_entry = BEAR_SHORT_LEV; sl_entry = BEAR_SHORT_SL
-                        bull_entry = False; short_flag = True; safe_flag = False
-                        mp = BULL_INITIAL_SIZE  # same entry size as longs
                     # TRX safe isolated short in BTC bear
                     elif coin == "TRX" and not btc_bull and is_sh:
                         if sc < SAFE_ENTRY_SCORE: mp = 0
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True; is_trx_safe = True
                         mp = SAFE_ENTRY
-                    # Bounce: defensive long in BTC bear (per-coin params)
+                    # Bounce: defensive long in BTC bear (strong signal req, 1.5x)
                     elif bounce and not is_sh:
-                        lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
-                        bull_entry = False; eth_flag = True
-                        mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        else:
+                            lev_entry = COIN_BOUNCE_LEV.get(coin, 1.5); sl_entry = BOUNCE_SL
+                            bull_entry = False; eth_flag = True
+                            mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
                     elif is_bull and not is_sh:
                         lev_entry = bull_lev_use
                         sl_entry = hybrid_profile['sl']
                         bull_entry = True; ct_flag = False; eth_flag = False
                         mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
                     else:
-                        lev_entry = hybrid_profile['lev']
-                        sl_entry = hybrid_profile['sl']
+                        mp = 0  # default: no trade (no mode matched)
+                        lev_entry = 1; sl_entry = 1
                         bull_entry = False; ct_flag = False; eth_flag = False
 
                     if mp > 0 and dep + mp <= coin_max_ms + 0.001:
@@ -756,7 +751,7 @@ def backtest_coin(args_tuple):
                                     'ct_mode': False, 'bounce': bounce,
                                     'safe_mode': btc_safe, 'short_agg': short_flag, 'trx_safe': is_trx_safe,
                             'snowball_stage': 0}
-                        if short_flag and btc_safe:
+                        if short_flag:
                             entry['_tp_s'] = WEAK_SHORT_TP
                             entry['_dd_t'] = WEAK_SHORT_PEAK_DD
                         entries.append(entry)

@@ -1527,8 +1527,6 @@ def analyse_coin(
             can_enter_short = False
     
     # No shorts in BTC bull (matches backtest)
-    if coin == "BNB" and not btc_bull and _coin_bull:
-        can_enter_long = False
 
     # No shorts in BTC bull (matches backtest)
     if btc_bull:
@@ -1667,23 +1665,17 @@ def analyse_coin(
                     else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
-                # 1b. Weak short (BTC ADX < 22) – isolated 1.5x short
-                elif btc_safe and is_sh:
+                # 1b. Weak short (BTC bear) – isolated 1.5x short
+                elif not btc_bull and is_sh:
                     mp = WEAK_SHORT_ENTRY
                     profile_lev = WEAK_SHORT_LEV
                     profile_sl = WEAK_SHORT_SL
-                # 2. Bear short (aggressive ETH short)
-                elif cfg.get("bear_short", False) and is_sh:
-                    mp = BULL_INITIAL_SIZE
-                    profile_lev = BEAR_SHORT_LEV
-                    profile_sl = BEAR_SHORT_SL
-                # 3. TRX safe short in BTC bear
+                # 2. TRX safe short in BTC bear
                 elif coin == "TRX" and not btc_bull and is_sh:
-                    if sc < SAFE_ENTRY_SCORE: mp = 0
-                    else: mp = SAFE_ENTRY
+                    mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
                     profile_sl = SAFE_SL
-                # 4. Bounce (BTC bear, defensive long)
+                # 3. Bounce (BTC bear, defensive long, strong signal req, 1.5x)
                 elif not btc_bull and not is_sh:
                     is_bounce = coin in ("ETH", "BNB", "TRX")
                     if is_bounce:
@@ -1692,23 +1684,23 @@ def analyse_coin(
                         if coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
                             is_bounce = False
                     if is_bounce:
-                        profile_lev = COIN_BOUNCE_LEV.get(coin, 2.0)
-                        profile_sl = BOUNCE_SL
-                        mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
-                    elif not is_sh:
-                        mp = 0  # non-ETH/BNB/TRX coins blocked in BTC bear
-                # 5. Bull mode (per-coin bull)
+                        if sc < SAFE_ENTRY_SCORE: mp = 0
+                        else:
+                            profile_lev = COIN_BOUNCE_LEV.get(coin, 1.5)
+                            profile_sl = BOUNCE_SL
+                            mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                    else:
+                        mp = 0
+                # 4. Bull mode (per-coin bull)
                 elif _coin_bull and not is_sh:
                     mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
                     profile_lev = 3.5
                     profile_sl = 12
-                # 6. Default (bear mode)
+                # 5. Default: no trade
                 else:
-                    mp = profile["initial_exposure"] * profile["pos_mult"]
-                    if strong: mp *= 1.0
-                    else: mp *= 0.7
-                    profile_lev = profile["lev"]
-                    profile_sl = 12 if coin == "TRX" else profile["sl"]
+                    mp = 0
+                    profile_lev = 1
+                    profile_sl = 1
 
                 if deployed + mp <= max_margin_pct + 0.001:
                     entries.append({
