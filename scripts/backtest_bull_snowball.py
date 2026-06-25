@@ -40,7 +40,7 @@ from trading_config import (
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
-    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
+    BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_ENTRY_SIZE_CHOPPY, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR, BOUNCE_CD_BEAR,
@@ -83,6 +83,33 @@ def aggr(c, n=3):
             'high': max(x['high'] for x in b), 'low': min(x['low'] for x in b),
             'close': b[-1]['close'], 'volume': sum(x['volume'] for x in b)})
     return r
+
+
+def bounce_bear_signal_6h(ds, rsi, v1, v5a, ma7, idx):
+    """6h bounce bear signal: oversold + rejection + volume + near MA7."""
+    if idx < 4:
+        return False
+    cc = ds[-1]['close']; cl = ds[-1]['low']; ch = ds[-1]['high']
+    prev_cc = ds[-2]['close']
+    # 1. Not in freefall (>3% drop in 6h)
+    if prev_cc > 0 and (prev_cc - cc) / prev_cc > 0.03:
+        return False
+    # 2. RSI oversold on 6h
+    if rsi > 35:
+        return False
+    # 3. Price near MA7 (within 5%)
+    if ma7 > 0 and (abs(cc - ma7) / ma7) > 0.05:
+        return False
+    # 4. Long lower wick (bullish rejection at lows)
+    candle_range = ch - cl
+    if candle_range > 0:
+        lower_wick = (min(cc, cl) - cl) / candle_range
+        if lower_wick < 0.35:
+            return False
+    # 5. Volume not dead
+    if len(v1) >= 5 and v5a > 0 and v1[-1] < v5a * 0.7:
+        return False
+    return True
 
 
 def get_cache_key(coin, config_hash):
@@ -710,8 +737,8 @@ def backtest_coin(args_tuple):
 
             # Standard entry (if not already snowballed)
             if not did_snowball:
-                # Bounce in bear: relaxed signal (no uptrend required by compute_entry_v6)
-                if bounce and not el and not es_:  # only override when no short signal
+                # Bounce in bear: relaxed score-based signal (works across regimes)
+                if bounce and not el and not es_:
                     sc_bounce = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
                     if sc_bounce >= BOUNCE_MIN_SCORE_BEAR:
                         el = True
@@ -745,7 +772,7 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_LEV; sl_entry = SAFE_SL
                         bull_entry = False; safe_flag = True; is_trx_safe = True
                         mp = SAFE_ENTRY
-                    # Bounce: defensive long in BTC bear (2.5x, really strong signal req)
+                    # Bounce: defensive long in BTC bear
                     elif bounce and not is_sh:
                         bounce_min_sc = BOUNCE_MIN_SCORE_CHOPPY if btc_safe else BOUNCE_MIN_SCORE
                         if sc < bounce_min_sc: mp = 0
@@ -753,7 +780,7 @@ def backtest_coin(args_tuple):
                             if btc_safe:
                                 lev_entry = COIN_BOUNCE_LEV.get(coin, BOUNCE_LEV_CHOPPY); sl_entry = BOUNCE_SL_CHOPPY
                                 bull_entry = False; eth_flag = True
-                                mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE)
+                                mp = COIN_BOUNCE_ENTRY_SIZE.get(coin, BOUNCE_ENTRY_SIZE_CHOPPY)
                             else:
                                 lev_entry = COIN_BOUNCE_LEV.get(coin, 2.0); sl_entry = BOUNCE_SL
                                 bull_entry = False; eth_flag = True
