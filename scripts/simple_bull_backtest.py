@@ -12,14 +12,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
 BASE = 10000
-LEV = 2.0
-ENTRY_SIZE = 0.10
+LEV = 1.5
+ENTRY_SIZE = 0.10  # 10% of capital per entry (10 entries max at 1.5x = 150% position)
 
 BTC_MA_PERIOD = 200
 TRAIL_RETRACE = 0.80  # trail at 80% of highest (20% retracement)
 
-# Staged TP for 40% of position: 13.3% each at 10/20/30% ROI
-TP_SCHEDULE = [(10, 0.133), (20, 0.133), (30, 0.134)]
+# Staged TP for 30% of position: 10% each at 10/20/30% ROI
+TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -135,7 +135,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
         # Entry: only when BTC Bull Strong
         if btc_bull:
             dep = sum(e.get('mp', ENTRY_SIZE) for e in entries)
-            if (dep < 0.80 and len(entries) < 8 and
+            if (dep < 1.0 and len(entries) < 10 and
                 ma50[idx] and ma100[idx] and
                 cc > ma50[idx] and cc > ma100[idx]):
                 entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE, 'rem': 1.0, 'tp_stage': 0})
