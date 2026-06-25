@@ -17,7 +17,7 @@ def detect_btc_safe(btc_adx: float) -> bool:
     return btc_adx < BTC_ADX_SAFE
 
 def detect_bear_short(btc_safe: bool, btc_bull: bool, coin: str) -> bool:
-    """Aggressive bear short: only ETH, strong BTC bear (ADX≥22)"""
+    """Aggressive bear short: ETH only, strong BTC bear (ADX≥22)"""
     return not btc_safe and not btc_bull and coin == "ETH" and BEAR_SHORT_SNOWBALL
 
 def detect_bounce(coin: str, btc_bull: bool) -> bool:

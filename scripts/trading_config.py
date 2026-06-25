@@ -80,6 +80,7 @@ BEAR_SHORT_LEV      = 3.5
 BEAR_SHORT_SL       = 12
 BEAR_SHORT_SNOWBALL = True
 BEAR_SHORT_SCORE    = 70      # strong signal required for bear short snowball
+BEAR_SHORT_MAX_LOSS = 0.10    # 10% ROI loss limit
 
 # Bounce: 3 same-sized entries, 80% TP 5→25%, peak DD 7%, 3% price trail on remaining
 BOUNCE_ENTRY_SIZE = 0.09

@@ -358,7 +358,6 @@ class TestTradingRules(unittest.TestCase):
 
     def test_detect_bear_short(self):
         from scripts.trading_rules import detect_bear_short
-        # Only ETH, ADX≥22, BTC bear
         self.assertTrue(detect_bear_short(False, False, "ETH"))
         self.assertFalse(detect_bear_short(True, False, "ETH"))   # safe mode
         self.assertFalse(detect_bear_short(False, True, "ETH"))   # BTC bull

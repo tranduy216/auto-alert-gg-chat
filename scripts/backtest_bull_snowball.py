@@ -38,7 +38,7 @@ from trading_config import (
     BTC_BEAR_OVERRIDE,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
-    BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE,
+    BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION,
 
@@ -453,7 +453,7 @@ def backtest_coin(args_tuple):
 
             # Aggressive bear short: same staggered TP + trail as bull longs
             if ent.get('short_agg', False):
-                if raw_roi <= -bull_max_loss_use * 100:
+                if raw_roi <= -BEAR_SHORT_MAX_LOSS * 100:
                     eq += raw_roi*rem2/100*ent_ff; rm = True
                     trades.append({'t':'MAX_LOSS','dir':'S'})
                     consec_s += 1; rolling_sl_short += 1
