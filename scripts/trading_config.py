@@ -105,12 +105,12 @@ BOUNCE_TRAIL_DISTANCE = 0.032  # 3.2% price trail — at 2.0x = 6.4% ROI
 BOUNCE_TRAIL_CLOSE = 1.0
 BOUNCE_TRAIL_ACTIVATION = 0
 
-# Choppy bounce (weak bear — ADX < 22): tight scalp params
-BOUNCE_LEV_CHOPPY      = 1.5
-BOUNCE_SL_CHOPPY       = 2.0    # 1.5x × 1.33% price = 2% ROI stop
-BOUNCE_TP_CHOPPY       = [(3, 0.50), (5, 0.30), (8, 0.20)]
-BOUNCE_PEAK_DD_CHOPPY  = 2.0    # close remaining if 2% from peak ROI
-BOUNCE_TRAIL_DISTANCE_CHOPPY = 0.015  # 1.5% price trail — at 1.5x = 2.25% ROI
+# Choppy bounce (weak bear — ADX < 22): hit-and-run scalp (6h bar, 1x lev)
+BOUNCE_LEV_CHOPPY      = 1.0
+BOUNCE_SL_CHOPPY       = 1.5    # 1x × 1.5% price = 1.5% ROI stop
+BOUNCE_TP_CHOPPY       = [(1.5, 0.25), (3, 0.25), (5, 0.25), (7, 0.25)]
+BOUNCE_PEAK_DD_CHOPPY  = 1.5    # close remaining if 1.5% from peak ROI
+BOUNCE_TRAIL_DISTANCE_CHOPPY = 0.010  # 1% price trail
 BOUNCE_TRAIL_CLOSE_CHOPPY    = 1.0
 BOUNCE_TRAIL_ACTIVATION_CHOPPY = 0
 

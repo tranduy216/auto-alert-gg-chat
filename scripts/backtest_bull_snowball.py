@@ -51,7 +51,7 @@ from trading_config import (
 # All constants imported from trading_config.py
 
 # Local constants (not in trading_config)
-AGGR_N = 2; TMA_F, TMA_M, TMA_S = 7, 14, 28
+AGGR_N = 1; TMA_F, TMA_M, TMA_S = 14, 28, 56
 INITIAL = 75
 BULL_LEV = 3.5
 BULL_REGIME_EXIT = True
