@@ -57,10 +57,10 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_CD,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
-    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, SAFE_CD, BTC_ADX_SAFE, SAFE_MA_BUF,
+    SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
     BTC_BEAR_OVERRIDE,
@@ -1668,7 +1668,6 @@ def analyse_coin(
                     )
                 strong = sc >= cfg["entry_score"]
                 is_bounce = False
-                is_safe_long = False  # track safe long entries
                 
                 # Get HYBRID profile based on market regime
                 profile = get_profile(coin, _coin_bull)
@@ -1676,7 +1675,6 @@ def analyse_coin(
                 # Apply profile parameters (matched to backtest priority)
                 # 1. Safe mode (BTC ADX < 22) – isolated 1.5x long
                 if btc_safe and not is_sh:
-                    is_safe_long = True
                     if sc < SAFE_ENTRY_SCORE: mp = 0
                     else: mp = SAFE_ENTRY
                     profile_lev = SAFE_LEV
@@ -1733,7 +1731,6 @@ def analyse_coin(
                             "lev": profile_lev,
                             "sl_roi": profile_sl,
                             "bounce": is_bounce if not is_sh else False,
-                            "safe_mode": is_safe_long,
                             "snowball_stage": 0,
                         }
                         if is_bounce:
@@ -1745,10 +1742,6 @@ def analyse_coin(
                     entries.append(entry)
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
-                    if entry.get("bounce", False):
-                        cd_l_until = (_now_vnt() + timedelta(hours=BOUNCE_CD * 12)).isoformat()
-                    elif entry.get("safe_mode", False):
-                        cd_l_until = (_now_vnt() + timedelta(hours=SAFE_CD * 12)).isoformat()
 
     # Determine overall action
     if exit_reasons:
