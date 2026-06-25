@@ -74,6 +74,7 @@ SAFE_TP         = [(3, 0.10), (5, 0.20), (8, 0.25), (12, 0.25), (20, 0.20)]  # 8
 SAFE_PEAK_DD    = 2.8     # close remaining if ROI drops 2.8% from peak
 SAFE_ENTRY_SCORE = 75
 SAFE_MA_BUF     = 0.02    # MA50 > MA120 * 1.02 to confirm trend
+SAFE_CD         = 8       # bars between safe entries
 BTC_ADX_SAFE    = 22      # BTC ADX < 22 → safe mode for all coins
 
 # Aggressive bear short: snowball + trailing like long, in BTC strong bear
@@ -97,6 +98,7 @@ BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
 BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
 BOUNCE_MIN_SCORE = 85    # really strong signal required
+BOUNCE_CD = 8            # bars between bounce entries
 
 BOUNCE_TP  = [(4, 0.50), (8, 0.30), (12, 0.25), (16, 0.20)]  # ~80% closed by 16% ROI
 BOUNCE_SL  = 9.0   # 2.0x × 4.5% price = 9% ROI stop
