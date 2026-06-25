@@ -1,8 +1,8 @@
 """
 Simple Bull Market Long Engine
-- BTC Bull Strong: Close > MA200 AND Vol20 > VolMA50
-- Entry: MA20 crosses above MA50
-- Exit: MA20 crosses below MA50, OR trailing 15%, OR BTC not Bull Strong
+- BTC Bull: Close > MA (test 200/180/150)
+- Entry: Coin Close > MA50 > MA100
+- Exit: MA20 < MA50 cross, OR take-profit 35% at 25% ROI, OR -15% hard stop
 - Leverage 2x
 """
 
@@ -13,8 +13,14 @@ from crypto_trading import sma
 
 BASE = 10000
 LEV = 2.0
-ENTRY_SIZE = 0.10  # 10% of capital per entry (max 10 entries = 100%)
-TRAIL_PCT = 0.80   # trail at 80% of highest price (20% retracement)
+ENTRY_SIZE = 0.10
+
+# Configurable BTC MA period for bull filter
+BTC_MA_PERIOD = 200  # test: 200, 180, 150
+
+TP_ROI = 25    # take profit at 25% ROI
+TP_CLOSE = 0.35  # close 35% of remaining at TP
+HARD_STOP = -15  # close all if position drops 15% from entry
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -43,7 +49,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
 
     closes = [c['close'] for c in da]
     n = len(closes)
-    if n < 220:
+    if n < BTC_MA_PERIOD + 20:
         return coin, None
 
     # Indicators
@@ -51,9 +57,9 @@ def backtest_coin(coin, da, btc_da, selected_years):
     ma50 = sma(closes, 50)
     ma100 = sma(closes, 100)
 
-    # BTC indicators (MA200 for bull market filter — protects in bear)
+    # BTC indicators
     btc_closes = [c['close'] for c in btc_da]
-    btc_ma200 = sma(btc_closes, 200)
+    btc_ma = sma(btc_closes, BTC_MA_PERIOD)
 
     # State
     entries = []  # list of {ep, hi, bar_index}
@@ -63,7 +69,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
 
     import datetime
 
-    for idx in range(200, n):
+    for idx in range(BTC_MA_PERIOD, n):
         cc = closes[idx]
         hi = da[idx]['high']
         bl = da[idx]['low']
@@ -82,13 +88,13 @@ def backtest_coin(coin, da, btc_da, selected_years):
                 yearly_eq[yr] = eq
             continue
 
-        # BTC Bull check: Close > MA200 (strong bull market filter)
+        # BTC Bull check: Close > MA(BTC_MA_PERIOD)
         btc_idx = min(idx, len(btc_closes) - 1)
         btc_bull = False
-        if btc_idx >= 200 and btc_ma200[btc_idx]:
-            btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
+        if btc_idx >= BTC_MA_PERIOD and btc_ma[btc_idx]:
+            btc_bull = btc_closes[btc_idx] > btc_ma[btc_idx]
 
-        # Exit: MA20 crosses below MA50 (always check, regardless of BTC bull)
+        # Exit: MA20 crosses below MA50
         for e in entries[:]:
             if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
                 if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
@@ -96,10 +102,23 @@ def backtest_coin(coin, da, btc_da, selected_years):
                     eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # Trailing stop (always check)
+        # Take-profit: at 25% ROI, close 35% of remaining
         for e in entries[:]:
-            loss_pct = (cc - e['hi']) / e['hi'] * 100
-            if loss_pct <= -15 or cc <= e['hi'] * TRAIL_PCT:
+            roi = (cc - e['ep']) / e['ep'] * 100 * LEV
+            if roi >= TP_ROI:
+                rem = e.get('rem', 1.0)
+                close_pct = TP_CLOSE * rem
+                raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
+                eq += raw * close_pct / 100 * (1 - 2 * 0.0005 * LEV)
+                rem -= close_pct
+                e['rem'] = rem
+                if rem <= 0.001:
+                    entries.remove(e)
+
+        # Hard stop: -15% from entry (protect against major drops)
+        for e in entries[:]:
+            roi = (cc - e['ep']) / e['ep'] * 100 * LEV
+            if roi <= HARD_STOP:
                 raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
                 eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
@@ -110,11 +129,7 @@ def backtest_coin(coin, da, btc_da, selected_years):
             if (dep < 0.80 and len(entries) < 8 and
                 ma50[idx] and ma100[idx] and
                 cc > ma50[idx] and cc > ma100[idx]):
-                entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE})
-
-        # Update highest price for trailing
-        for e in entries:
-            e['hi'] = max(e['hi'], hi)
+                entries.append({'ep': cc, 'mp': ENTRY_SIZE, 'rem': 1.0})
 
         # Track equity
         ureal = 0
@@ -162,7 +177,7 @@ def main():
     data = load_data()
     print(f"Loaded {len(data)} symbols")
 
-    coins = ['BTC', 'ETH', 'BNB', 'TRX']
+    coins = ['BTC', 'BNB', 'TRX']
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
     results = []
 
