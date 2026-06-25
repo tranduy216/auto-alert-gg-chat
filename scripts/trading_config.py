@@ -67,7 +67,7 @@ TRX_BOUNCE_MA_BUF = 0.018   # 1.8%
 
 # Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)
 SAFE_LEV        = 1.5
-SAFE_SL         = 3.3     # tight stop loss %
+SAFE_SL         = 6.75    # 1.5x × 4.5% price = 6.75% ROI stop
 SAFE_ENTRY      = 0.035   # 3.5% equity including margin
 SAFE_TP         = [(3, 0.10), (5, 0.20), (8, 0.25), (12, 0.25), (20, 0.20)]  # 80% at 3-12%, max 20%
 SAFE_PEAK_DD    = 2.8     # close remaining if ROI drops 2.8% from peak
@@ -84,7 +84,7 @@ BEAR_SHORT_MAX_LOSS = 0.10    # 10% ROI loss limit
 
 # Safe short: isolated 2x for BTC bear
 SAFE_SHORT_LEV      = 2.0
-SAFE_SHORT_SL       = 7.0
+SAFE_SHORT_SL       = 9.0    # 2x × 4.5% price = 9% ROI stop
 SAFE_SHORT_ENTRY    = 0.035   # 3.5% equity per entry
 SAFE_SHORT_SCORE    = 1       # any signal fires
 SAFE_SHORT_TP       = [(3, 0.20), (6, 0.30), (9, 0.30), (12, 0.20)]  # 100% at 3-12%
@@ -98,7 +98,7 @@ BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
 BOUNCE_MIN_SCORE = 80    # really strong signal required
 
 BOUNCE_TP  = [(4, 0.50), (8, 0.30), (12, 0.25), (16, 0.20)]  # ~80% closed by 16% ROI
-BOUNCE_SL  = 7.0
+BOUNCE_SL  = 11.25  # 2.5x × 4.5% price = 11.25% ROI stop
 BOUNCE_PEAK_DD = 7.0
 BOUNCE_TRAIL_DISTANCE = 0.032  # 8% ROI at 2.5x = 3.2% price trail on remaining ~20%
 BOUNCE_TRAIL_CLOSE = 1.0

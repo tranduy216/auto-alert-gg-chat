@@ -251,7 +251,7 @@ class TestSafeMode(unittest.TestCase):
     def test_safe_mode_constants(self):
         from trading_config import SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE
         self.assertEqual(SAFE_LEV, 1.5)
-        self.assertEqual(SAFE_SL, 3.3)
+        self.assertEqual(SAFE_SL, 6.75)
         self.assertLess(SAFE_ENTRY, 0.05)  # small entry for safety
         self.assertGreater(SAFE_ENTRY_SCORE, 70)  # strong signal
         self.assertGreater(BTC_ADX_SAFE, 15)  # reasonable ADX threshold
