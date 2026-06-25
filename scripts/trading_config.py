@@ -3,7 +3,7 @@ Centralized Trading Configuration
 All constants, profiles, and per-coin settings reference this file.
 """
 
-COINS = ["ETH", "BNB", "TRX"]
+COINS = ["ETH", "TRX"]
 SYMBOL_MAP = {coin: f"{coin}USDT" for coin in COINS}
 
 BASE = 10000

@@ -26,7 +26,7 @@ from crypto_trading import (
     _fib_cooldown_bars, compute_adx,
 )
 from trading_config import (
-    SF, BASE, ENTRY_MIN_SCORE, TP_SCHEDULE, FEE_RATE,
+    COINS, SF, BASE, ENTRY_MIN_SCORE, TP_SCHEDULE, FEE_RATE,
     SHORT_ALLOWED, MAX_POS_PCT,
     BULL_SNOWBALL_LEVELS, BULL_SNOWBALL_SIZES, BULL_INITIAL_SIZE,
     BULL_TRAIL_DISTANCE, BULL_TRAIL_ACTIVATION,
@@ -820,7 +820,7 @@ def main():
 
     if args.coin: coins = [args.coin.upper()]
     elif args.coins: coins = [c.strip().upper() for c in args.coins.split(',')]
-    else: coins = ["ETH", "BNB", "TRX"]
+    else: coins = COINS[:]
 
     if args.years:
         selected_years = set(int(y.strip()) for y in args.years.split(','))
