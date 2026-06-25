@@ -85,31 +85,64 @@ def aggr(c, n=3):
     return r
 
 
-def bounce_bear_signal_6h(ds, rsi, v1, v5a, ma7, idx):
-    """6h bounce bear signal: oversold + rejection + volume + near MA7."""
-    if idx < 4:
-        return False
-    cc = ds[-1]['close']; cl = ds[-1]['low']; ch = ds[-1]['high']
+def bounce_bear_score(ds, rsi, v1, v5a, ma7, ma20, close):
+    """Score 0-100 for bounce in bear. Higher = stronger oversold bounce.
+    
+    Designed for bear markets — ignores trend_score/MA alignment.
+    Uses: freefall guard, RSI oversold, bullish candle, volume spike, MA7 proximity.
+    """
+    if len(ds) < 3:
+        return 0
+    cc = ds[-1]['close']; cl = ds[-1]['low']; ch = ds[-1]['high']; co = ds[-1]['open']
     prev_cc = ds[-2]['close']
-    # 1. Not in freefall (>3% drop in 6h)
-    if prev_cc > 0 and (prev_cc - cc) / prev_cc > 0.03:
-        return False
-    # 2. RSI oversold on 6h
-    if rsi > 35:
-        return False
-    # 3. Price near MA7 (within 5%)
-    if ma7 > 0 and (abs(cc - ma7) / ma7) > 0.05:
-        return False
-    # 4. Long lower wick (bullish rejection at lows)
+    score = 0
+
+    # 1. Freefall guard (20 pts) — skip if >3% drop in one bar
+    drop_pct = (prev_cc - cc) / prev_cc * 100 if prev_cc > 0 else 0
+    if drop_pct > 3:
+        return 0
+    if drop_pct > 1:      score += 5
+    elif drop_pct > -0.5: score += 15
+    else:                 score += 20
+
+    # 2. RSI oversold zone (25 pts)
+    if   rsi < 30: score += 25
+    elif rsi < 35: score += 20
+    elif rsi < 40: score += 15
+    elif rsi < 45: score += 10
+    elif rsi < 50: score += 5
+
+    # 3. Bullish candle pattern (25 pts)
     candle_range = ch - cl
     if candle_range > 0:
-        lower_wick = (min(cc, cl) - cl) / candle_range
-        if lower_wick < 0.35:
-            return False
-    # 5. Volume not dead
-    if len(v1) >= 5 and v5a > 0 and v1[-1] < v5a * 0.7:
-        return False
-    return True
+        body = abs(cc - co)
+        lower_wick = min(cc, co) - cl
+        upper_wick = ch - max(cc, co)
+        lw_pct = lower_wick / candle_range
+        uw_pct = upper_wick / candle_range
+        if lw_pct > 0.50: score += 15
+        elif lw_pct > 0.35: score += 10
+        elif lw_pct > 0.20: score += 5
+        if uw_pct < 0.20: score += 5
+        if cc > co:        score += 5
+
+    # 4. Volume confirmation (15 pts)
+    if len(v1) >= 5 and v5a > 0:
+        vr = v1[-1] / v5a
+        if   vr > 2.0: score += 15
+        elif vr > 1.5: score += 12
+        elif vr > 1.0: score += 8
+        elif vr > 0.7: score += 4
+
+    # 5. Near MA7 support (15 pts)
+    if ma7 > 0:
+        d = abs(cc - ma7) / ma7
+        if   d < 0.01: score += 15
+        elif d < 0.02: score += 12
+        elif d < 0.03: score += 8
+        elif d < 0.05: score += 4
+
+    return round(score, 1)
 
 
 def get_cache_key(coin, config_hash):
@@ -737,10 +770,10 @@ def backtest_coin(args_tuple):
 
             # Standard entry (if not already snowballed)
             if not did_snowball:
-                # Bounce in bear: relaxed score-based signal (works across regimes)
+                # Bounce in bear: relaxed score-based signal (uses _entry_score_v7_long, lower bar)
                 if bounce and not el and not es_:
-                    sc_bounce = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
-                    if sc_bounce >= BOUNCE_MIN_SCORE_BEAR:
+                    sc_bb = _entry_score_v7_long(ts,cc,ma7,ma10,exec_s,ma200,ef,em,vs,v1[-1],v5a,rsi1)
+                    if sc_bb >= BOUNCE_MIN_SCORE_BEAR:
                         el = True
                 _, act = resolve_action_v6(ts, el, es_, 'FLAT')
                 if act in ('OPEN_LONG_ENTRY_1','OPEN_SHORT_ENTRY_1'):
