@@ -1,8 +1,6 @@
 """
-New Strategy Backtest — 1d, 2x lev, isolated positions
-Trend detection: MA10/30/100/180
-- Bull: buy pullbacks near MA30/MA100
-- Bear: buy strong bounces near MA100/MA180
+New Strategy v2 — 1d, 2x lev, limit entry near MA5-MA25 zone
+TP 60% staged 7-50% ROI, 40% trail at 18% ROI, SL 25%, peak DD 18%
 """
 
 import json, hashlib, argparse, sys
@@ -47,7 +45,7 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
 
     closes = [c['close'] for c in da]
     n = len(closes)
-    if n < MA180 + 10:
+    if n < MA100 + 20:
         return coin, None
 
     # ── Indicators ──
@@ -56,35 +54,20 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             return 50.0
         return compute_rsi(closes[:idx+1], period)
 
-    ma10 = sma(closes, MA10)
-    ma30 = sma(closes, MA30)
+    ma5 = sma(closes, MA5)
+    ma25 = sma(closes, MA25)
     ma100 = sma(closes, MA100)
-    ma180 = sma(closes, MA180)
     vol_ma20 = sma([c['volume'] for c in da], 20)
 
-    # Trend score: -3 (strong bear) to +3 (strong bull) based on MA alignment
-    def trend_score(idx):
-        m10 = ma10[idx]; m30 = ma30[idx]; m100 = ma100[idx]; m180 = ma180[idx]
-        if None in (m10, m30, m100, m180):
-            return 0
-        score = 0
-        if m10 > m30: score += 1
-        if m30 > m100: score += 1
-        if m100 > m180: score += 1
-        if m10 < m30: score -= 1
-        if m30 < m100: score -= 1
-        if m100 < m180: score -= 1
-        return score
-
     # ── State ──
-    entries = []   # list of dicts: entry_price, size, rem, tp_stage, is_bounce, ...
+    entries = []
     eq = 1.0
     curve = []
     yearly_eq = {}
     lei = -999  # last entry index
 
     # ── Main loop ──
-    for idx in range(max(MA180 + 10, 200), n):
+    for idx in range(max(MA100 + 10, 150), n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
         d_cur = __import__('datetime').datetime.fromtimestamp(da[idx]['open_time'] / 1000)
         cur_year = d_cur.year
@@ -101,76 +84,43 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             continue
 
         # ── Entry logic ──
-        ts = trend_score(idx)
-        rsi_v = rsi_at(idx)
-        vol = da[idx]['volume']
-        vol_avg = vol_ma20[idx] if vol_ma20[idx] and vol_ma20[idx] > 0 else vol
-        vs = vol / vol_avg if vol_avg > 0 else 0.2
-        m10_v = ma10[idx]; m30_v = ma30[idx]; m100_v = ma100[idx]; m180_v = ma180[idx]
-        if None in (m10_v, m30_v, m100_v, m180_v):
+        m5_v = ma5[idx]; m25_v = ma25[idx]; m100_v = ma100[idx]
+        if None in (m5_v, m25_v, m100_v):
             curve.append(eq)
             if d_cur.month == 12: yearly_eq[cur_year] = eq
             continue
 
         dep = sum(e['mp'] for e in entries)
-        can_enter = dep < MAX_COIN_EQ_PCT and (idx - lei >= 3)  # 3-day cooldown
+        can_enter = dep < MAX_COIN_EQ_PCT and (idx - lei >= 3)
 
         if can_enter and len(entries) < MAX_ENTRIES:
-            # Trend direction from MA alignment
-            ma_bull = m10_v > m30_v > m100_v   # full bull alignment
-            ma_bear = m10_v < m30_v < m100_v   # full bear alignment
-            near_m30 = m30_v > 0 and abs(cc - m30_v) / m30_v < 0.03
-            near_m100 = m100_v > 0 and abs(cc - m100_v) / m100_v < 0.05
-
-            entered = False
-
-            # Trend: MA100 > MA180 = bull, MA100 < MA180 = bear
-            is_bull_trend = m100_v > m180_v
-            is_bear_trend = m100_v < m180_v
-            near_m30 = m30_v > 0 and abs(cc - m30_v) / m30_v < 0.05
-
-            # Bull pullback: bull trend + price near MA30 + RSI cooling
-            if not entered and is_bull_trend and rsi_v < 50 and near_m30:
+            # Buy when: price > MA5 (short-term up) AND price < MA25 (pullback from resistance)
+            if cc > m5_v and cc < m25_v * 1.01:
                 entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
-                         'hi': cc, 'tstop': None, 'lev': LEV, 'sl': BULL_SL,
-                         'is_bounce': False, 'tp_sched': BULL_TP,
-                         'trail_act': BULL_TRAIL_ACT, 'trail_dist': BULL_TRAIL_DIST,
-                         'trail_close': BULL_TRAIL_CLOSE}
-                entries.append(entry); lei = idx; entered = True
-
-            # Bear bounce: bear trend + oversold RSI + bullish candle (long lower wick)
-            if not entered and is_bear_trend and rsi_v < 38:
-                c_range = hi - bl
-                lower_wick = (min(cc, da[idx]['open']) - bl) / c_range if c_range > 0 else 0
-                long_wick = lower_wick > 0.35
-                good_vol = vs > 0.7
-                if long_wick or good_vol:
-                    entry = {'ep': cc, 'mp': ENTRY_SIZE, 'tp': 0, 'rem': 1.0,
-                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': BEAR_SL,
-                             'is_bounce': True, 'tp_sched': BEAR_TP,
-                             'trail_act': BEAR_TRAIL_ACT, 'trail_dist': BEAR_TRAIL_DIST,
-                             'trail_close': BEAR_TRAIL_CLOSE}
-                    entries.append(entry); lei = idx; entered = True
+                         'hi': cc, 'tstop': None, 'lev': LEV, 'sl': SL,
+                         'tp_sched': TP_60,
+                         'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                         'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                entries.append(entry); lei = idx
 
         # ── Exit logic ──
         ne = []
         for e in entries:
-            ep = e['ep']; mp = e['mp']; rem = e['rem']; tp_s = e['tp']
+            ep = e['ep']; rem = e['rem']; tp_s = e['tp']
             hi_e = e['hi']; tstop = e['tstop']
-            lev = e['lev']; sl = e['sl']
+            sl = e['sl']; lev = e['lev']
             tp_sched = e['tp_sched']; trail_act = e['trail_act']
             trail_dist = e['trail_dist']; trail_close = e['trail_close']
-            is_bounce = e['is_bounce']
+            peak_dd = e['peak_dd']
             ff = 1 - 2 * FEE_RATE * lev
-            raw_roi = (cc - ep) / ep * 100 * mp * lev
-
+            raw_roi = (cc - ep) / ep * 100 * e['mp'] * lev
             rm = False
 
             # SL
             if raw_roi <= -sl:
                 eq += raw_roi * rem / 100 * ff; rm = True
 
-            # Staggered TP
+            # Staggered TP (60% of position)
             elif not rm and tp_s < len(tp_sched):
                 trg, cf_pct = tp_sched[tp_s]
                 if raw_roi >= trg:
@@ -178,15 +128,20 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                     eq += raw_roi * cf / 100 * ff
                     rem -= cf; e['rem'] = rem; e['tp'] = tp_s + 1
                     if rem <= 0.001: rm = True
-                    e['_peak_roi'] = raw_roi
+                e['_peak_roi'] = max(e.get('_peak_roi', -999), raw_roi)
 
-            # Trail after all TPs
+            # Peak DD: close remaining if profit drops peak_dd% from peak
             if not rm:
-                peak_r = max(e.get('_peak_roi', -999), raw_roi)
-                e['_peak_roi'] = peak_r
+                peak_r = e.get('_peak_roi', -999)
+                if peak_r > 0 and peak_r - raw_roi >= peak_dd:
+                    eq += raw_roi * rem / 100 * ff; rm = True
+
+            # Trail remaining (40% of position, after all TPs complete)
+            if not rm:
+                e['_peak_roi'] = max(e.get('_peak_roi', -999), raw_roi)
                 if tp_s >= len(tp_sched):
-                    pnl = (cc - ep) / ep
-                    if pnl * 100 >= trail_act:
+                    pnl = (cc - ep) / ep * 100
+                    if pnl >= trail_act:
                         if tstop is None:
                             tstop = cc * (1 - trail_dist)
                         tstop = max(tstop, hi_e * (1 - trail_dist))
