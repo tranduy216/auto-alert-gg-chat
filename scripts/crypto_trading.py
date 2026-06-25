@@ -57,7 +57,7 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR, BOUNCE_CD_BEAR,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
@@ -1728,7 +1728,11 @@ def analyse_coin(
                     profile_lev = 1
                     profile_sl = 1
 
-                    if deployed + mp <= max_margin_pct + 0.001 and len(entries) < MAX_ENTRIES_PER_COIN:
+                    # Mode-specific entry limit: bounce & safe long capped at 3
+                    mode_max = MAX_ENTRIES_PER_COIN
+                    if is_bounce or is_safe_long:
+                        mode_max = 3
+                    if deployed + mp <= max_margin_pct + 0.001 and len(entries) < mode_max:
                         entry = {
                             "entry_price": last_close,
                             "margin_pct": mp,
@@ -1751,6 +1755,8 @@ def analyse_coin(
                     entries.append(entry)
                     entry_action = "OPEN_LONG_ENTRY_1" if not is_sh else "OPEN_SHORT_ENTRY_1"
                     last_entry_ts = now_ts
+                    if entry.get("bounce", False):
+                        cd_l_until = (_now_vnt() + timedelta(hours=BOUNCE_CD_BEAR * 6)).isoformat()
 
     # Determine overall action
     if exit_reasons:
