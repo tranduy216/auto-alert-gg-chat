@@ -47,7 +47,7 @@ PROFILES_BEAR = {
 
 BULL_SNOWBALL_LEVELS = [0.05, 0.10, 0.15]
 BULL_SNOWBALL_SIZES = [0.06, 0.06, 0.06, 0.06]
-BULL_INITIAL_SIZE = 0.10
+BULL_INITIAL_SIZE = 0.08   # 8% equity per entry
 BULL_TRAIL_DISTANCE = 0.11
 BULL_TRAIL_ACTIVATION = 0.40
 BULL_TRAIL_CLOSE = 0.60
@@ -91,7 +91,7 @@ SAFE_SHORT_TP       = [(3, 0.20), (6, 0.30), (9, 0.30), (12, 0.20)]  # 100% at 3
 SAFE_SHORT_PEAK_DD  = 2.5     # close remaining if profit drops 2.5% from peak
 
 # Bounce: 3 same-sized entries, 80% TP 4→16%, peak DD 7%, 20% trails at 8% ROI
-BOUNCE_ENTRY_SIZE = 0.09
+BOUNCE_ENTRY_SIZE = 0.06   # 6% equity per entry
 BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
 BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
