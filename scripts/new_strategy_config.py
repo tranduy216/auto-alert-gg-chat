@@ -25,6 +25,12 @@ VOL_MAX_RATIO = 3.0
 # ── Resistance levels (Fibonacci MAs) ──
 RESISTANCE_LEVELS = [5, 8, 13, 21]
 
+# ── Resistance-based SL ──
+# Each entry level maps to the next lower MA for SL placement
+NEXT_LOWER_MA = {5: None, 8: 5, 13: 8, 21: 13, 50: 21, 100: 50}
+SL_MA_BUF = 0.97  # SL at 97% of the next lower MA (3% buffer below it)
+SL_FIXED_FALLBACK = 15  # fallback SL % if no lower MA (for MA5 entries)
+
 # ── Exit ──
 TP_60 = [(7, 0.15), (15, 0.15), (25, 0.15), (35, 0.15)]
 SL = 25        # 25% ROI at 1.5x = 16.7% price move

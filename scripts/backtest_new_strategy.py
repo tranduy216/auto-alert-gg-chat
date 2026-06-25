@@ -106,7 +106,15 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
             good_filters = adx_v >= ADX_MIN and RSI_MIN <= rsi_v <= RSI_MAX and vol_ratio >= VOL_MIN_RATIO
             # Bear market protection: reduce position size by half when below MA100
             entry_mp = ENTRY_SIZE * (0.5 if cc < m100 else 1.0)
-            entry_sl = 25 if cc < m100 else 40  # wider SL in bull market
+
+            # Dynamic SL based on entry resistance level
+            def calc_sl(entry_ma, ep, idx):
+                lower_ma = NEXT_LOWER_MA.get(entry_ma)
+                if lower_ma and mas[lower_ma][idx] and mas[lower_ma][idx] > 0:
+                    sl_price = mas[lower_ma][idx] * SL_MA_BUF
+                    sl_roi = (ep - sl_price) / ep * 100 * LEV
+                    return max(sl_roi, 20)  # minimum 20% ROI stop
+                return SL_FIXED_FALLBACK  # fallback for MA5
 
             if good_filters:
                 # Entry type 1: cross resistance from below (pullback entry)
@@ -116,20 +124,21 @@ def backtest_coin(coin, data_cache, use_cache, selected_years):
                         prev_close = closes[idx-1]
                         if prev_close < ma_v and cc >= ma_v and cc > m100 * 0.95:
                             entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                                     'hi': cc, 'tstop': None, 'lev': LEV, 'sl': entry_sl,
-                                 'tp_sched': TP_60,
-                                 'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
-                                 'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
+                                     'hi': cc, 'tstop': None, 'lev': LEV, 'sl': calc_sl(p, cc, idx),
+                                     'tp_sched': TP_60,
+                                     'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
+                                     'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
                             entries.append(entry); lei = idx
                             yearly_entries[str(cur_year)] = yearly_entries.get(str(cur_year), 0) + 1
                             break
 
 
-            # Entry type 3: trend-following — confirmed bull, green day (wider SL, deeper pullback)
+            # Entry type 3: trend-following — buy pullback TO MA50 in bull market
             if not lei == idx and m5 and m50 and m100:
-                if cc > m100 and m5 > m50 and cc > da[idx]['open'] and cc < m50 * 1.02:
+                near_m50 = m50 > 0 and cc < m50 * 1.02 and cc > m50 * 0.97
+                if near_m50 and cc > m100 and cc > da[idx]['open']:
                     entry = {'ep': cc, 'mp': entry_mp, 'tp': 0, 'rem': 1.0,
-                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': 50,  # wider SL for trend entries
+                             'hi': cc, 'tstop': None, 'lev': LEV, 'sl': calc_sl(50, cc, idx),
                              'tp_sched': TP_60,
                              'trail_act': TRAIL_ACT, 'trail_dist': TRAIL_DIST,
                              'trail_close': TRAIL_CLOSE, 'peak_dd': PEAK_DD}
