@@ -43,7 +43,7 @@ from trading_config import (
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,)
@@ -742,7 +742,7 @@ def backtest_coin(args_tuple):
                         mp = SAFE_ENTRY
                     # Bounce: defensive long in BTC bear (2.5x, really strong signal req)
                     elif bounce and not is_sh:
-                        bounce_min_sc = BOUNCE_MIN_SCORE
+                        bounce_min_sc = BOUNCE_MIN_SCORE_CHOPPY if btc_safe else BOUNCE_MIN_SCORE
                         if sc < bounce_min_sc: mp = 0
                         else:
                             if btc_safe:

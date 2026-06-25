@@ -96,7 +96,8 @@ BOUNCE_ENTRY_SIZE = 0.06   # 6% equity per entry
 BOUNCE_MAX_ENTRIES = 3
 BOUNCE_SNOWBALL_LEVELS = [0.05, 0.10]
 BOUNCE_SNOWBALL_SIZES = [0.09, 0.09, 0.09]
-BOUNCE_MIN_SCORE = 85    # really strong signal required
+BOUNCE_MIN_SCORE = 85    # really strong signal required (normal market)
+BOUNCE_MIN_SCORE_CHOPPY = 65  # looser in weak bear — more scalps with tight stops
 
 BOUNCE_TP  = [(4, 0.50), (8, 0.30), (12, 0.25), (16, 0.20)]  # ~80% closed by 16% ROI
 BOUNCE_SL  = 9.0   # 2.0x × 4.5% price = 9% ROI stop

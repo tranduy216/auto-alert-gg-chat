@@ -57,7 +57,7 @@ from trading_config import (  # centralized config
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE, BOUNCE_TRAIL_ACTIVATION,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY,
     BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, SAFE_MA_BUF,
@@ -1700,7 +1700,7 @@ def analyse_coin(
                         elif coin == "TRX" and ma50_temp <= ma120_temp * (1 + TRX_BOUNCE_MA_BUF):
                             is_bounce = False
                     if is_bounce:
-                        bounce_min_sc = BOUNCE_MIN_SCORE
+                        bounce_min_sc = BOUNCE_MIN_SCORE_CHOPPY
                         if sc < bounce_min_sc: mp = 0
                         else:
                             profile_lev = COIN_BOUNCE_LEV.get(coin, BOUNCE_LEV_CHOPPY)
