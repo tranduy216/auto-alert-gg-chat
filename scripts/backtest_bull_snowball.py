@@ -687,12 +687,11 @@ def backtest_coin(args_tuple):
 
                     safe_flag = False; eth_flag = False; bnb_flag = False; short_flag = False; is_trx_safe = False
                     # ── 4 simple modes ──
-                    # 1. Bull mode: BTC bull + coin bull (aggressive: 3.5x, no SL, snowball, trail)
+                    # 1. Bull mode: 3x, 15% entry, no SL, strong signal + MA buffer
                     if btc_bull and is_bull and not is_sh and ma50_pc > ma120_pc * (1 + TREND_MA_BUF):
-                        lev_entry = bull_lev_use
-                        sl_entry = hybrid_profile['sl']
+                        lev_entry = 3.0; sl_entry = 99
                         bull_entry = True; ct_flag = False; eth_flag = False
-                        mp = COIN_BULL_INITIAL_SIZE.get(coin, BULL_INITIAL_SIZE)
+                        mp = 0.15
                     # 2. Safe long: BTC or coin ADX < 22 (isolated 1.5x)
                     elif (btc_safe or (pre_adx[idx] is not None and pre_adx[idx] < BTC_ADX_SAFE)) and not is_sh:
                         if sc < SAFE_ENTRY_SCORE: mp = 0
@@ -704,11 +703,11 @@ def backtest_coin(args_tuple):
                         lev_entry = SAFE_SHORT_LEV; sl_entry = 99
                         bull_entry = False; safe_flag = True; short_flag = True
                         mp = SAFE_SHORT_ENTRY
-                    # 4. Bear short: both BTC + coin bear, strong ADX >= 22
+                    # 4. Bear short: 3x, 15% entry, no SL, both bear + ADX >= 22
                     elif not btc_safe and not btc_bull and not is_bull and is_sh:
-                        lev_entry = SAFE_SHORT_LEV; sl_entry = SAFE_SHORT_SL
+                        lev_entry = 3.0; sl_entry = 99
                         bull_entry = False; safe_flag = True; short_flag = True
-                        mp = SAFE_SHORT_ENTRY
+                        mp = 0.15
                     else:
                         mp = 0  # default: no trade (no mode matched)
                         lev_entry = 1; sl_entry = 1
@@ -728,6 +727,10 @@ def backtest_coin(args_tuple):
                             entry['_dd_t'] = SAFE_SHORT_PEAK_DD
                     entries.append(entry)
                     lei = idx
+                    # 3-day cooldown for risky modes (bull, bear short)
+                    if bull_entry or (not btc_safe and not btc_bull and is_sh):
+                        cd_l_until = idx + 12
+                        cd_s_until = idx + 12
 
         # --- Equity tracking ---
         ureal = 0
