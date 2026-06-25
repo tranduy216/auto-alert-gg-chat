@@ -1731,7 +1731,7 @@ def analyse_coin(
                     # Mode-specific entry limit: bounce & safe long capped at 3
                     mode_max = MAX_ENTRIES_PER_COIN
                     if is_bounce or is_safe_long:
-                        mode_max = 3
+                        mode_max = 4
                     if deployed + mp <= max_margin_pct + 0.001 and len(entries) < mode_max:
                         entry = {
                             "entry_price": last_close,

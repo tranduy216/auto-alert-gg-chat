@@ -110,13 +110,14 @@ BOUNCE_TRAIL_ACTIVATION = 0
 
 # Choppy bounce (weak bear — ADX < 22): hit-and-run scalp (6h bar, 1x lev)
 BOUNCE_LEV_CHOPPY      = 1.0
-BOUNCE_SL_CHOPPY       = 1.4    # 1x × 1.4% price = 1.4% ROI stop
-BOUNCE_TP_CHOPPY       = [(2, 0.25), (4, 0.25), (6, 0.50)]
-BOUNCE_PEAK_DD_CHOPPY  = 1.4    # close remaining if 1.4% from peak ROI
-BOUNCE_TRAIL_DISTANCE_CHOPPY = 0.010  # 1% price trail
-BOUNCE_TRAIL_CLOSE_CHOPPY    = 1.0
-BOUNCE_TRAIL_ACTIVATION_CHOPPY = 0
+BOUNCE_SL_CHOPPY       = 1.2    # 1x × 1.2% price = 1.2% ROI stop
+BOUNCE_TP_CHOPPY       = [(2, 0.20), (3, 0.20), (4, 0.20), (5, 0.20), (6, 0.20)]
+BOUNCE_PEAK_DD_CHOPPY  = 1.2    # close remaining if 1.2% from peak ROI
+BOUNCE_TRAIL_DISTANCE_CHOPPY = 0  # no trail
+BOUNCE_TRAIL_CLOSE_CHOPPY    = 0
+BOUNCE_TRAIL_ACTIVATION_CHOPPY = 99  # disabled
 BOUNCE_CD_BEAR = 12   # 3 days cooldown (12 bars at 6h)
+BOUNCE_SNOWBALL_CHOPPY = False  # no snowball for bounce bear
 
 # Per-coin bounce overrides
 COIN_BOUNCE_LEV = {}  # default 2.0

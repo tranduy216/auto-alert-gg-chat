@@ -43,7 +43,7 @@ from trading_config import (
     BOUNCE_TP, BOUNCE_SL, BOUNCE_PEAK_DD, BOUNCE_ENTRY_SIZE, BOUNCE_ENTRY_SIZE_CHOPPY, BOUNCE_TRAIL_DISTANCE, BOUNCE_TRAIL_CLOSE,
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
-    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR, BOUNCE_CD_BEAR,
+    BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_TRAIL_ACTIVATION, BOUNCE_MIN_SCORE, BOUNCE_MIN_SCORE_CHOPPY, BOUNCE_MIN_SCORE_BEAR, BOUNCE_CD_BEAR, BOUNCE_SNOWBALL_CHOPPY,
 
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,)
@@ -747,7 +747,7 @@ def backtest_coin(args_tuple):
                                 break
 
             # Bounce snowball: up to BOUNCE_MAX_ENTRIES same-sized entries
-            if bounce and has_l and not has_s and not did_snowball:
+            if bounce and has_l and not has_s and not did_snowball and not BOUNCE_SNOWBALL_CHOPPY:
                 for ent in entries:
                     if not ent.get('bounce', False) or ent.get('is_short', False): continue
                     ent_ep = ent['ep']
@@ -831,7 +831,7 @@ def backtest_coin(args_tuple):
                     # Mode-specific entry limit: bounce bear & safe long capped at 3
                     mode_max = MAX_ENTRIES_PER_COIN
                     if (bounce and btc_safe) or (safe_flag and not short_flag and not is_sh):
-                        mode_max = 3
+                        mode_max = 4
                     if mp > 0 and len(entries) < mode_max and dep + mp <= coin_max_ms + 0.001:
                         entry = {'ep':cc,'mp':mp,'tp':0,'rem':1.0,'hi':cc,
                             'tstop':None,'is_short':is_sh,
