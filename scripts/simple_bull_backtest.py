@@ -14,24 +14,24 @@ from crypto_trading import sma
 BASE = 10000
 LEV = 2.0
 ENTRY_SIZE = 0.10  # 10% of capital per entry (max 10 entries = 100%)
-TRAIL_PCT = 0.85   # trail at 85% of highest price (15% retracement)
+TRAIL_PCT = 0.80   # trail at 80% of highest price (20% retracement)
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
     with open(p) as f:
         raw = json.load(f)
-    # Aggregate 6h → 1d
+    # Aggregate 12h → 1d: take every 2nd bar
     data = {}
     for sym, candles in raw.items():
         daily = []
-        for i in range(3, len(candles), 4):
-            b4 = candles[i-3:i+1]
+        for i in range(1, len(candles), 2):
+            b2 = candles[i-1:i+1]
             daily.append({
-                'close': b4[-1]['close'],
-                'high': max(x['high'] for x in b4),
-                'low': min(x['low'] for x in b4),
-                'volume': sum(x['volume'] for x in b4),
-                'time': b4[0]['open_time'],
+                'close': b2[-1]['close'],
+                'high': max(x['high'] for x in b2),
+                'low': min(x['low'] for x in b2),
+                'volume': sum(x['volume'] for x in b2),
+                'time': b2[0]['open_time'],
             })
         data[sym] = daily
     return data
@@ -49,9 +49,9 @@ def backtest_coin(coin, da, btc_da, selected_years):
     # Indicators
     ma20 = sma(closes, 20)
     ma50 = sma(closes, 50)
-    ma200 = sma(closes, 200)
+    ma100 = sma(closes, 100)
 
-    # BTC indicators
+    # BTC indicators (MA200 for bull market filter — protects in bear)
     btc_closes = [c['close'] for c in btc_da]
     btc_ma200 = sma(btc_closes, 200)
 
@@ -82,41 +82,34 @@ def backtest_coin(coin, da, btc_da, selected_years):
                 yearly_eq[yr] = eq
             continue
 
-        # BTC Bull Strong check: Close > MA200 (simple)
+        # BTC Bull check: Close > MA200 (strong bull market filter)
         btc_idx = min(idx, len(btc_closes) - 1)
         btc_bull = False
         if btc_idx >= 200 and btc_ma200[btc_idx]:
             btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
 
-        # If not Bull Strong → exit all, no new entries
-        if not btc_bull:
-            if entries:
-                for e in entries:
-                    raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                    eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-                entries = []
-        else:
-            # Exit: MA20 crosses below MA50
-            for e in entries[:]:
-                if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
-                    if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
-                        raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
-                        eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-                        entries.remove(e)
-
-            # Trailing stop
-            for e in entries[:]:
-                loss_pct = (cc - e['hi']) / e['hi'] * 100
-                if loss_pct <= -15 or cc <= e['hi'] * TRAIL_PCT:
+        # Exit: MA20 crosses below MA50 (always check, regardless of BTC bull)
+        for e in entries[:]:
+            if idx > 0 and ma20[idx] and ma50[idx] and ma20[idx-1] and ma50[idx-1]:
+                if ma20[idx-1] >= ma50[idx-1] and ma20[idx] < ma50[idx]:
                     raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
                     eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-            # Entry: Close > MA20 > MA50 (uptrend confirmed) AND coin > MA200
+        # Trailing stop (always check)
+        for e in entries[:]:
+            loss_pct = (cc - e['hi']) / e['hi'] * 100
+            if loss_pct <= -15 or cc <= e['hi'] * TRAIL_PCT:
+                raw = (cc - e['ep']) / e['ep'] * 100 * ENTRY_SIZE * LEV
+                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                entries.remove(e)
+
+        # Entry: only when BTC Bull Strong
+        if btc_bull:
             dep = sum(e.get('mp', ENTRY_SIZE) for e in entries)
             if (dep < 0.80 and len(entries) < 8 and
-                ma20[idx] and ma50[idx] and ma200[idx] and
-                cc > ma20[idx] and ma20[idx] > ma50[idx] and cc > ma200[idx]):
+                ma50[idx] and ma100[idx] and
+                cc > ma50[idx] and cc > ma100[idx]):
                 entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE})
 
         # Update highest price for trailing
