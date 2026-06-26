@@ -16,6 +16,7 @@ from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position, okx_place_algo,
+    okx_get_algo_orders, okx_cancel_algo,
 )
 from utils.state_manager import has_entered_today, record_entry, set_state
 from backtest_shared import ENTRY_PCT
@@ -72,11 +73,20 @@ def manage_positions(log, btc_bull=False):
         if not coin:
             continue
         lev = COIN_LEV.get(coin, 1.8)
+        # Cancel any trailing stop before changing leverage
+        try:
+            algos = okx_get_algo_orders(inst_id, ord_type='move_order_stop')
+            if algos:
+                algo_ids = [a['algoId'] for a in algos]
+                okx_cancel_algo(inst_id, algo_ids)
+                log(f"  Cancel old trail for {coin}")
+        except Exception:
+            pass
         try:
             okx_set_leverage(inst_id, lev)
-            log(f"  Leverage re-set {lev}x for {coin}")
+            log(f"  Leverage {lev}x for {coin}")
         except Exception as lev_err:
-            log(f"  Leverage re-set failed for {coin}: {lev_err}")
+            log(f"  Leverage failed for {coin}: {lev_err}")
         if not btc_bull or float(p.get('pos', 0)) > 0:
             continue
         log(f"  CLOSE {coin}: BTC bull regime")

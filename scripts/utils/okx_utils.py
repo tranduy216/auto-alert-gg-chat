@@ -96,11 +96,11 @@ def okx_get_positions(inst_type: str = "SWAP") -> List[dict]:
 
 
 def okx_set_leverage(inst_id: str, lever: float, mgn_mode: str = "cross") -> dict | None:
-    """Set leverage for an instrument."""
+    """Set leverage for an instrument. Use str(lever) to preserve fractional values."""
     try:
         return _okx_request("POST", "/api/v5/account/set-leverage", {
             "instId": inst_id,
-            "lever": str(int(lever)),
+            "lever": str(lever),
             "mgnMode": mgn_mode,
         })
     except OKXError:
