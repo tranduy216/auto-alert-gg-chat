@@ -16,6 +16,9 @@ MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
+SHORT_TP = [(4, 0.15), (6, 0.15), (8, 0.20), (10, 0.20), (12, 0.20), (14, 0.10)]
+# Short TP ladder: 15%@4%, 15%@6%, 20%@8%, 20%@10%, 20%@12%, 10%@14% = 100%
+HARD_SL = 8             # hard stop loss % for shorts (close all when roi <= -HARD_SL)
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
 EXT_BLOCK_PCT = 30      # block adds when price >30% from lowest entry
@@ -116,10 +119,12 @@ def total_asset_value(entries, cc, eq, lev):
 
 # ── Results Computation ──
 
-def compute_results(curve, yearly_eq, base=BASE):
-    """From curve and yearly_eq dict, compute CAGR, MD, yearly, final."""
+def compute_results(curve, yearly_eq, base=BASE, days=None):
+    """From curve (daily equity values), yearly_eq (year-end dict), compute CAGR, MD, etc.
+    If days is provided, use it for CAGR period calculation (more accurate than len/365).
+    """
     teq = curve[-1] if curve else 1.0
-    years = len(curve) / 365 if curve else 1
+    years = (days or len(curve)) / 365 if (days or curve) else 1
     cagr = (teq ** (1 / years) - 1) * 100 if teq > 0 else 0
 
     peak = curve[0] if curve else teq
