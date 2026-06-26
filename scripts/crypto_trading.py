@@ -57,7 +57,7 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Trailing stop for longs via peak_price (20% below peak). Close all shorts if BTC bull."""
+    """Trailing stop for longs via peak_price. Close all shorts if BTC bull."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -84,13 +84,13 @@ def manage_positions(log, btc_bull=False):
             if mark_px > peak:
                 peak = mark_px
             if mark_px <= peak * TRAIL_PCT:
-                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak=${peak:,.2f}, drop={(1-mark_px/peak)*100:.1f}%)")
+                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak=${peak:,.2f})")
                 try:
                     okx_close_position(inst_id)
                     set_state(coin, {'peak_price': 0})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak ${peak:,.2f})")
+                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f}")
                 except Exception as e:
                     log(f"  CLOSE {coin} failed: {e}")
             else:
@@ -100,7 +100,7 @@ def manage_positions(log, btc_bull=False):
                 log(f"  CLOSE {coin}: BTC bull regime")
                 try:
                     okx_close_position(inst_id)
-                    set_state(coin, {'peak_price': 0})
+                    set_state(coin, {})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
                 except Exception as e:
@@ -219,9 +219,13 @@ def main():
                 okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
+                    sl_px = None
+                    if name == 'BTC':
+                        sl_px = str(round(price * 1.20, 1))
                     result = okx_place_order(
                         inst_id=inst_id, td_mode='cross',
                         side=side, sz=str(sz),
+                        sl_trigger_px=sl_px,
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
                     if direction == 'SELL':
@@ -240,8 +244,8 @@ def main():
                                 pass
                         log(f"  TP ladder set")
                     record_entry(name, price)
-                    # Reset peak_price on new entry
-                    set_state(name, {'peak_price': price})
+                    if direction == 'BUY':
+                        set_state(name, {'peak_price': price})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
