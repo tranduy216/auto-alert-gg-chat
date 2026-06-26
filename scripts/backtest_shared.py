@@ -26,7 +26,7 @@ MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
 BTC_SHORT_TP = [(4, 0.20), (8, 0.20), (12, 0.20), (16, 0.20), (20, 0.20)]
-# Short TP ladder: 15%@4%, 15%@6%, 20%@8%, 20%@10%, 20%@12%, 10%@14% = 100%
+# Short TP ladder: 20%@4%, 20%@8%, 20%@12%, 20%@16%, 20%@20% = 100%
 HARD_SL = 8             # hard stop loss % for shorts (close all when roi <= -HARD_SL)
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
