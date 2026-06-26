@@ -55,8 +55,8 @@ def check_signals(coin_da, btc_da, cfg, is_short):
     return should, cc
 
 
-def manage_positions(log):
-    """Check open positions: trailing stop for longs, TP ladder for short BTC."""
+def manage_positions(log, btc_bull=False):
+    """Check open positions: trailing stop for longs, TP ladder + trend exit for short BTC."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -96,6 +96,16 @@ def manage_positions(log):
             else:
                 set_state(coin, {'trail_high': trail_high})
         else:
+            if btc_bull:
+                log(f"  CLOSE {coin}: BTC bull regime (close all short)")
+                try:
+                    okx_close_position(inst_id)
+                    set_state(coin, {'tp_stage': 0})
+                    if DISCORD_WEBHOOK:
+                        send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
+                except Exception as e:
+                    log(f"  CLOSE {coin} failed: {e}")
+                continue
             tp_stage = state.get('tp_stage', 0)
             if tp_stage < len(BTC_SHORT_TP):
                 trg, frac = BTC_SHORT_TP[tp_stage]
@@ -166,8 +176,16 @@ def main():
                 eq = float(acct.get('totalEq', 0))
             log(f"Equity: ${eq:,.0f}")
 
+            # BTC regime check for short exit
+            btc_bull = False
+            if btc_da and len(btc_da) >= 200:
+                btc_closes = [c['close'] for c in btc_da]
+                btc_ma200 = sma(btc_closes, 200)
+                if btc_ma200[-1]:
+                    btc_bull = btc_closes[-1] > btc_ma200[-1]
+
             log("Checking positions...")
-            manage_positions(log)
+            manage_positions(log, btc_bull)
 
             pos = okx_get_positions()
             pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}
