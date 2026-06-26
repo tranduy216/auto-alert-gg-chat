@@ -105,7 +105,8 @@ def main():
             log(f"Equity: ${eq:,.0f}")
 
             pos = okx_get_positions()
-            log(f"Open positions: {len(pos)}")
+            pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}
+            log(f"Open positions: {len(pos_map)}")
 
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
@@ -126,7 +127,22 @@ def main():
                     log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
-                usd_val = eq * ENTRY_PCT
+                mult = 1.0
+                if inst_id in pos_map:
+                    avg_px = float(pos_map[inst_id].get('avgPx', 0))
+                    if avg_px > 0:
+                        if direction == 'SELL':
+                            roi = (avg_px - price) / avg_px * 100 * lev
+                        else:
+                            roi = (price - avg_px) / avg_px * 100 * lev
+                        if roi > 15:     mult = 2.5
+                        elif roi > 10:   mult = 2.0
+                        elif roi > 5:    mult = 1.5
+                        elif roi > 0:    mult = 1.2
+                        elif roi > -5:   mult = 0.75
+                        else:            mult = 0.5
+
+                usd_val = eq * ENTRY_PCT * mult
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
@@ -135,7 +151,7 @@ def main():
 
                 log(f"  Set leverage {name} {lev}x")
                 okx_set_leverage(inst_id, lev)
-                log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, ctVal={ct_val})")
+                log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
                         inst_id=inst_id, td_mode='cross',
