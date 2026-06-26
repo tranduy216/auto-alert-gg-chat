@@ -105,8 +105,7 @@ def main():
             log(f"Equity: ${eq:,.0f}")
 
             pos = okx_get_positions()
-            open_insts = {p['instId'] for p in pos if float(p.get('pos', 0)) != 0}
-            log(f"Open positions: {len(open_insts)}")
+            log(f"Open positions: {len(pos)}")
 
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
@@ -117,9 +116,6 @@ def main():
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
-                    continue
-                if inst_id in open_insts:
-                    log(f"  {name}: already in position, skipped")
                     continue
                 if inst_id not in inst_map:
                     log(f"  {name}: {inst_id} not available on OKX, skipped")
