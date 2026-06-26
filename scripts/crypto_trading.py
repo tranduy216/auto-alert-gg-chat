@@ -76,7 +76,11 @@ def main():
     if os.environ.get("OKX_API_KEY"):
         try:
             acct = okx_get_account()
-            eq = float(acct.get('details', [{}])[0].get('eqUsd', 0) or acct.get('data', [{}])[0].get('totalEq', 0) or 0)
+            eq = 0
+            for d in acct.get('data', []):
+                if isinstance(d, dict):
+                    eq = float(d.get('totalEq', 0) or d.get('eq', 0) or 0)
+                    if eq > 0: break
             if eq <= 0:
                 eq = float(acct.get('totalEq', 0))
             log(f"Equity: ${eq:,.0f}")
@@ -93,35 +97,37 @@ def main():
             for name, direction, price in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
-                    log(f"  {name}: no OKX instrument mapping, skipped")
+                    log(f"  {name}: no instrument mapping, skipped")
                     continue
                 if inst_id in open_insts:
-                    log(f"  {name}: already have position, skipped")
+                    log(f"  {name}: already in position, skipped")
                     continue
 
-                lev = 1.8 if name != 'BTC' else 1.6
                 usd_val = eq * ENTRY_PCT
-                ct_val = inst_map.get(inst_id, {}).get('ctVal', '0.01')
-                ct_val = float(ct_val) if ct_val else 0.01
+                inst_info = inst_map.get(inst_id, {})
+                ct_val_str = inst_info.get('ctVal', '')
+                ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
-
                 side = 'buy' if direction == 'BUY' else 'sell'
-                pos_side = 'long' if direction == 'BUY' else 'short'
 
-                log(f"  TRADE {name} {direction}: {sz} contracts @ ${price:,.4f} (${usd_val:,.0f})")
-                result = okx_place_order(
-                    inst_id=inst_id, td_mode='cross',
-                    side=side, pos_side=pos_side,
-                    sz=str(sz),
-                )
-                log(f"  Order: {result.get('data', [{}])[0].get('ordId', '?')}")
-
-                if DISCORD_WEBHOOK:
-                    send_message(DISCORD_WEBHOOK,
-                        f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
+                log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, ctVal={ct_val})")
+                try:
+                    result = okx_place_order(
+                        inst_id=inst_id, td_mode='cross',
+                        side=side, sz=str(sz),
+                    )
+                    log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    if DISCORD_WEBHOOK:
+                        send_message(DISCORD_WEBHOOK,
+                            f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
+                except Exception as trade_err:
+                    log(f"  Order FAILED: {trade_err}")
+                    if DISCORD_WEBHOOK:
+                        send_message(DISCORD_WEBHOOK,
+                            f"FAILED: {name} {direction} — {trade_err}")
 
         except Exception as e:
-            log(f"OKX error: {e}")
+            log(f"OKX setup error: {e}")
             import traceback; traceback.print_exc(file=sys.stderr)
     else:
         log("OKX not configured — signal only")
