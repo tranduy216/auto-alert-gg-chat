@@ -12,11 +12,16 @@ from crypto_trading import sma
 
 BASE = 10000; LEV = 1.5
 ENTRY_PCT = 0.015
-TRAIL_PCT = 0.80
-MA_BUF = 0.02       # 2% buffer
-MA_PERIOD = 5       # MA5 pullback entry
-PYRAMID_ROI = 5
+TRAIL_PCT = 0.80      # 20% trail
+MA_BUF = 0.03          # 3% buffer
+MA_PERIOD = 20         # MA20 pullback entry
+PYRAMID_ROI_DEFAULT = 5
+BTC_MA_BULL = 120   # strong bull: BTC > MA120
+BTC_MA_WEAK = 200   # weak bull: BTC > MA200
+PYR_STRONG = 8      # pyramid ROI threshold in strong bull
+PYR_WEAK = 5        # pyramid ROI threshold in weak bull
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
+# 4 TP levels, 25% each
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -32,14 +37,14 @@ def load_data():
         data[sym] = daily
     return data
 
-def winner_mult(entries, cc, is_short):
+def winner_mult(entries, cc, is_short, lev):
     if not entries: return 1.0
     rois = []
     for e in entries:
         if is_short:
-            roi = (e['ep'] - cc) / e['ep'] * 100 * LEV
+            roi = (e['ep'] - cc) / e['ep'] * 100 * lev
         else:
-            roi = (cc - e['ep']) / e['ep'] * 100 * LEV
+            roi = (cc - e['ep']) / e['ep'] * 100 * lev
         rois.append(roi)
     avg = sum(rois) / len(rois)
     if avg > 15:    return 2.5
@@ -49,11 +54,18 @@ def winner_mult(entries, cc, is_short):
     elif avg > -5:  return 0.75
     else:           return 0.5
 
-def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
+def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None):
     if not da or len(da) < 60: return coin, None
+    if cfg is None: cfg = {}
+    lev_coin = cfg.get('lev', LEV)
+    ma_period = cfg.get('ma', MA_PERIOD)
+    ma_buf = cfg.get('buf', MA_BUF)
+    pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
+    tp_sched = cfg.get('tp', TP_SCHEDULE)
+    trail_pct = cfg.get('trail', TRAIL_PCT)
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
-    ma_short = sma(closes, MA_PERIOD); vol_ma20 = sma(vols, 20)
+    ma_short = sma(closes, ma_period); vol_ma20 = sma(vols, 20)
 
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
     btc_ma200 = sma(btc_closes, 200) if btc_closes else None
@@ -61,6 +73,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
 
     entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}
+    ts_curve = []  # (timestamp, equity) for portfolio merging
     import datetime
 
     for idx in range(200, n):
@@ -70,19 +83,20 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
         if selected_years and yr not in selected_years:
             for e in entries:
                 if e.get('is_short'):
-                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
+                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                 else:
-                    raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
-                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                    raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
+                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * lev_coin)
             entries = []
             curve.append(eq)
+            ts_curve.append((da[idx]['time'], eq))
             if dt.month == 12: yearly_eq[yr] = eq
             continue
 
         m_ma = ma_short[idx]; vavg = vol_ma20[idx]
         if m_ma is None or vavg is None or vavg == 0: continue
 
-        # BTC regime: longs when BTC > MA200, shorts when BTC < MA200
+        # BTC regime: bull when BTC > MA200
         btc_bull = False
         if btc_ma200:
             btc_idx = min(idx, len(btc_closes) - 1)
@@ -90,57 +104,58 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
                 btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
 
         vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
-        near_ma = abs(cc - m_ma) / m_ma <= MA_BUF
+        near_ma = abs(cc - m_ma) / m_ma <= ma_buf
         red_bar = idx > 0 and cc < closes[idx-1]
         dep = sum(e.get('mp', 0) for e in entries)
-        mult = winner_mult(entries, cc, is_short)
+        mult = winner_mult(entries, cc, is_short, lev_coin)
 
-        # ── BTC regime exit ──
+        # Block entry entirely when price extended >30% from lowest entry price
+        if entries:
+            lowest_ep = min(e['ep'] for e in entries)
+            ext = (cc - lowest_ep) / lowest_ep * 100
+            if ext > 30:
+                mult = 0  # block adds
+
+        # ── BTC regime exit (longs: no exit, shorts: exit on bull) ──
         for e in entries[:]:
-            if not e.get('is_short') and not btc_bull:
-                raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
-                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-                entries.remove(e)
-                continue
             if e.get('is_short') and btc_bull:
-                raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
-                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
+                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * lev_coin)
                 entries.remove(e)
                 continue
 
-            # ── Per-position exit: trail + TP ──
+            # ── Per-position exit: TP + trail ──
             if e.get('is_short'):
                 e['lo'] = min(e.get('lo', bl), bl)
-                roi = (e['ep'] - cc) / e['ep'] * 100 * LEV
+                roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
                 tp_stage = e.get('tp', 0)
-                if tp_stage < len(TP_SCHEDULE):
-                    trg, cf = TP_SCHEDULE[tp_stage]
+                if tp_stage < len(tp_sched):
+                    trg, cf = tp_sched[tp_stage]
                     if roi >= trg:
-                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
-                        eq += raw * cf / 100 * (1 - 2 * 0.0005 * LEV)
+                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
+                        eq += raw * cf / 100 * (1 - 2 * 0.0005 * lev_coin)
                         e['rem'] = e.get('rem', 1.0) - cf
                         e['tp'] = tp_stage + 1
                         if e.get('rem', 1.0) <= 0.001: entries.remove(e) 
-                elif cc >= e['lo'] / TRAIL_PCT:
-                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV * e.get('rem', 1.0)
-                    eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
+                elif cc >= e['lo'] / trail_pct:
+                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                    eq += raw / 100 * (1 - 2 * 0.0005 * lev_coin)
                     entries.remove(e)
             else:
-                # Long trail
                 e['hi'] = max(e.get('hi', cc), hi)
-                if cc <= e['hi'] * TRAIL_PCT:
-                    raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV * e.get('rem', 1.0)
-                    eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
+                if cc <= e['hi'] * trail_pct:
+                    raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                    eq += raw / 100 * (1 - 2 * 0.0005 * lev_coin)
                     entries.remove(e)
 
-        # ── Entry: BTC gate + red bar near MA ──
-        can_enter_long = not is_short and btc_bull
+        # ── Entry: BTC two-regime gate, near MA ──
+        can_enter_long = not is_short
         can_enter_short = is_short and not btc_bull
         active = can_enter_long or can_enter_short
 
-        if active and near_ma and vol_cond and (idx - lei >= 0):
-            mp = eq * ENTRY_PCT / LEV * mult
-            if (dep + mp) * LEV <= max_cap * eq:
+        if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
+            mp = eq * ENTRY_PCT / lev_coin * mult
+            if (dep + mp) * lev_coin <= max_cap * eq:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                 if is_short: e['lo'] = bl
                 else: e['hi'] = cc
@@ -150,13 +165,13 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
         # Pyramid
         if active and last_ep > 0 and (idx - lei >= 0):
             if can_enter_long:
-                roi = (cc - last_ep) / last_ep * 100 * LEV
+                roi = (cc - last_ep) / last_ep * 100 * lev_coin
             else:
-                roi = (last_ep - cc) / last_ep * 100 * LEV
-            if roi >= PYRAMID_ROI:
+                roi = (last_ep - cc) / last_ep * 100 * lev_coin
+            if roi >= pyr_roi:
                 dep = sum(e.get('mp', 0) for e in entries)
-                mp = eq * ENTRY_PCT / LEV * mult
-                if (dep + mp) * LEV <= max_cap * eq:
+                mp = eq * ENTRY_PCT / lev_coin * mult
+                if (dep + mp) * lev_coin <= max_cap * eq:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                     if is_short: e['lo'] = bl
                     else: e['hi'] = cc
@@ -166,11 +181,11 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
         ureal = 0
         for e in entries:
             if e.get('is_short'):
-                roi = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
+                roi = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
             else:
-                roi = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
-            ureal += roi * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-        total_eq = eq + ureal; curve.append(total_eq)
+                roi = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
+            ureal += roi * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * lev_coin)
+        total_eq = eq + ureal; curve.append(total_eq); ts_curve.append((da[idx]['time'], total_eq))
         if dt.month == 12: yearly_eq[yr] = total_eq
 
     # Capture final partial year
@@ -191,46 +206,80 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
     for y in sorted(yearly_eq.keys()):
         prev = yearly_eq.get(y - 1, 1.0)
         yearly_cagr[y] = (yearly_eq[y] / prev - 1) * 100
-    return coin, {'cagr': cagr, 'dd': md, 'final': teq * BASE, 'yearly': yearly_cagr}
+    return coin, {'cagr': cagr, 'dd': md, 'final': teq * BASE, 'yearly': yearly_cagr, 'ts_curve': ts_curve}
 
 
 def main():
+    # Optimal leverage per coin
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
-    # Long: TRX, BNB, ADA (100% cap per coin)
-    # Short: BTC only (30% cap)
     strategies = [
-        ('TRX-L', 'TRX', False, 1.0),
-        ('BNB-L', 'BNB', False, 1.0),
-        ('ADA-L', 'ADA', False, 1.0),
-        ('BTC-S', 'BTC', True, 0.30),
+        ('TRX-L', 'TRX', False, 1.0,  {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('BNB-L', 'BNB', False, 1.0,  {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('BTC-S', 'BTC', True,  0.30, {'ma': 20, 'buf': 0.03, 'pyr': 5, 'lev': 1.6}),
     ]
 
     results = {}
-    for label, coin, is_short, max_cap in strategies:
+    for label, coin, is_short, max_cap, cfg in strategies:
         sym = f'{coin}USDT_4000_1609434000000'
         da = data.get(sym, [])
-        btc = btc_da  # always pass BTC data for regime gate
-        res = backtest_coin(coin, da, btc, is_short, max_cap, None)
+        btc = btc_da
+        res = backtest_coin(coin, da, btc, is_short, max_cap, None, cfg)
         if res[1]: results[label] = res[1]
 
+    # Merge portfolio equity curves by timestamp
+    curves = [results[s[0]]['ts_curve'] for s in strategies if s[0] in results]
+    if curves:
+        merged = {}
+        for curve in curves:
+            for ts, eq in curve:
+                merged[ts] = merged.get(ts, []) + [eq]
+        tss = sorted(merged.keys())
+        portfolio_eq = []
+        yearly = {}
+        peak = 1.0; md = 0
+        import datetime
+        for ts in tss:
+            vals = merged[ts]
+            if len(vals) != len(curves): continue
+            avg_eq = sum(vals) / len(vals)
+            portfolio_eq.append(avg_eq)
+            if avg_eq > peak: peak = avg_eq
+            dd = (peak - avg_eq) / peak * 100
+            if dd > md: md = dd
+            yr = datetime.datetime.fromtimestamp(ts / 1000).year
+            yearly[yr] = avg_eq
+        pf_yearly_cagr = {}
+        for y in sorted(yearly.keys()):
+            prev = yearly.get(y - 1, 1.0)
+            pf_yearly_cagr[y] = (yearly[y] / prev - 1) * 100
+        years_held = len(tss) / 365 if tss else 1
+        pf_cagr = (portfolio_eq[-1] ** (1 / years_held) - 1) * 100 if portfolio_eq else 0
+
     print("=" * 70)
-    print("COMBINED LONG + SHORT — YEARLY CAGR (standalone fresh $10k)")
+    print("COMBINED LONG + SHORT — YEARLY CAGR (per-coin tuned)")
     print("=" * 70)
     years = list(range(2021, 2027))
-    header = f"{'Strategy':<12}" + "".join(f"{y:>8}" for y in years) + f"{'CAGR':>8}"
+    header = f"{'Strategy':<12}" + "".join(f"{y:>8}" for y in years) + f"{'CAGR':>8}  {'Max DD':>8}  {'Lev':>5}"
     print(header)
     print("-" * 70)
-    for label in [s[0] for s in strategies]:
+    for label, coin, is_short, max_cap, cfg in strategies:
         if label in results:
             r = results[label]
             cagr_yr = r.get('yearly', {})
             row = f"{label:<12}"
             for y in years:
                 row += f"{cagr_yr.get(y, 0):>+7.1f}%"
-            row += f"{r['cagr']:>+7.1f}%"
+            lev_used = cfg.get('lev', 1.5)
+            row += f"{r['cagr']:>+7.1f}%  {r['dd']:>7.1f}%  {lev_used:>4.1f}x"
             print(row)
+    print("-" * 70)
+    row = f"{'Portfolio':<12}"
+    for y in years:
+        row += f"{pf_yearly_cagr.get(y, 0):>+7.1f}%"
+    row += f"{pf_cagr:>+7.1f}%  {md:>7.1f}%"
+    print(row)
     print("=" * 70)
 
 if __name__ == '__main__': main()
