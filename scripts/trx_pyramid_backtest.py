@@ -1,10 +1,9 @@
 """
-TRX Strategy — Long only, pyramiding
-Entry: price near MA20 (1.5% buffer) + vol2d > volMA20
-Each entry: 2% of CURRENT equity (compounding)
-Pyramid: +1 entry when previous reaches 7% ROI
-Cooldown: 1.5 days between entries
-Exit: trailing 20%
+TRX Strategy — Long only, pyramiding, winner-takes-more
+Entry: price near MA20 (3% buffer) + vol2d > volMA20
+Sizing: 1.5% of CURRENT equity, scaled by avg ROI
+Pyramid: +1 entry when previous reaches 5% ROI
+Max coin position: 100% of equity (1.5x lev)
 """
 
 import json, argparse, sys
@@ -12,12 +11,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
-BASE = 10000; LEV = 1.0
-ENTRY_PCT = 0.015   # 1.5% of current equity
+BASE = 10000; LEV = 1.5
+ENTRY_PCT = 0.015   # 1.5% base entry
 TRAIL_PCT = 0.80    # 20% retracement
 MA_BUF = 0.03       # 3% buffer from MA20
 PYRAMID_ROI = 5     # 5% ROI triggers pyramid
-COOLDOWN = 0        # no cooldown
+COOLDOWN = 0
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -34,16 +33,28 @@ def load_data():
     return data
 
 
+def winner_mult(entries, cc):
+    """Return entry size multiplier based on avg ROI of open positions"""
+    if not entries: return 1.0
+    rois = [(cc - e['ep']) / e['ep'] * 100 * LEV for e in entries]
+    avg = sum(rois) / len(rois)
+    if avg > 15:    return 2.5
+    elif avg > 10:  return 2.0
+    elif avg > 5:   return 1.5
+    elif avg > 0:   return 1.2
+    elif avg > -5:  return 0.75
+    else:           return 0.5
+
+
 def backtest_coin(coin, da, selected_years):
     if not da or len(da) < 50: return coin, None
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
-    ma20 = sma(closes, 20)
-    vol_ma20 = sma(vols, 20)
+    ma20 = sma(closes, 20); vol_ma20 = sma(vols, 20)
 
-    entries = []   # list of {ep, hi, mp}
-    eq = 1.0       # equity as fraction of BASE
-    lei = -999; last_ep = 0
+    entries = []
+    eq = 1.0
+    lei = -999; last_ep = 0; max_dep = 0; max_entries = 0
     curve = []; yearly_eq = {}
     import datetime
 
@@ -64,10 +75,9 @@ def backtest_coin(coin, da, selected_years):
         m20 = ma20[idx]; vavg = vol_ma20[idx]
         if m20 is None or vavg is None or vavg == 0: continue
 
-        # ── Volume condition: last 2 days > 20-day avg ──
         vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
 
-        # ── Exit: trailing 20% only ──
+        # ── Exit: trailing 20% ──
         for e in entries[:]:
             e['hi'] = max(e.get('hi', cc), hi)
             if cc <= e['hi'] * TRAIL_PCT:
@@ -75,20 +85,30 @@ def backtest_coin(coin, da, selected_years):
                 eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
 
-        # ── Entry: near MA20 + volume, with cooldown ──
+        # ── Entry: near MA20, volume, cap at 100% position ──
+        dep = sum(e.get('mp', 0) for e in entries)
         near_ma20 = abs(cc - m20) / m20 <= MA_BUF
+        mult = winner_mult(entries, cc)
+
         if near_ma20 and vol_cond and (idx - lei >= COOLDOWN):
-            mp = eq * ENTRY_PCT
-            entries.append({'ep': cc, 'hi': cc, 'mp': mp})
-            last_ep = cc; lei = idx
+            mp = eq * ENTRY_PCT * mult
+            if (dep + mp) * LEV <= eq:  # cap at 100% position
+                entries.append({'ep': cc, 'hi': cc, 'mp': mp})
+                last_ep = cc; lei = idx
 
-        # ── Pyramid: previous entry reaches 7% ROI ──
-        if last_ep > 0 and (cc - last_ep) / last_ep * 100 >= PYRAMID_ROI and (idx - lei >= COOLDOWN):
-            mp = eq * ENTRY_PCT
-            entries.append({'ep': cc, 'hi': cc, 'mp': mp})
-            last_ep = cc; lei = idx
+        # ── Pyramid: prev entry reaches 5% ROI ──
+        dep = sum(e.get('mp', 0) for e in entries)
+        if last_ep > 0 and (cc - last_ep) / last_ep * 100 * LEV >= PYRAMID_ROI and (idx - lei >= COOLDOWN):
+            mp = eq * ENTRY_PCT * mult
+            if (dep + mp) * LEV <= eq:
+                entries.append({'ep': cc, 'hi': cc, 'mp': mp})
+                last_ep = cc; lei = idx
 
-        # ── Track equity ──
+        # ── Track max deployed ──
+        dep_total = sum(e.get('mp', 0) for e in entries)
+        if dep_total > max_dep: max_dep = dep_total
+        if len(entries) > max_entries: max_entries = len(entries)
+
         ureal = 0
         for e in entries:
             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
@@ -109,7 +129,7 @@ def backtest_coin(coin, da, selected_years):
         prev = yearly_eq.get(y - 1, 1.0)
         yearly_cagr[y] = (yearly_eq[y] / prev - 1) * 100
 
-    print(f"{coin}: CAGR {cagr:+.2f}%  DD {md:.1f}%  Final ${teq*BASE:,.0f}")
+    print(f"{coin}: CAGR {cagr:+.2f}%  DD {md:.1f}%  Final ${teq*BASE:,.0f}  MaxPos {max_dep*LEV*100:.0f}%({max_entries}e)")
     for y in sorted(yearly_cagr): print(f"  {y}: {yearly_cagr[y]:+.2f}%")
     return coin, {'cagr': cagr, 'dd': md, 'final': teq * BASE, 'yearly': yearly_cagr}
 
@@ -121,7 +141,7 @@ def main():
     args = parser.parse_args()
     selected_years = set(int(y.strip()) for y in args.years.split(',')) if args.years else None
     data = load_data()
-    coins = ['TRX', 'ETH', 'BNB', 'LINK', 'BTC']
+    coins = ['TRX', 'BNB', 'BTC', 'ETH']
     results = []
     for coin in coins:
         da = data.get(f'{coin}USDT_4000_1609434000000', [])
