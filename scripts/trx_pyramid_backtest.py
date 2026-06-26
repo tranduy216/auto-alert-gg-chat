@@ -1,9 +1,10 @@
 """
 TRX Strategy — Long only, pyramiding
-Entry: price near MA20 (1.5% buffer) + volume > avg
-Sizing: 1.5% of CURRENT equity per entry (compounding)
-Pyramid: +1 entry every 10% price increase from last entry
-Exit: trailing 20% or MA20 < MA50 cross
+Entry: price near MA20 (1.5% buffer) + vol2d > volMA20
+Each entry: 2% of CURRENT equity (compounding)
+Pyramid: +1 entry when previous reaches 7% ROI
+Cooldown: 1.5 days between entries
+Exit: trailing 20%
 """
 
 import json, argparse, sys
@@ -12,10 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
 BASE = 10000; LEV = 1.0
-ENTRY_PCT = 0.015   # 1.5% of current equity
+ENTRY_PCT = 0.02    # 2% of current equity
 TRAIL_PCT = 0.80    # 20% retracement
-MA_BUF = 0.015       # 1.5% buffer from MA20
-PYRAMID_PCT = 0.10   # 10% price increase from last entry
+MA_BUF = 0.015      # 1.5% buffer from MA20
+PYRAMID_ROI = 7     # 7% ROI triggers pyramid
+COOLDOWN = 1        # 1 bar cooldown (approx 1.5 days on daily)
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -37,13 +39,12 @@ def backtest_coin(coin, da, selected_years):
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
     ma20 = sma(closes, 20)
-    ma50 = sma(closes, 50)
     vol_ma20 = sma(vols, 20)
 
     entries = []   # list of {ep, hi, mp}
     eq = 1.0       # equity as fraction of BASE
+    lei = -999; last_ep = 0
     curve = []; yearly_eq = {}
-    last_ep = 0    # last entry price for pyramiding
     import datetime
 
     for idx in range(30, n):
@@ -74,24 +75,23 @@ def backtest_coin(coin, da, selected_years):
                 eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
 
-        # ── Entry: price near MA20 (1.5% buffer) + volume ──
+        # ── Entry: near MA20 + volume, with cooldown ──
         near_ma20 = abs(cc - m20) / m20 <= MA_BUF
-        if near_ma20 and vol_cond and (not last_ep or idx > 0):
-            # Enter new position at 1.5% of current equity
-            mp = eq * ENTRY_PCT  # fraction of BASE
-            entries.append({'ep': cc, 'hi': cc, 'mp': mp})
-            last_ep = cc
-
-        # ── Pyramid: +10% from last entry price ──
-        if last_ep > 0 and cc >= last_ep * (1 + PYRAMID_PCT):
+        if near_ma20 and vol_cond and (idx - lei >= COOLDOWN):
             mp = eq * ENTRY_PCT
             entries.append({'ep': cc, 'hi': cc, 'mp': mp})
-            last_ep = cc
+            last_ep = cc; lei = idx
+
+        # ── Pyramid: previous entry reaches 7% ROI ──
+        if last_ep > 0 and (cc - last_ep) / last_ep * 100 >= PYRAMID_ROI and (idx - lei >= COOLDOWN):
+            mp = eq * ENTRY_PCT
+            entries.append({'ep': cc, 'hi': cc, 'mp': mp})
+            last_ep = cc; lei = idx
 
         # ── Track equity ──
         ureal = 0
         for e in entries:
-            raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV / BASE
+            raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
             ureal += raw / 100 * (1 - 2 * 0.0005 * LEV)
         total_eq = eq + ureal; curve.append(total_eq)
         if dt.month == 12: yearly_eq[yr] = total_eq
