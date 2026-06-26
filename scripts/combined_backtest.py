@@ -48,7 +48,7 @@ def winner_mult(entries, cc, is_short):
     elif avg > -5:  return 0.75
     else:           return 0.5
 
-def backtest_coin(coin, da, btc_da, is_short, selected_years):
+def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
     if not da or len(da) < 60: return coin, None
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
@@ -151,7 +151,7 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
 
         if active and near_ma20 and vol_cond and (idx - lei >= 0):
             mp = eq * ENTRY_PCT / LEV * mult * btc_size_mult
-            if (dep + mp) * LEV <= eq:
+            if (dep + mp) * LEV <= max_cap * eq:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                 if is_short: e['lo'] = bl
                 else: e['hi'] = cc
@@ -167,7 +167,7 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
             if roi >= PYRAMID_ROI:
                 dep = sum(e.get('mp', 0) for e in entries)
                 mp = eq * ENTRY_PCT / LEV * mult * btc_size_mult
-                if (dep + mp) * LEV <= eq:
+                if (dep + mp) * LEV <= max_cap * eq:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                     if is_short: e['lo'] = bl
                     else: e['hi'] = cc
@@ -209,22 +209,21 @@ def main():
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
-    # Long: TRX, BNB, ADA (no BTC gate)
-    # Short: BTC, ETH (BTC bear gate)
+    # Long: TRX, BNB, ADA (100% cap per coin)
+    # Short: BTC only (30% cap)
     strategies = [
-        ('TRX-L', 'TRX', False),
-        ('BNB-L', 'BNB', False),
-        ('ADA-L', 'ADA', False),
-        ('BTC-S', 'BTC', True),
-        ('ETH-S', 'ETH', True),
+        ('TRX-L', 'TRX', False, 1.0),
+        ('BNB-L', 'BNB', False, 1.0),
+        ('ADA-L', 'ADA', False, 1.0),
+        ('BTC-S', 'BTC', True, 0.30),
     ]
 
     results = {}
-    for label, coin, is_short in strategies:
+    for label, coin, is_short, max_cap in strategies:
         sym = f'{coin}USDT_4000_1609434000000'
         da = data.get(sym, [])
         btc = btc_da  # always pass BTC data for regime gate
-        res = backtest_coin(coin, da, btc, is_short, None)
+        res = backtest_coin(coin, da, btc, is_short, max_cap, None)
         if res[1]: results[label] = res[1]
 
     print("=" * 70)
