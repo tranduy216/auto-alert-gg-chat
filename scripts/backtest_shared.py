@@ -60,6 +60,30 @@ def load_data(filepath=None):
     return data
 
 
+def fetch_binance(symbol, days=600):
+    """Fetch klines from Binance, aggregate 12h → 1d bars."""
+    url = 'https://api.binance.com/api/v3/klines'
+    start_ms = int((datetime.datetime.now() - datetime.timedelta(days=days)).timestamp() * 1000)
+    candles = []
+    while True:
+        params = {'symbol': symbol, 'interval': '12h', 'startTime': start_ms, 'limit': 1000}
+        resp = requests.get(url, params=params, timeout=30)
+        raw = resp.json()
+        if not raw or isinstance(raw, dict): break
+        candles.extend(raw); start_ms = raw[-1][6] + 1
+        if len(raw) < 1000: break
+        time.sleep(0.3)
+    daily = []
+    for i in range(1, len(candles), 2):
+        b2 = candles[i-1:i+1]
+        daily.append({
+            'close': float(b2[-1][4]), 'high': max(float(x[2]) for x in b2),
+            'low': min(float(x[3]) for x in b2), 'volume': sum(float(x[5]) for x in b2),
+            'time': b2[0][0],
+        })
+    return daily
+
+
 def fetch_paxg(from_ts=None):
     """Fetch PAXGUSDT 12h klines from Binance, aggregate → 1d bars."""
     if from_ts is None:
@@ -94,6 +118,7 @@ def fetch_paxg(from_ts=None):
 # ── Entry Sizing ──
 
 def winner_mult(entries, cc, is_short, lev):
+    """Return position size multiplier based on average ROI of existing entries."""
     if not entries:
         return 1.0
     rois = []

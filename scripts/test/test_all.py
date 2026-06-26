@@ -6,7 +6,7 @@ import sys, json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from crypto_trading import sma
+from backtest_shared import sma
 from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
     EXT_BLOCK_PCT, fee_factor,

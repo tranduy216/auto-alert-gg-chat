@@ -3,21 +3,12 @@
 Crypto Trading System (v5) — Simple, shared logic with backtest.
 Uses entry_conditions from backtest_shared → same signals as historical backtest.
 """
-import json, os, sys, datetime, time
+import os, sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-def sma(values, period):
-    """Simple Moving Average."""
-    period = int(period)
-    result = []
-    for i in range(len(values)):
-        if i < period - 1:
-            result.append(None)
-        else:
-            result.append(sum(values[i - period + 1 : i + 1]) / period)
-    return result
 
 from backtest_shared import (
+    sma, fetch_binance,
     BTC_SHORT_TP, EXT_BLOCK_PCT,
     fetch_paxg, entry_conditions,
 )
@@ -27,30 +18,6 @@ from utils.okx_utils import (
 )
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
-
-
-def fetch_binance(symbol, days=600):
-    import requests
-    url = 'https://api.binance.com/api/v3/klines'
-    start_ms = int((datetime.datetime.now() - datetime.timedelta(days=days)).timestamp() * 1000)
-    candles = []
-    while True:
-        params = {'symbol': symbol, 'interval': '12h', 'startTime': start_ms, 'limit': 1000}
-        resp = requests.get(url, params=params, timeout=30)
-        raw = resp.json()
-        if not raw or isinstance(raw, dict): break
-        candles.extend(raw); start_ms = raw[-1][6] + 1
-        if len(raw) < 1000: break
-        time.sleep(0.3)
-    daily = []
-    for i in range(1, len(candles), 2):
-        b2 = candles[i-1:i+1]
-        daily.append({
-            'close': float(b2[-1][4]), 'high': max(float(x[2]) for x in b2),
-            'low': min(float(x[3]) for x in b2), 'volume': sum(float(x[5]) for x in b2),
-            'time': b2[0][0],
-        })
-    return daily
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):

@@ -10,7 +10,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_paxg, winner_mult, compute_results,
+    load_data, fetch_paxg, entry_conditions, compute_results,
 )
 
 # Multi-coin total_asset_value (different signature from single-coin version)
@@ -132,20 +132,17 @@ def run_pooled(data, strategies):
 
             m_ma = cd['ma_short'][idx]; vavg = cd['vol_ma20'][idx]
             if m_ma is None or vavg is None or vavg == 0: continue
-            vol_cond = idx >= 2 and (cd['vols'][idx] + cd['vols'][idx-1]) / 2 > vavg
-            near_ma = abs(cc - m_ma) / m_ma <= ma_buf
 
             can_enter_long = not is_short
             can_enter_short = is_short and not btc_bull
             active = can_enter_long or can_enter_short
 
-            mult = winner_mult(entries, cc, is_short, lev_coin)
-            if entries:
-                lowest_ep = min(e['ep'] for e in entries)
-                if abs(cc - lowest_ep) / lowest_ep * 100 > ext_block:
-                    mult = 0
+            should_enter, mult = entry_conditions(
+                entries, cc, idx, cd['vols'], vavg, m_ma, ma_buf, is_short,
+                btc_bull, ext_block, lev_coin, lei_map[label],
+            )
 
-            if active and near_ma and vol_cond and mult > 0 and idx - lei_map[label] >= 0:
+            if should_enter:
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}

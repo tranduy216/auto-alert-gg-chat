@@ -3,7 +3,7 @@ Combined Long + Short Pyramid Strategy (standalone per-coin)
 - Long: TRX, PAXG — MA pullback entry, no BTC gate
 - Short: BTC only — only when BTC < MA200
 - 75% max margin cap per coin (cap on margin, not position size)
-- Block pyramid adds when price >30% from lowest entry price
+- Block pyramid adds when price >25% from lowest entry price
 """
 from pathlib import Path
 import sys, datetime, requests, time

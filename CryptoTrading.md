@@ -14,7 +14,7 @@ Multi-coin pyramid strategy với shared capital pool. Long TRX/PAXG khi gần M
 
 ## Entry Logic (`entry_conditions`)
 
-Shared function ở `scripts/backtest_shared.py:147`:
+Shared function ở `scripts/backtest_shared.py:180`:
 
 ```
 near_ma  = abs(close - ma) / ma <= buffer
@@ -83,28 +83,28 @@ Entry size = `eq * ENTRY_PCT / lev * mult`. Cap: tổng margin ≤ 75% total ass
 
 | Year | Return |
 |------|--------|
-| 2021 | +0.4% |
-| 2022 | **+17.6%** |
-| 2023 | +11.5% |
-| 2024 | **+237.2%** |
-| 2025 | **+95.4%** |
-| 2026 | +9.2% |
-| **CAGR** | **+57.7%** |
+| 2021 | -0.3% |
+| 2022 | **+19.1%** |
+| 2023 | +12.3% |
+| 2024 | **+236.7%** |
+| 2025 | **+95.3%** |
+| 2026 | +9.7% |
+| **CAGR** | **+58.2%** |
 | Max DD | −24.7% |
-| Final | **$94,645** |
+| Final | **$96,254** |
 
 ## File Map
 
 | File | Role | Lines |
 |------|------|-------|
-| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions` | 187 |
-| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 225 |
-| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 231 |
-| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 130 |
-| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 130 |
+| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions` | 211 |
+| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 221 |
+| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 227 |
+| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 95 |
+| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 106 |
 | `scripts/crypto_trading_legacy.py` | Preserved old system for legacy scripts | 2254 |
-| `scripts/trading_config.py` | Coin profiles, SHORT_ALLOWED | 140 |
-| `scripts/test/test_all.py` | Unit tests (72 tests, 0 failures) | 175 |
+| `scripts/trading_config.py` | Coin profiles, SHORT_ALLOWED | 155 |
+| `scripts/test/test_all.py` | Unit tests (75 tests, 0 failures) | 188 |
 
 ## Key Principle
 

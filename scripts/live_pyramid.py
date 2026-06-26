@@ -2,39 +2,15 @@
 Live Pyramid Strategy — sử dụng CHUNG logic entry với backtest.
 Import entry_conditions từ backtest_shared → behavior 100% giống backtest.
 """
-import sys, datetime, requests, time
+import sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crypto_trading import sma
 from backtest_shared import (
+    sma, fetch_binance,
     MA_BUF, MA_PERIOD, PYRAMID_ROI_DEFAULT, BTC_SHORT_TP, EXT_BLOCK_PCT,
     fetch_paxg, entry_conditions,
 )
-
-
-def fetch_binance(symbol, days=600):
-    url = 'https://api.binance.com/api/v3/klines'
-    start_ms = int((datetime.datetime.now() - datetime.timedelta(days=days)).timestamp() * 1000)
-    candles = []
-    while True:
-        params = {'symbol': symbol, 'interval': '12h', 'startTime': start_ms, 'limit': 1000}
-        resp = requests.get(url, params=params, timeout=30)
-        raw = resp.json()
-        if not raw or isinstance(raw, dict): break
-        candles.extend(raw)
-        start_ms = raw[-1][6] + 1
-        if len(raw) < 1000: break
-        time.sleep(0.3)
-    daily = []
-    for i in range(1, len(candles), 2):
-        b2 = candles[i-1:i+1]
-        daily.append({
-            'close': float(b2[-1][4]), 'high': max(float(x[2]) for x in b2),
-            'low': min(float(x[3]) for x in b2), 'volume': sum(float(x[5]) for x in b2),
-            'time': b2[0][0],
-        })
-    return daily
 
 
 def check_signal(coin_da, btc_da, is_short, cfg):
