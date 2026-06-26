@@ -3,7 +3,7 @@
 Crypto Trading System (v5) — Simple, shared logic with backtest.
 Uses entry_conditions from backtest_shared → same signals as historical backtest.
 """
-import os, sys, datetime
+import os, sys, json, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -20,6 +20,22 @@ from utils.okx_utils import (
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
+LAST_ENTRY_FILE = Path(__file__).parent / '_last_entry.json'
+
+
+def _load_last_entries():
+    if LAST_ENTRY_FILE.exists():
+        try:
+            return json.loads(LAST_ENTRY_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_last_entry(name, date_str):
+    entries = _load_last_entries()
+    entries[name] = date_str
+    LAST_ENTRY_FILE.write_text(json.dumps(entries))
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):
@@ -120,9 +136,14 @@ def main():
                 if inst_id in open_insts:
                     log(f"  {name}: already in position, skipped")
                     continue
-
                 if inst_id not in inst_map:
                     log(f"  {name}: {inst_id} not available on OKX, skipped")
+                    continue
+
+                today = datetime.datetime.now().strftime('%Y-%m-%d')
+                last_entries = _load_last_entries()
+                if last_entries.get(name) == today:
+                    log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
                 usd_val = eq * ENTRY_PCT
@@ -141,6 +162,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    _save_last_entry(name, today)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")

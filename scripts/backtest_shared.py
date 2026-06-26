@@ -2,7 +2,7 @@
 Shared backtest logic — constants, helpers, data loading.
 All backtest files should import from here to avoid duplication.
 """
-import json, sys, datetime, requests, time
+import json, os, sys, datetime, requests, time
 from pathlib import Path
 
 def sma(values, period):
@@ -217,26 +217,96 @@ def fetch_candles_okx(symbol, days=600):
         return None
 
 
+def fetch_candles_coingecko(symbol, days=600):
+    """Fetch OHLCV from CoinGecko market_chart, aggregate hourly → daily."""
+    api_key = os.environ.get('COINGECKO_API_KEY', '')
+    if not api_key:
+        return None
+    try:
+        cg_id = {'BTCUSDT': 'bitcoin', 'TRXUSDT': 'tron'}.get(symbol)
+        if not cg_id:
+            return None
+        headers = {'x-cg-demo-api-key': api_key}
+        url = f'https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart'
+        params = {'vs_currency': 'usd', 'days': str(min(days * 2, 720))}
+        resp = requests.get(url, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        prices = data.get('prices', [])
+        if len(prices) < 48:
+            return None
+        daily_map = {}
+        for ts, price in prices:
+            day = ts // (86400 * 1000)
+            d = daily_map.get(day)
+            if d is None:
+                daily_map[day] = {'open': price, 'high': price, 'low': price, 'close': price, 'time': day * 86400 * 1000}
+            else:
+                d['high'] = max(d['high'], price)
+                d['low'] = min(d['low'], price)
+                d['close'] = price
+        daily = sorted(daily_map.values(), key=lambda x: x['time'])
+        daily = daily[-days:] if len(daily) > days else daily
+        print(f"[backtest_shared] CoinGecko {symbol}: {len(daily)} daily bars", file=sys.stderr)
+        return daily
+    except Exception as e:
+        print(f"[backtest_shared] CoinGecko {symbol} failed: {e}", file=sys.stderr)
+        return None
+
+
+def fetch_candles_cmc(symbol, days=600):
+    """Fetch OHLCV from CoinMarketCap (requires CMC_API_KEY env)."""
+    api_key = os.environ.get('CMC_API_KEY', '')
+    if not api_key:
+        return None
+    try:
+        headers = {'X-CMC_PRO_API_KEY': api_key}
+        url = 'https://pro-api.coinmarketcap.com/v2/cryptocurrency/ohlcv/historical'
+        params = {'symbol': symbol.replace('USDT', ''), 'convert': 'USD', 'count': min(days, 365)}
+        resp = requests.get(url, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        quotes = data.get('data', {}).get(symbol.replace('USDT', ''), {}).get('quotes', [])
+        if not quotes:
+            return None
+        daily = []
+        for q in quotes:
+            quote = q.get('quote', {}).get('USD', {})
+            daily.append({
+                'close': float(quote.get('close', 0)),
+                'high': float(quote.get('high', 0)),
+                'low': float(quote.get('low', 0)),
+                'volume': float(quote.get('volume', 0)),
+                'time': int(datetime.datetime.strptime(q['time_open'][:10], '%Y-%m-%d').timestamp() * 1000),
+            })
+        print(f"[backtest_shared] CMC {symbol}: {len(daily)} daily bars", file=sys.stderr)
+        return daily
+    except Exception as e:
+        print(f"[backtest_shared] CMC {symbol} failed: {e}", file=sys.stderr)
+        return None
+
+
+def _try_fetch(fetcher, symbol, days, label):
+    """Try one fetcher with 3 attempts, 0.5s cooldown."""
+    for attempt in range(3):
+        data = fetcher(symbol, days)
+        if data and len(data) >= 200:
+            return data
+        if attempt < 2:
+            time.sleep(0.5)
+    return None
+
+
 def fetch_candles(symbol, days=600):
-    """Fetch daily candles. Primary: OKX (3 attempts), fallback: Binance (3 attempts).
-    Each retry has 0.5s cooldown."""
-    for attempt in range(3):
-        data = fetch_candles_okx(symbol, days)
-        if data and len(data) >= 200:
+    """Fetch daily candles. Priority: CoinGecko → CMC → OKX. 0.5s cooldown between attempts."""
+    for fetcher, label in [(fetch_candles_coingecko, 'CoinGecko'), (fetch_candles_cmc, 'CMC'), (fetch_candles_okx, 'OKX')]:
+        data = _try_fetch(fetcher, symbol, days, label)
+        if data:
             return data
-        if attempt < 2:
-            print(f"[backtest_shared] OKX {symbol} attempt {attempt+2}/3 retrying...", file=sys.stderr)
-            time.sleep(0.5)
-    print(f"[backtest_shared] Falling back to Binance for {symbol}", file=sys.stderr)
-    for attempt in range(3):
-        data = fetch_binance(symbol, days)
-        if data and len(data) >= 200:
-            return data
-        if attempt < 2:
-            print(f"[backtest_shared] Binance {symbol} attempt {attempt+2}/3 retrying...", file=sys.stderr)
-            time.sleep(0.5)
-    print(f"[backtest_shared] ERROR: OKX+Binance both failed for {symbol} after 3 attempts each", file=sys.stderr)
-    return data if data else []
+        print(f"[backtest_shared] {label} {symbol} exhausted, trying next source", file=sys.stderr)
+        time.sleep(0.5)
+    print(f"[backtest_shared] ERROR: All sources failed for {symbol}", file=sys.stderr)
+    return []
 
 
 # ── Entry Sizing ──
