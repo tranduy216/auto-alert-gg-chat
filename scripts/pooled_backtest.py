@@ -170,7 +170,8 @@ def run_pooled(data, strategies):
                     entries.append(e)
                     last_ep_map[label] = cc; lei_map[label] = idx
 
-            if active and last_ep_map[label] > 0 and idx - lei_map[label] >= 0 and mult > 0:
+            # Pyramid (long only)
+            if not is_short and active and last_ep_map[label] > 0 and idx - lei_map[label] >= 0 and mult > 0:
                 last_ep = last_ep_map[label]
                 if can_enter_long:
                     roi = (cc - last_ep) / last_ep * 100 * lev_coin

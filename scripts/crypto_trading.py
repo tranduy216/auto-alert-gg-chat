@@ -166,13 +166,10 @@ def main():
                     continue
 
                 mult = 1.0
-                if inst_id in pos_map:
+                if direction == 'BUY' and inst_id in pos_map:
                     avg_px = float(pos_map[inst_id].get('avgPx', 0))
                     if avg_px > 0:
-                        if direction == 'SELL':
-                            roi = (avg_px - price) / avg_px * 100 * lev
-                        else:
-                            roi = (price - avg_px) / avg_px * 100 * lev
+                        roi = (price - avg_px) / avg_px * 100 * lev
                         if roi > 15:     mult = 2.5
                         elif roi > 10:   mult = 2.0
                         elif roi > 5:    mult = 1.5
@@ -190,7 +187,7 @@ def main():
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
-                        inst_id=inst_id, td_mode='cross',
+                        inst_id=inst_id, td_mode='isolated',
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
@@ -201,7 +198,7 @@ def main():
                         try:
                             trail_pct = str(round(1 - trail, 2))
                             okx_place_algo(
-                                inst_id=inst_id, td_mode='cross',
+                                inst_id=inst_id, td_mode='isolated',
                                 side='sell', sz=str(sz),
                                 ord_type='move_order_stop',
                                 callback_ratio=trail_pct,
@@ -215,7 +212,7 @@ def main():
                             tp_sz = max(1, int(sz * frac + 0.5))
                             try:
                                 okx_place_algo(
-                                    inst_id=inst_id, td_mode='cross',
+                                    inst_id=inst_id, td_mode='isolated',
                                     side='buy', sz=str(tp_sz),
                                     ord_type='conditional', pos_side='short',
                                     tp_trigger_px=str(tp_price),

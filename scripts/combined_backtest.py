@@ -133,8 +133,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 entries.append(e)
                 last_ep = cc; lei = idx
 
-        # ── Pyramid ──
-        if active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
+        # ── Pyramid (long only) ──
+        if not is_short and active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
             if can_enter_long:
                 roi = (cc - last_ep) / last_ep * 100 * lev_coin
             else:
