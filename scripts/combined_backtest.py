@@ -92,20 +92,26 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
         dep = sum(e.get('mp', 0) for e in entries)
         mult = winner_mult(entries, cc, is_short)
 
-        # ── Exit logic ──
+        # ── BTC regime exit: close longs when bear, close shorts when bull ──
         for e in entries[:]:
+            if not e.get('is_short') and btc_bear:
+                # Long closed when BTC becomes bear
+                raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
+                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                entries.remove(e)
+                continue
+            if e.get('is_short') and not btc_bear:
+                raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
+                eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
+                entries.remove(e)
+                continue
+
+            # ── Per-position exit: trail + TP ──
             if e.get('is_short'):
-                # BTC exit: close shorts when BTC exits bear
-                if is_short and not btc_bear:
-                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
-                    eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
-                    entries.remove(e)
-                    continue
-                # Short trail + TP
                 e['lo'] = min(e.get('lo', bl), bl)
                 roi = (e['ep'] - cc) / e['ep'] * 100 * LEV
                 tp_stage = e.get('tp', 0)
-                if is_short and tp_stage < len(TP_SCHEDULE):
+                if tp_stage < len(TP_SCHEDULE):
                     trg, cf = TP_SCHEDULE[tp_stage]
                     if roi >= trg:
                         raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
@@ -125,9 +131,9 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
                     eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # ── Entry logic ──
-        can_enter_long = not is_short
-        can_enter_short = is_short and btc_bear
+        # ── Entry: only when BTC regime matches direction ──
+        can_enter_long = not is_short and not btc_bear  # long only in BTC bull
+        can_enter_short = is_short and btc_bear         # short only in BTC bear
         active = can_enter_long or can_enter_short
 
         if active and near_ma20 and vol_cond and (idx - lei >= 0):
@@ -165,6 +171,12 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
         total_eq = eq + ureal; curve.append(total_eq)
         if dt.month == 12: yearly_eq[yr] = total_eq
 
+    # Capture final partial year
+    if curve:
+        last_yr = datetime.datetime.fromtimestamp(da[-1]['time'] / 1000).year
+        if last_yr not in yearly_eq:
+            yearly_eq[last_yr] = curve[-1]
+
     teq = curve[-1] if curve else eq
     years = len(curve) / 365 if curve else 1
     cagr = (teq ** (1 / years) - 1) * 100 if teq > 0 else 0
@@ -184,13 +196,12 @@ def main():
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
-    # Long: TRX, SOL, AVAX (no BTC gate)
-    # Short: AVAX, BTC, ETH (BTC bear gate)
+    # Long: TRX, BNB, ADA (no BTC gate)
+    # Short: BTC, ETH (BTC bear gate)
     strategies = [
         ('TRX-L', 'TRX', False),
-        ('SOL-L', 'SOL', False),
-        ('AVAX-L', 'AVAX', False),
-        ('AVAX-S', 'AVAX', True),
+        ('BNB-L', 'BNB', False),
+        ('ADA-L', 'ADA', False),
         ('BTC-S', 'BTC', True),
         ('ETH-S', 'ETH', True),
     ]
@@ -199,7 +210,7 @@ def main():
     for label, coin, is_short in strategies:
         sym = f'{coin}USDT_4000_1609434000000'
         da = data.get(sym, [])
-        btc = btc_da if is_short else None
+        btc = btc_da  # always pass BTC data for regime gate
         res = backtest_coin(coin, da, btc, is_short, None)
         if res[1]: results[label] = res[1]
 
@@ -210,7 +221,7 @@ def main():
     header = f"{'Strategy':<12}" + "".join(f"{y:>8}" for y in years) + f"{'CAGR':>8}"
     print(header)
     print("-" * 70)
-    for label in ['TRX-L', 'SOL-L', 'AVAX-L', 'AVAX-S', 'BTC-S', 'ETH-S']:
+    for label in [s[0] for s in strategies]:
         if label in results:
             r = results[label]
             cagr_yr = r.get('yearly', {})
