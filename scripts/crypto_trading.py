@@ -137,8 +137,8 @@ def main():
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
 
-                log(f"  Set leverage {name} {lev}x")
-                okx_set_leverage(inst_id, lev)
+                log(f"  Set leverage {name} {lev}x (disabled)")
+                # okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, ctVal={ct_val})")
                 try:
                     # ORDER PLACEMENT DISABLED — signal-only mode
@@ -167,7 +167,7 @@ def main():
         log("OKX not configured — signal only")
 
     if DISCORD_WEBHOOK and signals:
-        summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p in signals)
+        summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p, _ in signals)
         send_message(DISCORD_WEBHOOK,
             f"*Pyramid Trading — {ts:%Y-%m-%d}*\n{summary}")
 
