@@ -1,8 +1,8 @@
 """
 Combined Long + Short Pyramid Strategy
 - Long: TRX, BNB — MA pullback entry, no BTC gate
-- Short: BTC only — only when BTC < MA200, 30% cap
-- Per-coin tuned: MA period, buffer, pyramid ROI, leverage
+- Short: BTC only — only when BTC < MA200
+- 75% max asset cap per coin (no entry count limit)
 - Block adds when price >30% from lowest entry
 """
 
@@ -50,6 +50,17 @@ def winner_mult(entries, cc, is_short, lev):
     elif avg > 0:   return 1.2
     elif avg > -5:  return 0.75
     else:           return 0.5
+
+def total_asset_value(entries, cc, eq, lev):
+    """eq + unrealized PnL of all open entries"""
+    val = eq
+    for e in entries:
+        if e.get('is_short'):
+            val += (e['ep'] - cc) / e['ep'] * e['mp'] * lev * e.get('rem', 1.0)
+        else:
+            val += (cc - e['ep']) / e['ep'] * e['mp'] * lev * e.get('rem', 1.0)
+    return val
+
 
 def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None):
     if not da or len(da) < 60: return coin, None
@@ -148,10 +159,11 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         can_enter_short = is_short and not btc_bull
         active = can_enter_long or can_enter_short
         dep = sum(e.get('mp', 0) for e in entries)  # refresh after exits
+        total_val = total_asset_value(entries, cc, eq, lev_coin)
 
         if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
             mp = eq * ENTRY_PCT / lev_coin * mult
-            if (dep + mp) * lev_coin <= max_cap * eq:
+            if (dep + mp) * lev_coin <= max_cap * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                 if is_short: e['lo'] = bl
                 else: e['hi'] = cc
@@ -166,8 +178,9 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 roi = (last_ep - cc) / last_ep * 100 * lev_coin
             if roi >= pyr_roi:
                 dep = sum(e.get('mp', 0) for e in entries)
+                total_val = total_asset_value(entries, cc, eq, lev_coin)
                 mp = eq * ENTRY_PCT / lev_coin * mult
-                if (dep + mp) * lev_coin <= max_cap * eq:
+                if (dep + mp) * lev_coin <= max_cap * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                     if is_short: e['lo'] = bl
                     else: e['hi'] = cc
@@ -211,9 +224,9 @@ def main():
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
     strategies = [
-        ('TRX-L', 'TRX', False, 1.0,  {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BNB-L', 'BNB', False, 1.0,  {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BTC-S', 'BTC', True,  0.30, {'ma': 20, 'buf': 0.03, 'pyr': 5, 'lev': 1.6}),
+        ('TRX-L', 'TRX', False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('BNB-L', 'BNB', False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('BTC-S', 'BTC', True,  0.75, {'ma': 20, 'buf': 0.03, 'pyr': 5, 'lev': 1.6}),
     ]
 
     results = {}
