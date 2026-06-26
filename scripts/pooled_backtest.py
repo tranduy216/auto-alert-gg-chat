@@ -69,6 +69,8 @@ def run_pooled(data, strategies):
     entries_map = {label: [] for label, _, _, _ in strategies}
     lei_map = {label: -999 for label, _, _, _ in strategies}
     last_ep_map = {label: 0 for label, _, _, _ in strategies}
+    base_ep_map = {label: 0 for label, _, _, _ in strategies}
+    tp_stage_map = {label: 0 for label, _, _, _ in strategies}
     time_to_idx = {l: {t: i for i, t in enumerate(cd['times'])} for l, cd in coin_data.items()}
 
     eq = 1.0; curve = []; yearly_eq = {}; ts_curve = []
@@ -100,19 +102,30 @@ def run_pooled(data, strategies):
                     eq += raw * e.get('rem', 1.0) / 100 * ff
                     entries.remove(e)
 
-            # Short: TP ladder
-            for e in entries[:]:
-                if e.get('is_short'):
-                    roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
-                    tp_stage = e.get('tp', 0)
-                    if tp_stage < len(tp_sched):
-                        trg, cf = tp_sched[tp_stage]
-                        if roi >= trg:
-                            raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
+            # Short: TP ladder + pyramid (based on base entry price)
+            if base_ep_map[label] > 0:
+                base_roi = (base_ep_map[label] - cc) / base_ep_map[label] * 100 * lev_coin
+                while tp_stage_map[label] < len(tp_sched):
+                    trg, cf = tp_sched[tp_stage_map[label]]
+                    if base_roi >= trg:
+                        for e in entries[:]:
+                            raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                             eq += raw * cf / 100 * ff
                             e['rem'] = e.get('rem', 1.0) - cf
-                            e['tp'] = tp_stage + 1
-                            if e.get('rem', 1.0) <= 0.001: entries.remove(e)
+                        tp_stage_map[label] += 1
+                        if tp_stage_map[label] < len(tp_sched) and is_short and not btc_bull:
+                            mp = eq * ENTRY_PCT / lev_coin
+                            total_dep = sum(sum(e2.get('mp', 0) for e2 in es) for es in entries_map.values())
+                            total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
+                            if total_dep + mp <= MAX_CAP * total_val:
+                                e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': True, 'hi': cc}
+                                entries.append(e)
+                                last_ep_map[label] = cc; lei_map[label] = idx
+                        if all(e.get('rem', 1.0) <= 0.001 for e in entries):
+                            entries.clear()
+                            break
+                    else:
+                        break
 
             # Long: stoploss update (20% below peak)
             long_entries = [e for e in entries if not e.get('is_short')]
@@ -169,6 +182,8 @@ def run_pooled(data, strategies):
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                     entries.append(e)
                     last_ep_map[label] = cc; lei_map[label] = idx
+                    if is_short and not base_ep_map[label]:
+                        base_ep_map[label] = cc
 
             # Pyramid (long only)
             if not is_short and active and last_ep_map[label] > 0 and idx - lei_map[label] >= 0 and mult > 0:

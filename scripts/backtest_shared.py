@@ -25,8 +25,8 @@ MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
-BTC_SHORT_TP = [(4, 0.20), (8, 0.20), (12, 0.20), (16, 0.20), (20, 0.20)]
-# Short TP ladder: 20%@4%, 20%@8%, 20%@12%, 20%@16%, 20%@20% = 100%
+BTC_SHORT_TP = [(8, 0.10), (13, 0.25)]
+# Short TP: close 10% at 8% ROI, then 25% at 13% ROI. Remaining → trailing stop / BTC bull close-all.
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry

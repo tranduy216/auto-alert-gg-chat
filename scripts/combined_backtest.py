@@ -41,7 +41,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
     btc_ma200 = sma(btc_closes, 200) if btc_closes else None
 
-    entries = []; eq = 1.0; lei = -999; last_ep = 0
+    entries = []; eq = 1.0; lei = -999; last_ep = 0; base_ep = 0; sym_tp_stage = 0
     curve = []; yearly_eq = {}; ts_curve = []
     ff = fee_factor(lev_coin)
 
@@ -88,6 +88,31 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 eq += raw * e.get('rem', 1.0) / 100 * ff
                 entries.remove(e)
 
+        # ── Short: TP ladder + pyramid (both based on base entry price) ──
+        if is_short and base_ep > 0:
+            base_roi = (base_ep - cc) / base_ep * 100 * lev_coin
+            while sym_tp_stage < len(tp_sched):
+                trg, cf = tp_sched[sym_tp_stage]
+                if base_roi >= trg:
+                    # Close cf% of all entries
+                    for e in entries[:]:
+                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                        eq += raw * cf / 100 * ff
+                        e['rem'] = e.get('rem', 1.0) - cf
+                    sym_tp_stage += 1
+                    # Add pyramid entry (except final stage = close all)
+                    if sym_tp_stage < len(tp_sched) and can_enter_short:
+                        mp = eq * ENTRY_PCT / lev_coin * mult
+                        if dep + mp <= max_cap * total_val:
+                            e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': True, 'hi': cc}
+                            entries.append(e)
+                            last_ep = cc; lei = idx
+                    if all(e.get('rem', 1.0) <= 0.001 for e in entries):
+                        entries.clear()
+                        break
+                else:
+                    break
+
         # ── Short: TP ladder ──
         for e in entries[:]:
             if e.get('is_short'):
@@ -129,16 +154,14 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
             mp = eq * ENTRY_PCT / lev_coin * mult
             if dep + mp <= max_cap * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
-
                 entries.append(e)
                 last_ep = cc; lei = idx
+                if not base_ep:
+                    base_ep = cc  # first short entry sets base price
 
-        # ── Pyramid (long only) ──
+        # ── Pyramid (long: last_ep) ──
         if not is_short and active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
-            if can_enter_long:
-                roi = (cc - last_ep) / last_ep * 100 * lev_coin
-            else:
-                roi = (last_ep - cc) / last_ep * 100 * lev_coin
+            roi = (cc - last_ep) / last_ep * 100 * lev_coin
             if roi >= pyr_roi:
                 dep = sum(e.get('mp', 0) for e in entries)
                 total_val = total_asset_value(entries, cc, eq, lev_coin)
