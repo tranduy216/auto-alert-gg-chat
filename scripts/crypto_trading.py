@@ -114,6 +114,7 @@ def main():
     ]
 
     signals = []
+    traded_count = 0
     for name, da, is_short, cfg in strategies:
         sig = check_signals(da, btc_da, cfg, is_short)
         if sig:
@@ -191,6 +192,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    traded_count += 1
                     time.sleep(1.5)
                     okx_set_leverage(inst_id, lev)
                     log(f"  Leverage set {lev}x")
@@ -243,12 +245,12 @@ def main():
     else:
         log("OKX not configured — signal only")
 
-    if DISCORD_WEBHOOK and signals:
+    if DISCORD_WEBHOOK and traded_count > 0:
         summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p, *_ in signals)
         send_message(DISCORD_WEBHOOK,
             f"*Pyramid Trading — {ts:%Y-%m-%d}*\n{summary}")
 
-    log(f"Done. {len(signals)} signal(s).")
+    log(f"Done. {len(signals)} signal(s){'' if traded_count == len(signals) else f' ({traded_count} placed, {len(signals)-traded_count} skipped)'}.")
 
 
 if __name__ == '__main__':
