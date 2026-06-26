@@ -119,7 +119,7 @@ def run_pooled(data, strategies):
             if long_entries:
                 peak_hi = max(e.get('hi', cc) for e in long_entries)
                 peak_hi = max(peak_hi, hi)
-                if cc <= peak_hi * 0.80:
+                if cc <= peak_hi * trail_pct:
                     for e in entries[:]:
                         if not e.get('is_short'):
                             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
