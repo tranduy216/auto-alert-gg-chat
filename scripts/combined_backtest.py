@@ -102,6 +102,19 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                         e['tp'] = tp_stage + 1
                         if e.get('rem', 1.0) <= 0.001: entries.remove(e)
 
+        # ── Fixed stop loss (matching live: LONG -20%, SHORT +13%) ──
+        for e in entries[:]:
+            if e.get('is_short'):
+                if cc >= e['ep'] * 1.13:
+                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                    eq += raw / 100 * ff
+                    entries.remove(e)
+            else:
+                if cc <= e['ep'] * 0.80:
+                    raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                    eq += raw / 100 * ff
+                    entries.remove(e)
+
         # ── Long: combined trailing stop (single peak for all entries, matching live) ──
         long_entries = [e for e in entries if not e.get('is_short')]
         if long_entries:
