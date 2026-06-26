@@ -1,8 +1,8 @@
 """
 Combined Long + Short Pyramid Strategy
-- Long: TRX, BNB — MA pullback entry, no BTC gate
+- Long: TRX, PAXG — MA pullback entry, no BTC gate
 - Short: BTC only — only when BTC < MA200
-- 75% max asset cap per coin (no entry count limit)
+- 75% max asset cap per coin, cap on margin (not position)
 - Block adds when price >30% from lowest entry
 """
 
@@ -219,20 +219,43 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
 
 def main():
-    # Optimal leverage per coin
+    import requests, time, datetime
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
+    # Fetch PAXG from Binance (not in local JSON)
+    print("Fetching PAXG data from Binance...")
+    url = 'https://api.binance.com/api/v3/klines'
+    start_ts = int(datetime.datetime(2022, 1, 1).timestamp() * 1000)
+    paxg_candles = []
+    while True:
+        params = {'symbol': 'PAXGUSDT', 'interval': '12h', 'startTime': start_ts, 'limit': 1000}
+        resp = requests.get(url, params=params, timeout=30)
+        raw = resp.json()
+        if not raw or isinstance(raw, dict): break
+        paxg_candles.extend(raw)
+        start_ts = raw[-1][6] + 1
+        if len(raw) < 1000: break
+        time.sleep(0.5)
+    paxg_da = []
+    for i in range(1, len(paxg_candles), 2):
+        b2 = paxg_candles[i-1:i+1]
+        paxg_da.append({
+            'close': float(b2[-1][4]), 'high': max(float(x[2]) for x in b2),
+            'low': min(float(x[3]) for x in b2), 'volume': sum(float(x[5]) for x in b2),
+            'time': b2[0][0],
+        })
+
     strategies = [
-        ('TRX-L', 'TRX', False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BNB-L', 'BNB', False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BTC-S', 'BTC', True,  0.75, {'ma': 20, 'buf': 0.03, 'pyr': 5, 'lev': 1.6}),
+        ('TRX-L',  'TRX',  False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('PAXG-L', 'PAXG', False, 0.75, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('BTC-S',  'BTC',  True,  0.75, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6}),
     ]
 
     results = {}
     for label, coin, is_short, max_cap, cfg in strategies:
         sym = f'{coin}USDT_4000_1609434000000'
-        da = data.get(sym, [])
+        da = paxg_da if coin == 'PAXG' else data.get(sym, [])
         btc = btc_da
         res = backtest_coin(coin, da, btc, is_short, max_cap, None, cfg)
         if res[1]: results[label] = res[1]
