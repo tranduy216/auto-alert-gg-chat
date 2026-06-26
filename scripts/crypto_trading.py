@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    BTC_SHORT_TP, LONG_TP_SCHEDULE, EXT_BLOCK_PCT,
+    BTC_SHORT_TP, EXT_BLOCK_PCT,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
@@ -206,19 +206,6 @@ def main():
                             ord_type='move_order_stop', callback_ratio='0.20',
                         )
                         log("  Trailing stop set (20%)")
-                        for trg, frac in LONG_TP_SCHEDULE:
-                            tp_price = round(price * (1 + trg / (100 * lev)), 4)
-                            tp_sz = max(1, int(sz * frac + 0.5))
-                            try:
-                                okx_place_algo(
-                                    inst_id=inst_id, td_mode='cross',
-                                    side='sell', sz=str(tp_sz),
-                                    ord_type='conditional',
-                                    tp_trigger_px=str(tp_price),
-                                )
-                            except Exception:
-                                pass
-                        log(f"  TP set: {[t for t,_ in LONG_TP_SCHEDULE]}")
                     if direction == 'SELL':
                         # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
