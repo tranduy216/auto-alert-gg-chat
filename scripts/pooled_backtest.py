@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
-    MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
+    MAX_CAP, EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, winner_mult, compute_results,
 )
 

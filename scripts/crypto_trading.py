@@ -18,15 +18,13 @@ def sma(values, period):
     return result
 
 from backtest_shared import (
-    MA_BUF, TP_SCHEDULE, BTC_SHORT_TP, MAX_CAP, EXT_BLOCK_PCT,
+    BTC_SHORT_TP, EXT_BLOCK_PCT,
     fetch_paxg, entry_conditions,
 )
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
-    okx_get_account, okx_get_positions, okx_set_leverage,
-    okx_place_order, okx_close_position, okx_get_open_orders,
+    okx_get_account, okx_get_positions,
 )
-from utils.firebase_utils import is_firebase_enabled, get_db
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 

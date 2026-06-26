@@ -23,7 +23,7 @@ Required environment variables:
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 import feedparser  # type: ignore
 import pytz
@@ -150,7 +150,7 @@ def fetch_news_articles() -> list:
 # Message formatting
 # ---------------------------------------------------------------------------
 
-def format_breaking_alert(alert: dict, now_vnt: datetime) -> str:
+def format_breaking_alert(alert: dict) -> str:
     """Return a compact plain-text alert: descriptive title then URLs."""
     headline = alert.get('headline', 'Breaking News')
     urls_lines = "\n".join(
@@ -166,7 +166,7 @@ def format_breaking_alert(alert: dict, now_vnt: datetime) -> str:
 # Queue flush
 # ---------------------------------------------------------------------------
 
-def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
+def flush_queued_alerts(webhook_url: str) -> None:
     """Send all held alerts that were queued during quiet hours."""
     queued = get_unsent_queued_alerts()
     if not queued:
@@ -179,7 +179,7 @@ def flush_queued_alerts(webhook_url: str, now_vnt: datetime) -> None:
 
     for item in queued:
         alert = item.get("alert", {})
-        message = format_breaking_alert(alert, now_vnt)
+        message = format_breaking_alert(alert)
         send_message(webhook_url, message)
         mark_alert_sent(item["_doc_id"])
         print(f"[breaking_news] Flushed: {alert.get('headline', 'N/A')}")
@@ -206,7 +206,7 @@ def main() -> None:
 
     # Step 1 – flush held alerts when the quiet window ends
     if flush:
-        flush_queued_alerts(webhook_url, now_vnt)
+        flush_queued_alerts(webhook_url)
 
     # Step 2 – gather intelligence
     print("[breaking_news] Fetching news articles…")
@@ -258,7 +258,7 @@ def main() -> None:
             print(f"[breaking_news] Skipping duplicate: {headline}")
             continue
 
-        message = format_breaking_alert(alert, now_vnt)
+        message = format_breaking_alert(alert)
         queued_at_str = now_vnt.strftime("%Y-%m-%d %H:%M %Z")
 
         if quiet and not flush:

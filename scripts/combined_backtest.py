@@ -13,7 +13,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
     PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
-    MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
+    MAX_CAP, EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions,
 )

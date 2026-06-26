@@ -8,11 +8,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from crypto_trading import sma
 from backtest_shared import (
-    BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
-    MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    fetch_paxg, winner_mult, total_asset_value,
-    entry_conditions, compute_roi,
+    MA_BUF, MA_PERIOD, PYRAMID_ROI_DEFAULT, BTC_SHORT_TP, EXT_BLOCK_PCT,
+    fetch_paxg, entry_conditions,
 )
 
 
