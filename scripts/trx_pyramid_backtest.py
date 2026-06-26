@@ -141,7 +141,7 @@ def main():
     args = parser.parse_args()
     selected_years = set(int(y.strip()) for y in args.years.split(',')) if args.years else None
     data = load_data()
-    coins = ['TRX', 'BNB', 'BTC', 'ETH']
+    coins = ['TRX', 'SOL', 'BNB']
     results = []
     for coin in coins:
         da = data.get(f'{coin}USDT_4000_1609434000000', [])
