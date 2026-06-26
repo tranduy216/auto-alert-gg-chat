@@ -1270,6 +1270,7 @@ def analyse_coin(
     now_ts = int(datetime.fromisoformat(ts).timestamp()) if ts else 0
 
     tot_cap = BASE * _coin_cap(coin)
+    is_sh = False  # default
 
     for ent in entries:
         ep = ent.get("entry_price", 0)
