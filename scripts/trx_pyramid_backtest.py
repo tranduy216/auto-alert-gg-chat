@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
 BASE = 10000; LEV = 1.5
-ENTRY_PCT = 0.015   # 1.5% base entry
+ENTRY_PCT = 0.015   # 1.5% of equity INCLUDING leverage
+# Margin = ENTRY_PCT / LEV = 1% (since 1.5% / 1.5x = 1%)
 TRAIL_PCT = 0.80    # 20% retracement
 MA_BUF = 0.03       # 3% buffer from MA20
 PYRAMID_ROI = 5     # 5% ROI triggers pyramid
@@ -91,7 +92,7 @@ def backtest_coin(coin, da, selected_years):
         mult = winner_mult(entries, cc)
 
         if near_ma20 and vol_cond and (idx - lei >= COOLDOWN):
-            mp = eq * ENTRY_PCT * mult
+            mp = eq * ENTRY_PCT / LEV * mult
             if (dep + mp) * LEV <= eq:  # cap at 100% position
                 entries.append({'ep': cc, 'hi': cc, 'mp': mp})
                 last_ep = cc; lei = idx
@@ -99,7 +100,7 @@ def backtest_coin(coin, da, selected_years):
         # ── Pyramid: prev entry reaches 5% ROI ──
         dep = sum(e.get('mp', 0) for e in entries)
         if last_ep > 0 and (cc - last_ep) / last_ep * 100 * LEV >= PYRAMID_ROI and (idx - lei >= COOLDOWN):
-            mp = eq * ENTRY_PCT * mult
+            mp = eq * ENTRY_PCT / LEV * mult
             if (dep + mp) * LEV <= eq:
                 entries.append({'ep': cc, 'hi': cc, 'mp': mp})
                 last_ep = cc; lei = idx
