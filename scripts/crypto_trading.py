@@ -224,6 +224,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    import time as _time; _time.sleep(5)
                     # Set stop loss after order confirmed
                     if direction == 'BUY':
                         sl_px = str(round(price * 0.80, 4))
