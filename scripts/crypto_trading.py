@@ -3,7 +3,7 @@
 Crypto Trading System (v5) — Simple, shared logic with backtest.
 Uses entry_conditions from backtest_shared → same signals as historical backtest.
 """
-import os, sys, datetime
+import os, sys, time, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -18,7 +18,7 @@ from utils.okx_utils import (
     okx_set_leverage, okx_close_position, okx_place_algo,
 )
 from utils.state_manager import has_entered_today, record_entry, get_state, set_state
-from backtest_shared import ENTRY_PCT, TRAIL_PCT
+from backtest_shared import ENTRY_PCT
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -57,7 +57,7 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Trailing stop for longs via peak_price. Close all shorts if BTC bull."""
+    """Long: update stoploss (20% below peak). Short: close all if BTC bull."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -83,18 +83,16 @@ def manage_positions(log, btc_bull=False):
             peak = max(state.get('peak_price', 0), mark_px)
             if mark_px > peak:
                 peak = mark_px
-            if mark_px <= peak * TRAIL_PCT:
-                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak=${peak:,.2f})")
+            set_state(coin, {'peak_price': peak})
+            if mark_px <= peak * 0.80:
+                log(f"  CLOSE {coin}: SL hit @ ${mark_px:,.2f} (peak=${peak:,.2f})")
                 try:
                     okx_close_position(inst_id)
                     set_state(coin, {'peak_price': 0})
                     if DISCORD_WEBHOOK:
-                        send_message(DISCORD_WEBHOOK,
-                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f}")
+                        send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: SL @ ${mark_px:,.2f}")
                 except Exception as e:
                     log(f"  CLOSE {coin} failed: {e}")
-            else:
-                set_state(coin, {'peak_price': peak})
         else:
             if btc_bull:
                 log(f"  CLOSE {coin}: BTC bull regime")
@@ -224,7 +222,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
-                    _t.sleep(5)
+                    time.sleep(1.5)
                     if direction == 'SELL':
                         # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
@@ -237,7 +235,7 @@ def main():
                                     ord_type='conditional', pos_side='short',
                                     tp_trigger_px=str(tp_price),
                                 )
-                                _t.sleep(5)
+    
                             except Exception:
                                 pass
                         log(f"  TP ladder set")
