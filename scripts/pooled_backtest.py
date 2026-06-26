@@ -140,7 +140,6 @@ def run_pooled(data, strategies):
     entries_map = {label: [] for label, _, _, _ in strategies}  # label -> list of entries
     lei_map = {label: -999 for label, _, _, _ in strategies}
     last_ep_map = {label: 0 for label, _, _, _ in strategies}
-    idx_map = {label: 0 for label, _, _, _ in strategies}  # current index in coin's data
     time_to_idx = {label: {t: i for i, t in enumerate(coin_data[label]['times'])} for label in coin_data}
 
     eq = 1.0  # shared realized equity
@@ -229,10 +228,7 @@ def run_pooled(data, strategies):
             can_enter_short = is_short and not btc_bull
             active = can_enter_long or can_enter_short
 
-            if not active or not near_ma or not vol_cond:
-                continue
-
-            # Compute mult and extension block
+            # Compute mult (needed for both entry and pyramid)
             mult = winner_mult(entries, cc, is_short, lev_coin)
             if entries:
                 lowest_ep = min(e['ep'] for e in entries)
@@ -240,42 +236,35 @@ def run_pooled(data, strategies):
                 if ext > 30:
                     mult = 0
 
-            if mult <= 0:
-                continue
+            # Try entry if all conditions met
+            if active and near_ma and vol_cond and mult > 0 and idx - lei_map[label] >= 0:
+                total_dep = sum(sum(e.get('mp', 0) for e in entries) for entries in entries_map.values())
+                closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
+                lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
+                total_val = total_asset_value(entries_map, closes_map, eq, lev_map)
 
-            # Check cooldown
-            if idx - lei_map[label] < 0:
-                continue
+                mp = eq * ENTRY_PCT / lev_coin * mult
+                if total_dep + mp <= MAX_CAP * total_val:
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
+                    if is_short:
+                        e['lo'] = bl
+                    else:
+                        e['hi'] = cc
+                    entries.append(e)
+                    last_ep_map[label] = cc
+                    lei_map[label] = idx
 
-            # Compute total deployed (all coins) + total asset value for global cap
-            total_dep = sum(sum(e.get('mp', 0) for e in entries) for entries in entries_map.values())
-            closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts, -1)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
-            lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
-            total_val = total_asset_value(entries_map, closes_map, eq, lev_map)
-
-            # Entry
-            dep_coin = sum(e.get('mp', 0) for e in entries)
-            mp = eq * ENTRY_PCT / lev_coin * mult
-            if total_dep + mp <= MAX_CAP * total_val:
-                e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
-                if is_short:
-                    e['lo'] = bl
-                else:
-                    e['hi'] = cc
-                entries.append(e)
-                last_ep_map[label] = cc
-                lei_map[label] = idx
-
-            # Pyramid
-            last_ep = last_ep_map[label]
-            lei = lei_map[label]
-            if last_ep > 0 and idx - lei >= 0 and mult > 0:
+            # Pyramid (fires regardless of entry conditions, as long as active and position exists)
+            if active and last_ep_map[label] > 0 and idx - lei_map[label] >= 0 and mult > 0:
+                last_ep = last_ep_map[label]
                 if can_enter_long:
                     roi = (cc - last_ep) / last_ep * 100 * lev_coin
                 else:
                     roi = (last_ep - cc) / last_ep * 100 * lev_coin
                 if roi >= pyr_roi:
                     total_dep = sum(sum(e.get('mp', 0) for e in entries) for entries in entries_map.values())
+                    closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
+                    total_val = total_asset_value(entries_map, closes_map, eq, lev_map)
                     mp = eq * ENTRY_PCT / lev_coin * mult
                     if total_dep + mp <= MAX_CAP * total_val:
                         e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
