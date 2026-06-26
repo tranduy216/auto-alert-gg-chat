@@ -14,8 +14,9 @@ from backtest_shared import (
 )
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
-    okx_get_account, okx_get_positions,
+    okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
 )
+from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
@@ -73,19 +74,55 @@ def main():
             log(f"  {name}: {dir} @ {sig[1]:.4f}")
 
     if os.environ.get("OKX_API_KEY"):
-        log("OKX checking positions...")
         try:
             acct = okx_get_account()
+            eq = float(acct.get('details', [{}])[0].get('eqUsd', 0) or acct.get('data', [{}])[0].get('totalEq', 0) or 0)
+            if eq <= 0:
+                eq = float(acct.get('totalEq', 0))
+            log(f"Equity: ${eq:,.0f}")
+
             pos = okx_get_positions()
-            log(f"  Equity: {acct.get('eq', '?'):>10}")
-            log(f"  Open positions: {len(pos)}")
+            open_insts = {p['instId'] for p in pos if float(p.get('pos', 0)) != 0}
+            log(f"Open positions: {len(open_insts)}")
+
+            instruments = okx_get_instruments('SWAP')
+            inst_map = {inst['instId']: inst for inst in instruments}
+
+            SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'PAXG': 'PAXG-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
+
             for name, direction, price in signals:
-                log(f"  Signal: {name} {direction} @ {price:.4f}")
+                inst_id = SYMBOL_OKX.get(name)
+                if not inst_id:
+                    log(f"  {name}: no OKX instrument mapping, skipped")
+                    continue
+                if inst_id in open_insts:
+                    log(f"  {name}: already have position, skipped")
+                    continue
+
+                lev = 1.8 if name != 'BTC' else 1.6
+                usd_val = eq * ENTRY_PCT
+                ct_val = inst_map.get(inst_id, {}).get('ctVal', '0.01')
+                ct_val = float(ct_val) if ct_val else 0.01
+                sz = max(1, int(usd_val / (price * ct_val)))
+
+                side = 'buy' if direction == 'BUY' else 'sell'
+                pos_side = 'long' if direction == 'BUY' else 'short'
+
+                log(f"  TRADE {name} {direction}: {sz} contracts @ ${price:,.4f} (${usd_val:,.0f})")
+                result = okx_place_order(
+                    inst_id=inst_id, td_mode='cross',
+                    side=side, pos_side=pos_side,
+                    sz=str(sz),
+                )
+                log(f"  Order: {result.get('data', [{}])[0].get('ordId', '?')}")
+
                 if DISCORD_WEBHOOK:
                     send_message(DISCORD_WEBHOOK,
-                        f"Pyramid Signal: {name} {direction} @ {price:.4f}")
+                        f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
+
         except Exception as e:
-            log(f"  OKX error: {e}")
+            log(f"OKX error: {e}")
+            import traceback; traceback.print_exc(file=sys.stderr)
     else:
         log("OKX not configured — signal only")
 
