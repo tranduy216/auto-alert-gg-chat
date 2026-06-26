@@ -82,24 +82,24 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years):
         m20 = ma20[idx]; vavg = vol_ma20[idx]
         if m20 is None or vavg is None or vavg == 0: continue
 
-        # BTC dual MA regime: strong bull / weak recovery / bear
-        btc_regime = 'bear'  # default
+        # BTC dual MA regime
+        btc_regime = 'bear'
         btc_size_mult = 1.0
         if btc_ma50 and btc_ma200:
             btc_idx = min(idx, len(btc_closes) - 1)
-            if btc_idx >= 200 and btc_ma200[btc_idx] and btc_idx >= 50 and btc_ma50[btc_idx]:
+            if btc_idx >= 50 and btc_ma50[btc_idx]:
                 btc_close = btc_closes[btc_idx]
-                above_ma200 = btc_close > btc_ma200[btc_idx]
+                above_ma200 = btc_idx >= 200 and btc_ma200[btc_idx] and btc_close > btc_ma200[btc_idx]
                 above_ma50 = btc_close > btc_ma50[btc_idx]
                 if above_ma200:
                     btc_regime = 'strong_bull'
-                    btc_size_mult = 1.0
                 elif above_ma50:
                     btc_regime = 'weak_bull'
-                    btc_size_mult = 0.7  # reduced size in recovery
                 else:
                     btc_regime = 'bear'
-                    btc_size_mult = 1.0  # full size for shorts in bear
+                # For longs: full size in weak_bull (recovery), only block in true bear
+                # For shorts: reduced in weak_bull, full in bear
+                btc_size_mult = 0.7 if is_short and btc_regime == 'weak_bull' else 1.0
 
         vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
         near_ma20 = abs(cc - m20) / m20 <= MA_BUF
