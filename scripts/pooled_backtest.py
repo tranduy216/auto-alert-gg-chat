@@ -78,7 +78,8 @@ def run_pooled(data, strategies):
         if btc_ma200:
             btc_idx = btc_time_to_idx.get(ts)
             if btc_idx is not None and btc_idx >= 200 and btc_ma200[btc_idx]:
-                btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
+                btc_bull = btc_closes[btc_idx] >= btc_ma200[btc_idx] * 1.005
+                btc_bull_exit = btc_closes[btc_idx] > btc_ma200[btc_idx] * 0.995
 
         dt = datetime.datetime.fromtimestamp(ts / 1000); yr = dt.year
 
@@ -94,7 +95,7 @@ def run_pooled(data, strategies):
             entries = entries_map[label]
 
             for e in entries[:]:
-                if e.get('is_short') and btc_bull:
+                if e.get('is_short') and btc_bull_exit:
                     raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                     eq += raw * e.get('rem', 1.0) / 100 * ff
                     entries.remove(e)

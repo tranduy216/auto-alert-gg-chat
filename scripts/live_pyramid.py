@@ -51,7 +51,7 @@ def check_signal(coin_da, btc_da, is_short, cfg):
     if btc_ma200 and btc_closes:
         btc_i = min(idx, len(btc_closes) - 1)
         if btc_i >= 200 and btc_ma200[btc_i]:
-            btc_bull = btc_closes[btc_i] > btc_ma200[btc_i]
+            btc_bull = btc_closes[btc_i] >= btc_ma200[btc_i] * 1.005
 
     # Dùng CHUNG entry_conditions với backtest
     should_enter, mult = entry_conditions(

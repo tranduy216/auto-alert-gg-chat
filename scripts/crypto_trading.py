@@ -176,16 +176,18 @@ def main():
                 eq = float(acct.get('totalEq', 0))
             log(f"Equity: ${eq:,.0f}")
 
-            # BTC regime check for short exit
+            # BTC regime: entry < MA200*1.005 (generous), exit > MA200*0.995 (tight)
             btc_bull = False
+            btc_bull_exit = False
             if btc_da and len(btc_da) >= 200:
                 btc_closes = [c['close'] for c in btc_da]
                 btc_ma200 = sma(btc_closes, 200)
                 if btc_ma200[-1]:
-                    btc_bull = btc_closes[-1] > btc_ma200[-1]
+                    btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
+                    btc_bull_exit = btc_closes[-1] > btc_ma200[-1] * 0.995
 
             log("Checking positions...")
-            manage_positions(log, btc_bull)
+            manage_positions(log, btc_bull_exit)
 
             pos = okx_get_positions()
             pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}

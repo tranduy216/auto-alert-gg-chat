@@ -69,7 +69,9 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         if btc_ma200:
             btc_idx = min(idx, len(btc_closes) - 1)
             if btc_idx >= 200 and btc_ma200[btc_idx]:
-                btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
+                # Entry generous: short when BTC < MA200 * 1.005; Exit tight: close when BTC > MA200 * 0.995
+                btc_bull = btc_closes[btc_idx] >= btc_ma200[btc_idx] * 1.005
+                btc_bull_exit = btc_closes[btc_idx] > btc_ma200[btc_idx] * 0.995
 
         # ── Entry check (shared) ──
         should_enter, mult = entry_conditions(
@@ -81,7 +83,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
         # ── BTC regime exit (shorts exit on bull) ──
         for e in entries[:]:
-            if e.get('is_short') and btc_bull:
+            if e.get('is_short') and btc_bull_exit:
                 raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                 eq += raw * e.get('rem', 1.0) / 100 * ff
                 entries.remove(e)
