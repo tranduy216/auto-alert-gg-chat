@@ -1,11 +1,7 @@
 """
-TRX Strategy — Long only, pyramiding, winner-takes-more
-Entry: price near MA20 (3% buffer) + vol2d > volMA20
-Sizing: 1.5% of CURRENT equity, scaled by avg ROI
-Pyramid: +1 entry when previous reaches 5% ROI
-Max coin position: 100% of equity (1.5x lev)
+[DEPRECATED] TRX Strategy — use combined_backtest.py or pooled_backtest.py instead.
+Common constants/functions moved to backtest_shared.py.
 """
-
 import json, argparse, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
