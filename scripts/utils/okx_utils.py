@@ -154,18 +154,24 @@ def okx_place_order(
 def okx_place_algo(
     inst_id: str, td_mode: str, side: str, sz: str,
     ord_type: str, pos_side: Optional[str] = None,
-    tp_trigger_px: Optional[str] = None, callback_ratio: Optional[str] = None,
+    tp_trigger_px: Optional[str] = None,
+    sl_trigger_px: Optional[str] = None,
+    callback_ratio: Optional[str] = None,
 ) -> dict:
-    """Place a standalone algo order (trailing stop or TP)."""
+    """Place a standalone algo order (trailing stop, TP, or stop loss)."""
     body: dict = {
         "instId": inst_id, "tdMode": td_mode,
         "side": side, "sz": sz, "ordType": ord_type,
     }
     if pos_side:
         body["posSide"] = pos_side
-    if ord_type == "conditional" and tp_trigger_px:
-        body["tpTriggerPx"] = tp_trigger_px
-        body["tpOrdPx"] = "-1"
+    if ord_type == "conditional":
+        if tp_trigger_px:
+            body["tpTriggerPx"] = tp_trigger_px
+            body["tpOrdPx"] = "-1"
+        if sl_trigger_px:
+            body["slTriggerPx"] = sl_trigger_px
+            body["slOrdPx"] = "-1"
     elif ord_type == "move_order_stop" and callback_ratio:
         body["callbackRatio"] = callback_ratio
         body["slTriggerPxType"] = "last"

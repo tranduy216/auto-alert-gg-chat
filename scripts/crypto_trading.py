@@ -219,15 +219,29 @@ def main():
                 okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
-                    sl_px = None
-                    if name == 'BTC':
-                        sl_px = str(round(price * 1.20, 1))
                     result = okx_place_order(
                         inst_id=inst_id, td_mode='cross',
                         side=side, sz=str(sz),
-                        sl_trigger_px=sl_px,
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    # Set stop loss after order confirmed
+                    if direction == 'BUY':
+                        sl_px = str(round(price * 0.80, 4))
+                        okx_place_algo(
+                            inst_id=inst_id, td_mode='cross',
+                            side='sell', sz=str(sz),
+                            ord_type='conditional', sl_trigger_px=sl_px,
+                        )
+                        log(f"  SL set @ {sl_px} (-20%)")
+                    else:
+                        sl_px = str(round(price * 1.13, 1))
+                        okx_place_algo(
+                            inst_id=inst_id, td_mode='cross',
+                            side='buy', sz=str(sz),
+                            ord_type='conditional', pos_side='short',
+                            sl_trigger_px=sl_px,
+                        )
+                        log(f"  SL set @ {sl_px} (+13%)")
                     if direction == 'SELL':
                         # Set TP ladder for shorts at order time
                         for trg, frac in BTC_SHORT_TP:
