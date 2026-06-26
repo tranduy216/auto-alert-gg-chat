@@ -14,7 +14,8 @@ from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
     PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
+    load_data, fetch_paxg, total_asset_value, compute_results,
+    entry_conditions,
 )
 
 
@@ -66,19 +67,11 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
             if btc_idx >= 200 and btc_ma200[btc_idx]:
                 btc_bull = btc_closes[btc_idx] > btc_ma200[btc_idx]
 
-        vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
-        near_ma = abs(cc - m_ma) / m_ma <= ma_buf
-        mult = winner_mult(entries, cc, is_short, lev_coin)
-
-        if entries:
-            if is_short:
-                highest_ep = max(e['ep'] for e in entries)
-                if (highest_ep - cc) / highest_ep * 100 > ext_block:
-                    mult = 0
-            else:
-                lowest_ep = min(e['ep'] for e in entries)
-                if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
-                    mult = 0
+        # ── Entry check (shared) ──
+        should_enter, mult = entry_conditions(
+            entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
+            btc_bull, ext_block, lev_coin, lei,
+        )
 
         # ── BTC regime exit (shorts exit on bull) ──
         for e in entries[:]:
@@ -114,7 +107,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         dep = sum(e.get('mp', 0) for e in entries)
         total_val = total_asset_value(entries, cc, eq, lev_coin)
 
-        if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
+        if should_enter:
             mp = eq * ENTRY_PCT / lev_coin * mult
             if dep + mp <= max_cap * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}

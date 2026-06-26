@@ -157,17 +157,14 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
                      btc_bull, ext_block, lev_coin, lei=-999):
     """
     Kiểm tra điều kiện entry — shared giữa backtest và live.
-    Returns: (should_enter, mult) — mult=0 nếu bị block extension.
+    Returns: (should_enter, mult) — mult luôn là giá trị đúng (dùng cho pyramid).
     """
     near_ma = abs(cc - m_ma) / m_ma <= ma_buf if m_ma else False
     vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
     can_enter = (not is_short) or (is_short and not btc_bull)
 
-    if not (can_enter and near_ma and vol_cond):
-        return False, 0
-
+    # Compute mult dù entry có fire hay không (pyramid cần mult)
     mult = winner_mult(entries, cc, is_short, lev_coin)
-
     if entries:
         if is_short:
             highest_ep = max(e['ep'] for e in entries)
@@ -178,7 +175,7 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
             if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
                 mult = 0
 
-    should = (idx - lei >= 0) and mult > 0
+    should = (can_enter and near_ma and vol_cond and idx - lei >= 0 and mult > 0)
     return should, mult
 
 
