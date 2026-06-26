@@ -3,7 +3,7 @@
 Crypto Trading System (v5) — Simple, shared logic with backtest.
 Uses entry_conditions from backtest_shared → same signals as historical backtest.
 """
-import os, sys, json, datetime
+import os, sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -17,25 +17,10 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage,
 )
+from utils.state_manager import has_entered_today, record_entry
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
-LAST_ENTRY_FILE = Path(__file__).parent / '_last_entry.json'
-
-
-def _load_last_entries():
-    if LAST_ENTRY_FILE.exists():
-        try:
-            return json.loads(LAST_ENTRY_FILE.read_text())
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_last_entry(name, date_str):
-    entries = _load_last_entries()
-    entries[name] = date_str
-    LAST_ENTRY_FILE.write_text(json.dumps(entries))
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):
@@ -141,8 +126,7 @@ def main():
                     continue
 
                 today = datetime.datetime.now().strftime('%Y-%m-%d')
-                last_entries = _load_last_entries()
-                if last_entries.get(name) == today:
+                if has_entered_today(name):
                     log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
@@ -162,7 +146,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
-                    _save_last_entry(name, today)
+                    record_entry(name, price)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")

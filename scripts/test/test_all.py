@@ -2,7 +2,7 @@
 Unit tests for backtest_shared, combined_backtest, pooled_backtest, crypto_trading.
 Run: python3 -B scripts/test/test_all.py
 """
-import sys, json, os, datetime, tempfile
+import sys, json, os, datetime
 from unittest.mock import patch, Mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -338,49 +338,40 @@ with patch('backtest_shared.fetch_candles_coingecko', return_value=None), \
     check("returns empty when all fail", result == [])
 
 
-# ── Daily cooldown (_last_entry.json) ──
+# ── Daily cooldown (state_manager) ──
 print("\n=== Daily cooldown ===")
-from crypto_trading import _load_last_entries, _save_last_entry, LAST_ENTRY_FILE
+from utils.state_manager import get_state, set_state, has_entered_today, record_entry, LOCAL_FALLBACK
 
-# Save original path and use temp file
-original_path = LAST_ENTRY_FILE
-tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-tmp_path = Path(tmp.name)
-tmp.close()
+# Clean up local fallback before tests
+if LOCAL_FALLBACK.exists():
+    LOCAL_FALLBACK.unlink()
 
-import crypto_trading
-crypto_trading.LAST_ENTRY_FILE = tmp_path
+state = get_state('BTC')
+check("empty state returns empty dict", state == {})
 
-try:
-    # Clean start
-    if tmp_path.exists():
-        tmp_path.unlink()
-    
-    entries = _load_last_entries()
-    check("empty file returns empty dict", entries == {})
-    
-    _save_last_entry('BTC', '2026-06-26')
-    entries = _load_last_entries()
-    check("saved entry persists", entries.get('BTC') == '2026-06-26')
-    
-    _save_last_entry('TRX', '2026-06-25')
-    entries = _load_last_entries()
-    check("multiple coins stored", len(entries) == 2)
-    check("today check blocks BTC", entries.get('BTC') == '2026-06-26')
-    
-    _save_last_entry('BTC', '2026-06-27')
-    entries = _load_last_entries()
-    check("overwrites existing coin entry", entries.get('BTC') == '2026-06-27')
-    
-    # Corrupted file
-    tmp_path.write_text('not json')
-    entries = _load_last_entries()
-    check("corrupted file returns empty dict", entries == {})
+set_state('BTC', {'last_entry_date': '2026-06-26'})
+state = get_state('BTC')
+check("saved state persists", state.get('last_entry_date') == '2026-06-26')
 
-finally:
-    crypto_trading.LAST_ENTRY_FILE = original_path
-    if tmp_path.exists():
-        tmp_path.unlink()
+set_state('TRX', {'last_entry_date': '2026-06-25'})
+state = get_state('TRX')
+check("multiple coins stored", state.get('last_entry_date') == '2026-06-25')
+check("BTC still intact", get_state('BTC').get('last_entry_date') == '2026-06-26')
+
+# has_entered_today checks current date
+check("past date returns False", has_entered_today('TRX') is False)
+
+# record_entry sets today's date
+record_entry('XAU', 4050.0)
+state = get_state('XAU')
+today = datetime.datetime.now().strftime('%Y-%m-%d')
+check("record_entry sets today", state.get('last_entry_date') == today)
+check("record_entry stores price", state.get('last_entry_price') == 4050.0)
+check("has_entered_today returns True", has_entered_today('XAU') is True)
+
+# Cleanup
+if LOCAL_FALLBACK.exists():
+    LOCAL_FALLBACK.unlink()
 
 
 # ── _try_fetch retry logic ──
