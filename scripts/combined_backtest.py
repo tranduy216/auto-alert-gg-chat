@@ -83,9 +83,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 entries.remove(e)
                 continue
 
-            # ── TP + trail exit ──
+            # ── Long: trailing stop / Short: TP ladder ──
             if e.get('is_short'):
-                e['lo'] = min(e.get('lo', bl), bl)
                 roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
                 tp_stage = e.get('tp', 0)
                 if tp_stage < len(tp_sched):
@@ -96,10 +95,6 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                         e['rem'] = e.get('rem', 1.0) - cf
                         e['tp'] = tp_stage + 1
                         if e.get('rem', 1.0) <= 0.001: entries.remove(e)
-                elif cc >= e['lo'] / trail_pct:
-                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                    eq += raw / 100 * ff
-                    entries.remove(e)
             else:
                 e['hi'] = max(e.get('hi', cc), hi)
                 if cc <= e['hi'] * trail_pct:
@@ -117,9 +112,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
             mp = eq * ENTRY_PCT / lev_coin * mult
             if dep + mp <= max_cap * total_val:
-                e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
-                if is_short: e['lo'] = bl
-                else: e['hi'] = cc
+                e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
+
                 entries.append(e)
                 last_ep = cc; lei = idx
 
@@ -134,9 +128,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 total_val = total_asset_value(entries, cc, eq, lev_coin)
                 mp = eq * ENTRY_PCT / lev_coin * mult
                 if dep + mp <= max_cap * total_val:
-                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
-                    if is_short: e['lo'] = bl
-                    else: e['hi'] = cc
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                     entries.append(e)
                     last_ep = cc; lei = idx
 

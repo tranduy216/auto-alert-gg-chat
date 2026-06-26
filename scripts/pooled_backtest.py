@@ -101,7 +101,6 @@ def run_pooled(data, strategies):
                     continue
 
                 if e.get('is_short'):
-                    e['lo'] = min(e.get('lo', bl), bl)
                     roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
                     tp_stage = e.get('tp', 0)
                     if tp_stage < len(tp_sched):
@@ -112,10 +111,6 @@ def run_pooled(data, strategies):
                             e['rem'] = e.get('rem', 1.0) - cf
                             e['tp'] = tp_stage + 1
                             if e.get('rem', 1.0) <= 0.001: entries.remove(e)
-                    elif cc >= e['lo'] / trail_pct:
-                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw / 100 * ff
-                        entries.remove(e)
                 else:
                     e['hi'] = max(e.get('hi', cc), hi)
                     if cc <= e['hi'] * trail_pct:
@@ -157,9 +152,7 @@ def run_pooled(data, strategies):
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                 mp = eq * ENTRY_PCT / lev_coin * mult
                 if total_dep + mp <= MAX_CAP * total_val:
-                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
-                    if is_short: e['lo'] = bl
-                    else: e['hi'] = cc
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                     entries.append(e)
                     last_ep_map[label] = cc; lei_map[label] = idx
 
@@ -175,9 +168,7 @@ def run_pooled(data, strategies):
                     total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                     mp = eq * ENTRY_PCT / lev_coin * mult
                     if total_dep + mp <= MAX_CAP * total_val:
-                        e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
-                        if is_short: e['lo'] = bl
-                        else: e['hi'] = cc
+                        e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                         entries.append(e)
                         last_ep_map[label] = cc; lei_map[label] = idx
 
