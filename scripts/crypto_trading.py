@@ -167,9 +167,7 @@ def main():
                     btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
                     btc_bull_exit = btc_closes[-1] > btc_ma200[-1] * 0.995
 
-            log("Checking positions...")
-            manage_positions(log, btc_bull_exit)
-
+            # 1. Place new orders first
             pos = okx_get_positions()
             pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}
             log(f"Open positions: {len(pos_map)}")
@@ -250,6 +248,10 @@ def main():
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"FAILED: {name} {direction} — {trade_err}")
+
+            # 2. Update stoploss for longs + check close-all for shorts (always run)
+            log("Updating stoploss...")
+            manage_positions(log, btc_bull_exit)
 
         except Exception as e:
             log(f"OKX setup error: {e}")
