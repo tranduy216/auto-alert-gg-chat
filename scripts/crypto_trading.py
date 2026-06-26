@@ -25,6 +25,7 @@ DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
 SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
+COIN_LEV = {'TRX': 1.8, 'XAU': 1.8, 'BTC': 1.6}
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):
@@ -57,9 +58,7 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Close all shorts if BTC turns bull. Long trailing stop handled by OKX."""
-    if not btc_bull:
-        return
+    """Re-set leverage for all positions. Close all shorts if BTC turns bull."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -71,7 +70,14 @@ def manage_positions(log, btc_bull=False):
         if pos_qty == 0:
             continue
         coin = COIN_FROM_INST.get(inst_id, '')
-        if not coin or float(p.get('pos', 0)) > 0:
+        if not coin:
+            continue
+        lev = COIN_LEV.get(coin, 1.8)
+        try:
+            okx_set_leverage(inst_id, lev)
+        except Exception:
+            pass
+        if not btc_bull or float(p.get('pos', 0)) > 0:
             continue
         log(f"  CLOSE {coin}: BTC bull regime")
         try:
@@ -189,8 +195,6 @@ def main():
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
 
-                log(f"  Set leverage {name} {lev}x")
-                okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
@@ -199,6 +203,8 @@ def main():
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
                     time.sleep(1.5)
+                    okx_set_leverage(inst_id, lev)
+                    log(f"  Leverage set {lev}x")
                     if direction == 'BUY':
                         trail_pct = str(round(1 - trail, 2))
                         okx_place_algo(
