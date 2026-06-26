@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
-    EXT_BLOCK_PCT, fee_factor,
+    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
+    MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
 )
 
@@ -71,9 +71,14 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         mult = winner_mult(entries, cc, is_short, lev_coin)
 
         if entries:
-            lowest_ep = min(e['ep'] for e in entries)
-            if abs(cc - lowest_ep) / lowest_ep * 100 > ext_block:
-                mult = 0
+            if is_short:
+                highest_ep = max(e['ep'] for e in entries)
+                if (highest_ep - cc) / highest_ep * 100 > ext_block:
+                    mult = 0
+            else:
+                lowest_ep = min(e['ep'] for e in entries)
+                if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
+                    mult = 0
 
         # ── BTC regime exit (shorts exit on bull) ──
         for e in entries[:]:
@@ -163,7 +168,7 @@ def main():
     strategies = [
         ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
         ('PAXG-L', 'PAXG', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6}),
+        ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
     results = {}

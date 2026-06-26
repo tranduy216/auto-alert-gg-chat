@@ -42,7 +42,7 @@ check("TP_SCHEDULE sum 1.0", sum(cf for _, cf in TP_SCHEDULE) == 1.0)
 check("TP_SCHEDULE len 4", len(TP_SCHEDULE) == 4)
 check("MAX_CAP = 0.75", MAX_CAP == 0.75)
 check("FEE_RATE = 0.0005", FEE_RATE == 0.0005)
-check("EXT_BLOCK_PCT = 30", EXT_BLOCK_PCT == 30)
+check("EXT_BLOCK_PCT = 25", EXT_BLOCK_PCT == 25)
 
 # ── shared: fee_factor ──
 print("\n=== fee_factor ===")

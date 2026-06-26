@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from crypto_trading import sma
 from backtest_shared import (
-    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
-    EXT_BLOCK_PCT, fee_factor,
+    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
+    MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, winner_mult, compute_results,
 )
 
@@ -207,7 +207,7 @@ def main():
     strategies = [
         ('TRX-L',  'TRXUSDT_4000_1609434000000', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
         ('PAXG-L', 'PAXGUSDT_POOL',              False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6}),
+        ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
     r = run_pooled(data, strategies)

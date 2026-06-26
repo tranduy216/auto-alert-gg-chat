@@ -16,12 +16,12 @@ MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
-SHORT_TP = [(4, 0.15), (6, 0.15), (8, 0.20), (10, 0.20), (12, 0.20), (14, 0.10)]
+BTC_SHORT_TP = [(4, 0.20), (8, 0.20), (12, 0.20), (16, 0.20), (20, 0.20)]
 # Short TP ladder: 15%@4%, 15%@6%, 20%@8%, 20%@10%, 20%@12%, 10%@14% = 100%
 HARD_SL = 8             # hard stop loss % for shorts (close all when roi <= -HARD_SL)
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
-EXT_BLOCK_PCT = 30      # block adds when price >30% from lowest entry
+EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
 
 
 def fee_factor(lev):
