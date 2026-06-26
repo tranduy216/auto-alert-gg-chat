@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from trading_config import BASE, FEE_RATE, SF
 from new_strategy_config import *
-from crypto_trading import sma, compute_rsi, compute_adx
+from crypto_trading_legacy import sma, compute_rsi, compute_adx
 
 
 def fetch(data_cache, symbol):

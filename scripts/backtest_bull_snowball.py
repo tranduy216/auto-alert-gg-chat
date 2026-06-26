@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crypto_trading import (
+from crypto_trading_legacy import (
     sma, evaluate_trend_3d, compute_volume_score,
     compute_entry_v6_long, compute_entry_v6_short,
     resolve_action_v6, _entry_score_v7_long, _entry_score_v7_short,

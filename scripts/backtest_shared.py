@@ -5,7 +5,16 @@ All backtest files should import from here to avoid duplication.
 import json, datetime, requests, time
 from pathlib import Path
 
-from crypto_trading import sma
+def sma(values, period):
+    """Simple Moving Average."""
+    period = int(period)
+    result = []
+    for i in range(len(values)):
+        if i < period - 1:
+            result.append(None)
+        else:
+            result.append(sum(values[i - period + 1 : i + 1]) / period)
+    return result
 
 # ── Constants ──
 

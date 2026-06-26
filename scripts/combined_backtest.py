@@ -9,8 +9,8 @@ from pathlib import Path
 import sys, datetime, requests, time
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crypto_trading import sma
 from backtest_shared import (
+    sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
     PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, FEE_RATE, EXT_BLOCK_PCT, fee_factor,
