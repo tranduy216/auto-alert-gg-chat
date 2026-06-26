@@ -13,11 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
 BASE = 10000; LEV = 1.0
-ENTRY_PCT = 0.02    # 2% of current equity
+ENTRY_PCT = 0.015   # 1.5% of current equity
 TRAIL_PCT = 0.80    # 20% retracement
-MA_BUF = 0.015      # 1.5% buffer from MA20
-PYRAMID_ROI = 7     # 7% ROI triggers pyramid
-COOLDOWN = 1        # 1 bar cooldown (approx 1.5 days on daily)
+MA_BUF = 0.03       # 3% buffer from MA20
+PYRAMID_ROI = 5     # 5% ROI triggers pyramid
+COOLDOWN = 0        # no cooldown
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
