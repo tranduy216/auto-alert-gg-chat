@@ -1,27 +1,24 @@
 """
-Combined Long + Short — MA5 pullback, red bar, BTC gate
-- Long: buy red bars near MA5 (2% buffer) when BTC > MA200
-- Short: BTC only, when BTC < MA200 with 30% cap
-- 1.5x lev, 1.5% entry incl leverage
+Combined Long + Short Pyramid Strategy
+- Long: TRX, BNB — MA pullback entry, no BTC gate
+- Short: BTC only — only when BTC < MA200, 30% cap
+- Per-coin tuned: MA period, buffer, pyramid ROI, leverage
+- Block adds when price >30% from lowest entry
 """
 
-import json, argparse, sys
+import json
 from pathlib import Path
+import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
-BASE = 10000; LEV = 1.5
-ENTRY_PCT = 0.015
-TRAIL_PCT = 0.80      # 20% trail
-MA_BUF = 0.03          # 3% buffer
-MA_PERIOD = 20         # MA20 pullback entry
+BASE = 10000
+ENTRY_PCT = 0.015     # 1.5% of equity per entry (including leverage)
+TRAIL_PCT = 0.80      # 20% trailing stop from extreme
+MA_BUF = 0.03         # 3% buffer default
+MA_PERIOD = 20        # MA period default
 PYRAMID_ROI_DEFAULT = 5
-BTC_MA_BULL = 120   # strong bull: BTC > MA120
-BTC_MA_WEAK = 200   # weak bull: BTC > MA200
-PYR_STRONG = 8      # pyramid ROI threshold in strong bull
-PYR_WEAK = 5        # pyramid ROI threshold in weak bull
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
-# 4 TP levels, 25% each
 
 def load_data():
     p = Path(__file__).parent / "_klines_12h_5y.json"
@@ -57,7 +54,7 @@ def winner_mult(entries, cc, is_short, lev):
 def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None):
     if not da or len(da) < 60: return coin, None
     if cfg is None: cfg = {}
-    lev_coin = cfg.get('lev', LEV)
+    lev_coin = cfg.get('lev', 1.5)
     ma_period = cfg.get('ma', MA_PERIOD)
     ma_buf = cfg.get('buf', MA_BUF)
     pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
@@ -69,7 +66,6 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
     btc_ma200 = sma(btc_closes, 200) if btc_closes else None
-    btc_start = 200
 
     entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}
@@ -105,14 +101,13 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
         vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
         near_ma = abs(cc - m_ma) / m_ma <= ma_buf
-        red_bar = idx > 0 and cc < closes[idx-1]
         dep = sum(e.get('mp', 0) for e in entries)
         mult = winner_mult(entries, cc, is_short, lev_coin)
 
         # Block entry entirely when price extended >30% from lowest entry price
         if entries:
             lowest_ep = min(e['ep'] for e in entries)
-            ext = (cc - lowest_ep) / lowest_ep * 100
+            ext = abs(cc - lowest_ep) / lowest_ep * 100
             if ext > 30:
                 mult = 0  # block adds
 
@@ -148,10 +143,11 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                     eq += raw / 100 * (1 - 2 * 0.0005 * lev_coin)
                     entries.remove(e)
 
-        # ── Entry: BTC two-regime gate, near MA ──
+        # ── Entry: long always allowed, short on BTC bear ──
         can_enter_long = not is_short
         can_enter_short = is_short and not btc_bull
         active = can_enter_long or can_enter_short
+        dep = sum(e.get('mp', 0) for e in entries)  # refresh after exits
 
         if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
             mp = eq * ENTRY_PCT / lev_coin * mult
@@ -163,7 +159,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 last_ep = cc; lei = idx
 
         # Pyramid
-        if active and last_ep > 0 and (idx - lei >= 0):
+        if active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
             if can_enter_long:
                 roi = (cc - last_ep) / last_ep * 100 * lev_coin
             else:
