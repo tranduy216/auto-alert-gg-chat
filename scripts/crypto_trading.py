@@ -208,7 +208,7 @@ def main():
                         trail_pct = str(round(1 - trail, 2))
                         okx_place_algo(
                             inst_id=inst_id, td_mode='cross',
-                            side='sell', sz='-1',
+                            side='sell', sz=str(sz),
                             ord_type='move_order_stop',
                             callback_ratio=trail_pct,
                         )
