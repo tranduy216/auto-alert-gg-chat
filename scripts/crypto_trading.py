@@ -55,9 +55,26 @@ def main():
     def log(msg): print(f"[{ts:%H:%M}] {msg}")
 
     log("Fetching market data...")
+    errors = []
+
     btc_da = fetch_candles('BTCUSDT', 600)
+    if not btc_da or len(btc_da) < 200:
+        errors.append("BTC data fetch FAILED")
+        btc_da = []
+
     trx_da = fetch_candles('TRXUSDT', 600)
+    if not trx_da or len(trx_da) < 200:
+        errors.append("TRX data fetch FAILED")
+        trx_da = []
+
     paxg_da = fetch_paxg()
+    if not paxg_da or len(paxg_da) < 200:
+        errors.append("PAXG data fetch FAILED")
+        paxg_da = []
+
+    if errors and DISCORD_WEBHOOK:
+        send_message(DISCORD_WEBHOOK,
+            f"*Fetch Errors — {ts:%Y-%m-%d %H:%M}*\n" + "\n".join(f"  {e}" for e in errors))
 
     strategies = [
         ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
@@ -129,6 +146,8 @@ def main():
         except Exception as e:
             log(f"OKX setup error: {e}")
             import traceback; traceback.print_exc(file=sys.stderr)
+            if DISCORD_WEBHOOK:
+                send_message(DISCORD_WEBHOOK, f"OKX setup ERROR: {e}")
     else:
         log("OKX not configured — signal only")
 
