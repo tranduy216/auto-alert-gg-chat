@@ -16,16 +16,14 @@ from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position, okx_place_algo,
-    okx_get_algo_orders, okx_cancel_algo,
 )
-from utils.state_manager import has_entered_today, record_entry, set_state
+from utils.state_manager import has_entered_today, record_entry
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
 SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
-COIN_LEV = {'TRX': 1.8, 'XAU': 1.8, 'BTC': 1.6}
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):
@@ -58,7 +56,9 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Re-set leverage for all positions. Close all shorts if BTC turns bull."""
+    """Close all shorts if BTC turns bull."""
+    if not btc_bull:
+        return
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -70,29 +70,11 @@ def manage_positions(log, btc_bull=False):
         if pos_qty == 0:
             continue
         coin = COIN_FROM_INST.get(inst_id, '')
-        if not coin:
-            continue
-        lev = COIN_LEV.get(coin, 1.8)
-        # Cancel any trailing stop before changing leverage
-        try:
-            algos = okx_get_algo_orders(inst_id, ord_type='move_order_stop')
-            if algos:
-                algo_ids = [a['algoId'] for a in algos]
-                okx_cancel_algo(inst_id, algo_ids)
-                log(f"  Cancel old trail for {coin}")
-        except Exception:
-            pass
-        try:
-            okx_set_leverage(inst_id, lev)
-            log(f"  Leverage {lev}x for {coin}")
-        except Exception as lev_err:
-            log(f"  Leverage failed for {coin}: {lev_err}")
-        if not btc_bull or float(p.get('pos', 0)) > 0:
+        if not coin or float(p.get('pos', 0)) > 0:
             continue
         log(f"  CLOSE {coin}: BTC bull regime")
         try:
             okx_close_position(inst_id)
-            set_state(coin, {})
             if DISCORD_WEBHOOK:
                 send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
         except Exception as e:
