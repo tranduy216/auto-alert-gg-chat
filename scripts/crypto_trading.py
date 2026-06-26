@@ -224,8 +224,7 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
-                    import time as _time; _time.sleep(5)
-                    # Set stop loss after order confirmed
+                    import time as _t; _t.sleep(5)
                     if direction == 'BUY':
                         sl_px = str(round(price * 0.80, 4))
                         okx_place_algo(
@@ -236,6 +235,7 @@ def main():
                         log(f"  SL set @ {sl_px} (-20%)")
                     else:
                         sl_px = str(round(price * 1.13, 1))
+                        _t.sleep(5)
                         okx_place_algo(
                             inst_id=inst_id, td_mode='cross',
                             side='buy', sz=str(sz),
@@ -243,8 +243,8 @@ def main():
                             sl_trigger_px=sl_px,
                         )
                         log(f"  SL set @ {sl_px} (+13%)")
-                    if direction == 'SELL':
-                        # Set TP ladder for shorts at order time
+                        _t.sleep(5)
+                        # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
                             tp_price = round(price * (1 - trg / (100 * lev)), 1)
                             tp_sz = max(1, int(sz * frac + 0.5))
@@ -255,6 +255,7 @@ def main():
                                     ord_type='conditional', pos_side='short',
                                     tp_trigger_px=str(tp_price),
                                 )
+                                _t.sleep(5)
                             except Exception:
                                 pass
                         log(f"  TP ladder set")
