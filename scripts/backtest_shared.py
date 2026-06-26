@@ -220,13 +220,11 @@ def fetch_candles_okx(symbol, days=600):
 def fetch_candles_coingecko(symbol, days=600):
     """Fetch OHLCV from CoinGecko market_chart, aggregate hourly → daily."""
     api_key = os.environ.get('COINGECKO_API_KEY', '')
-    if not api_key:
+    cg_id = {'BTCUSDT': 'bitcoin', 'TRXUSDT': 'tron', 'XAUUSDT': 'pax-gold'}.get(symbol)
+    if not cg_id:
         return None
     try:
-        cg_id = {'BTCUSDT': 'bitcoin', 'TRXUSDT': 'tron'}.get(symbol)
-        if not cg_id:
-            return None
-        headers = {'x-cg-demo-api-key': api_key}
+        headers = {'x-cg-demo-api-key': api_key} if api_key else {}
         url = f'https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart'
         params = {'vs_currency': 'usd', 'days': str(min(days * 2, 720))}
         resp = requests.get(url, params=params, headers=headers, timeout=30)
