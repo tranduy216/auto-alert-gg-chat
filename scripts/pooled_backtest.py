@@ -10,7 +10,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_paxg, entry_conditions, compute_results,
+    load_data, fetch_paxg, entry_conditions, compute_results, LONG_TP_SCHEDULE,
 )
 
 # Multi-coin total_asset_value (different signature from single-coin version)
@@ -90,6 +90,7 @@ def run_pooled(data, strategies):
             cc = cd['closes'][idx]; hi = cd['highs'][idx]; bl = cd['lows'][idx]
             lev_coin = cd['cfg'].get('lev', 1.5)
             tp_sched = cd['cfg'].get('tp', TP_SCHEDULE)
+            tp_long = cd['cfg'].get('tp_long', LONG_TP_SCHEDULE)
             trail_pct = cd['cfg'].get('trail', TRAIL_PCT)
             ff = fee_factor(lev_coin)
             entries = entries_map[label]
@@ -112,6 +113,20 @@ def run_pooled(data, strategies):
                             eq += raw * cf / 100 * ff
                             e['rem'] = e.get('rem', 1.0) - cf
                             e['tp'] = tp_stage + 1
+                            if e.get('rem', 1.0) <= 0.001: entries.remove(e)
+
+            # Long: TP ladder
+            for e in entries[:]:
+                if not e.get('is_short'):
+                    roi = (cc - e['ep']) / e['ep'] * 100 * lev_coin
+                    tp_stage = e.get('tp_stage', 0)
+                    if tp_stage < len(tp_long):
+                        trg, cf = tp_long[tp_stage]
+                        if roi >= trg:
+                            raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                            eq += raw * cf / 100 * ff
+                            e['rem'] = e.get('rem', 1.0) - cf
+                            e['tp_stage'] = tp_stage + 1
                             if e.get('rem', 1.0) <= 0.001: entries.remove(e)
 
             # Long: stoploss update (20% below peak)

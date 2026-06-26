@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
+    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP, LONG_TP_SCHEDULE,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions,
@@ -27,6 +27,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
     ma_buf = cfg.get('buf', MA_BUF)
     pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
     tp_sched = cfg.get('tp', TP_SCHEDULE)
+    tp_long = cfg.get('tp_long', LONG_TP_SCHEDULE)
     trail_pct = cfg.get('trail', TRAIL_PCT)
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
     ma_slope = cfg.get('ma_slope', False)
@@ -100,6 +101,20 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                         eq += raw * cf / 100 * ff
                         e['rem'] = e.get('rem', 1.0) - cf
                         e['tp'] = tp_stage + 1
+                        if e.get('rem', 1.0) <= 0.001: entries.remove(e)
+
+        # ── Long: TP ladder ──
+        for e in entries[:]:
+            if not e.get('is_short'):
+                roi = (cc - e['ep']) / e['ep'] * 100 * lev_coin
+                tp_stage = e.get('tp_stage', 0)
+                if tp_stage < len(tp_long):
+                    trg, cf = tp_long[tp_stage]
+                    if roi >= trg:
+                        raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                        eq += raw * cf / 100 * ff
+                        e['rem'] = e.get('rem', 1.0) - cf
+                        e['tp_stage'] = tp_stage + 1
                         if e.get('rem', 1.0) <= 0.001: entries.remove(e)
 
         # ── Long: stoploss update (20% below peak) ──
