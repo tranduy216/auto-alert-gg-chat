@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma, fetch_candles,
     MA_BUF, MA_PERIOD, PYRAMID_ROI_DEFAULT, BTC_SHORT_TP, EXT_BLOCK_PCT,
-    fetch_paxg, entry_conditions,
+    entry_conditions,
 )
 
 
@@ -77,7 +77,7 @@ def main():
     print("Fetching market data...", file=sys.stderr)
     btc_da = fetch_candles('BTCUSDT', 600)
     trx_da = fetch_candles('TRXUSDT', 600)
-    paxg_da = fetch_paxg()
+    paxg_da = fetch_candles('PAXGUSDT', 600)
 
     strategies = [
         ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),

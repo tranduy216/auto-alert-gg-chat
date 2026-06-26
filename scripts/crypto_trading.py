@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma, fetch_candles,
     BTC_SHORT_TP, EXT_BLOCK_PCT,
-    fetch_paxg, entry_conditions,
+    entry_conditions,
 )
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
@@ -67,7 +67,7 @@ def main():
         errors.append("TRX data fetch FAILED")
         trx_da = []
 
-    paxg_da = fetch_paxg()
+    paxg_da = fetch_candles('PAXGUSDT', 600)
     if not paxg_da or len(paxg_da) < 200:
         errors.append("PAXG data fetch FAILED")
         paxg_da = []
