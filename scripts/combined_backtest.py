@@ -56,6 +56,8 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
 
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
     btc_ma200 = sma(btc_closes, 200) if btc_closes else None
+    btc_ma50 = sma(btc_closes, 50) if btc_closes else None
+    btc_start = 200
 
     entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}
@@ -80,27 +82,38 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
         m20 = ma20[idx]; vavg = vol_ma20[idx]
         if m20 is None or vavg is None or vavg == 0: continue
 
-        # BTC bear gate for shorts
-        btc_bear = False
-        if btc_ma200:
+        # BTC dual MA regime: strong bull / weak recovery / bear
+        btc_regime = 'bear'  # default
+        btc_size_mult = 1.0
+        if btc_ma50 and btc_ma200:
             btc_idx = min(idx, len(btc_closes) - 1)
-            if btc_idx >= 200 and btc_ma200[btc_idx]:
-                btc_bear = btc_closes[btc_idx] < btc_ma200[btc_idx]
+            if btc_idx >= 200 and btc_ma200[btc_idx] and btc_idx >= 50 and btc_ma50[btc_idx]:
+                btc_close = btc_closes[btc_idx]
+                above_ma200 = btc_close > btc_ma200[btc_idx]
+                above_ma50 = btc_close > btc_ma50[btc_idx]
+                if above_ma200:
+                    btc_regime = 'strong_bull'
+                    btc_size_mult = 1.0
+                elif above_ma50:
+                    btc_regime = 'weak_bull'
+                    btc_size_mult = 0.7  # reduced size in recovery
+                else:
+                    btc_regime = 'bear'
+                    btc_size_mult = 1.0  # full size for shorts in bear
 
         vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
         near_ma20 = abs(cc - m20) / m20 <= MA_BUF
         dep = sum(e.get('mp', 0) for e in entries)
         mult = winner_mult(entries, cc, is_short)
 
-        # ── BTC regime exit: close longs when bear, close shorts when bull ──
+        # ── BTC regime exit ──
         for e in entries[:]:
-            if not e.get('is_short') and btc_bear:
-                # Long closed when BTC becomes bear
+            if not e.get('is_short') and btc_regime == 'bear':
                 raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * LEV
                 eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
                 continue
-            if e.get('is_short') and not btc_bear:
+            if e.get('is_short') and btc_regime == 'strong_bull':
                 raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * LEV
                 eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                 entries.remove(e)
@@ -131,13 +144,13 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
                     eq += raw / 100 * (1 - 2 * 0.0005 * LEV)
                     entries.remove(e)
 
-        # ── Entry: only when BTC regime matches direction ──
-        can_enter_long = not is_short and not btc_bear  # long only in BTC bull
-        can_enter_short = is_short and btc_bear         # short only in BTC bear
+        # ── Entry: BTC dual-MA gate ──
+        can_enter_long = not is_short and btc_regime != 'bear'
+        can_enter_short = is_short and btc_regime != 'strong_bull'
         active = can_enter_long or can_enter_short
 
         if active and near_ma20 and vol_cond and (idx - lei >= 0):
-            mp = eq * ENTRY_PCT / LEV * mult
+            mp = eq * ENTRY_PCT / LEV * mult * btc_size_mult
             if (dep + mp) * LEV <= eq:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                 if is_short: e['lo'] = bl
@@ -153,7 +166,7 @@ def backtest_coin(coin, da, btc_da, is_short, selected_years):
                 roi = (last_ep - cc) / last_ep * 100 * LEV
             if roi >= PYRAMID_ROI:
                 dep = sum(e.get('mp', 0) for e in entries)
-                mp = eq * ENTRY_PCT / LEV * mult
+                mp = eq * ENTRY_PCT / LEV * mult * btc_size_mult
                 if (dep + mp) * LEV <= eq:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                     if is_short: e['lo'] = bl
