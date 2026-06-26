@@ -296,8 +296,8 @@ def _try_fetch(fetcher, symbol, days, label):
 
 
 def fetch_candles(symbol, days=600):
-    """Fetch daily candles. Priority: CoinGecko → CMC → OKX. 0.5s cooldown between attempts."""
-    for fetcher, label in [(fetch_candles_coingecko, 'CoinGecko'), (fetch_candles_cmc, 'CMC'), (fetch_candles_okx, 'OKX')]:
+    """Fetch daily candles. Priority: OKX → CMC → CoinGecko. 0.5s cooldown between attempts."""
+    for fetcher, label in [(fetch_candles_okx, 'OKX'), (fetch_candles_cmc, 'CMC'), (fetch_candles_coingecko, 'CoinGecko')]:
         data = _try_fetch(fetcher, symbol, days, label)
         if data:
             return data

@@ -305,35 +305,34 @@ with patch('backtest_shared.requests.get') as mock_get:
 print("\n=== fetch_candles() priority ===")
 from backtest_shared import fetch_candles
 
-# CoinGecko succeeds → returns immediately, no fallback needed
-with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test'}):
-    with patch('backtest_shared.fetch_candles_coingecko') as mock_cg, \
-         patch('backtest_shared.fetch_candles_cmc') as mock_cmc, \
-         patch('backtest_shared.fetch_candles_okx') as mock_okx:
-        mock_cg.return_value = [{'close': 100, 'high': 100, 'low': 100, 'volume': 0, 'time': 1}] * 200
-        result = fetch_candles('BTCUSDT', 10)
-        check("uses CoinGecko when available", result is not None and len(result) >= 200)
-        mock_cg.assert_called()
-        mock_cmc.assert_not_called()
-        mock_okx.assert_not_called()
+# OKX succeeds → returns immediately, no fallback needed
+with patch('backtest_shared.fetch_candles_okx') as mock_okx, \
+     patch('backtest_shared.fetch_candles_cmc') as mock_cmc, \
+     patch('backtest_shared.fetch_candles_coingecko') as mock_cg:
+    mock_okx.return_value = [{'close': 100, 'high': 100, 'low': 100, 'volume': 0, 'time': 1}] * 200
+    result = fetch_candles('BTCUSDT', 10)
+    check("uses OKX when available", result is not None and len(result) >= 200)
+    mock_okx.assert_called()
+    mock_cmc.assert_not_called()
+    mock_cg.assert_not_called()
 
-# CoinGecko fails → falls back to CMC
-with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test', 'CMC_API_KEY': 'test'}):
-    with patch('backtest_shared.fetch_candles_coingecko') as mock_cg, \
+# OKX fails → falls back to CMC
+with patch.dict(os.environ, {'CMC_API_KEY': 'test'}):
+    with patch('backtest_shared.fetch_candles_okx') as mock_okx, \
          patch('backtest_shared.fetch_candles_cmc') as mock_cmc, \
-         patch('backtest_shared.fetch_candles_okx') as mock_okx:
-        mock_cg.return_value = None
+         patch('backtest_shared.fetch_candles_coingecko') as mock_cg:
+        mock_okx.return_value = None
         mock_cmc.return_value = [{'close': 100, 'high': 100, 'low': 100, 'volume': 0, 'time': 1}] * 200
         result = fetch_candles('BTCUSDT', 10)
-        check("falls back to CMC when CoinGecko fails", result is not None and len(result) >= 200)
-        mock_cg.assert_called()
+        check("falls back to CMC when OKX fails", result is not None and len(result) >= 200)
+        mock_okx.assert_called()
         mock_cmc.assert_called()
-        mock_okx.assert_not_called()
+        mock_cg.assert_not_called()
 
 # All fail → returns empty
-with patch('backtest_shared.fetch_candles_coingecko', return_value=None), \
+with patch('backtest_shared.fetch_candles_okx', return_value=None), \
      patch('backtest_shared.fetch_candles_cmc', return_value=None), \
-     patch('backtest_shared.fetch_candles_okx', return_value=None):
+     patch('backtest_shared.fetch_candles_coingecko', return_value=None):
     result = fetch_candles('BTCUSDT', 10)
     check("returns empty when all fail", result == [])
 
