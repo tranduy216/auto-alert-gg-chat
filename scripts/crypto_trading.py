@@ -74,7 +74,7 @@ def manage_positions(log, btc_bull=False):
             continue
         log(f"  CLOSE {coin}: BTC bull regime")
         try:
-            okx_close_position(inst_id)
+            okx_close_position(inst_id, pos_side='short', mgn_mode='isolated')
             if DISCORD_WEBHOOK:
                 send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
         except Exception as e:
@@ -184,23 +184,25 @@ def main():
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
+                td_mode = 'isolated' if direction == 'SELL' else 'cross'
+                okx_lev = round(lev)
 
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
-                        inst_id=inst_id, td_mode='isolated',
+                        inst_id=inst_id, td_mode=td_mode,
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
                     traded_count += 1
                     time.sleep(1.5)
-                    okx_set_leverage(inst_id, lev)
-                    log(f"  Leverage set {lev}x")
+                    okx_set_leverage(inst_id, okx_lev)
+                    log(f"  Leverage set {okx_lev}x")
                     if direction == 'BUY':
                         try:
                             trail_pct = str(round(1 - trail, 2))
                             okx_place_algo(
-                                inst_id=inst_id, td_mode='isolated',
+                                inst_id=inst_id, td_mode=td_mode,
                                 side='sell', sz=str(sz),
                                 ord_type='move_order_stop',
                                 callback_ratio=trail_pct,
@@ -214,12 +216,11 @@ def main():
                             tp_sz = max(1, int(sz * frac + 0.5))
                             try:
                                 okx_place_algo(
-                                    inst_id=inst_id, td_mode='isolated',
+                                    inst_id=inst_id, td_mode=td_mode,
                                     side='buy', sz=str(tp_sz),
                                     ord_type='conditional', pos_side='short',
                                     tp_trigger_px=str(tp_price),
                                 )
-    
                             except Exception as tp_err:
                                 log(f"  TP {trg}% failed: {tp_err}")
                         log(f"  TP ladder set")
