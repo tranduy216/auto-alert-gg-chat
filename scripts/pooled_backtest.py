@@ -99,8 +99,9 @@ def run_pooled(data, strategies):
                     raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                     eq += raw * e.get('rem', 1.0) / 100 * ff
                     entries.remove(e)
-                    continue
 
+            # Short: TP ladder
+            for e in entries[:]:
                 if e.get('is_short'):
                     roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
                     tp_stage = e.get('tp', 0)
@@ -112,12 +113,22 @@ def run_pooled(data, strategies):
                             e['rem'] = e.get('rem', 1.0) - cf
                             e['tp'] = tp_stage + 1
                             if e.get('rem', 1.0) <= 0.001: entries.remove(e)
+
+            # Long: combined trailing stop (single peak for all entries, matching live)
+            long_entries = [e for e in entries if not e.get('is_short')]
+            if long_entries:
+                peak_hi = max(e.get('hi', cc) for e in long_entries)
+                peak_hi = max(peak_hi, hi)
+                if cc <= peak_hi * trail_pct:
+                    for e in entries[:]:
+                        if not e.get('is_short'):
+                            raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                            eq += raw / 100 * ff
+                            entries.remove(e)
                 else:
-                    e['hi'] = max(e.get('hi', cc), hi)
-                    if cc <= e['hi'] * trail_pct:
-                        raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw / 100 * ff
-                        entries.remove(e)
+                    for e in entries:
+                        if not e.get('is_short'):
+                            e['hi'] = peak_hi
 
         # ── Entries (FCFS by strategy order) ──
         for label, cd in coin_data.items():
