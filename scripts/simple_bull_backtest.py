@@ -108,11 +108,11 @@ def backtest_coin(coin, da, btc_da, selected_years):
                         eq += raw * e.get('rem', 1.0) / 100 * (1 - 2 * 0.0005 * LEV)
                         entries.remove(e)
 
-            # Entry: Close > MA20 > MA50 > MA200 (uptrend confirmed)
+            # Entry: Close > MA50 (bull momentum) when BTC bull market
             dep = sum(e.get('mp', ENTRY_SIZE) for e in entries)
-            if (dep < 0.80 and len(entries) < 8 and
-                ma20[idx] and ma50[idx] and ma200[idx] and
-                cc > ma20[idx] and ma20[idx] > ma50[idx] and cc > ma200[idx]):
+            if (dep < 1.0 and len(entries) < 10 and
+                ma50[idx] and ma200[idx] and
+                cc > ma50[idx] and cc > ma200[idx]):
                 entries.append({'ep': cc, 'hi': cc, 'mp': ENTRY_SIZE})
 
         # Update highest price for trailing
