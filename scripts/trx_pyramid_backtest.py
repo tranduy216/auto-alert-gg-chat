@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from crypto_trading import sma
 
-BASE = 10000; LEV = 2.0
+BASE = 10000; LEV = 1.0
 ENTRY_PCT = 0.015   # 1.5% of current equity
 TRAIL_PCT = 0.80    # 20% retracement
 MA_BUF = 0.015       # 1.5% buffer from MA20
