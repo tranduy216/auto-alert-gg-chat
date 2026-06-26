@@ -14,10 +14,10 @@ from backtest_shared import (
 )
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
-    okx_get_account, okx_get_positions, okx_get_instruments,
+    okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage,
 )
-from utils.state_manager import has_entered_today
+from utils.state_manager import has_entered_today, record_entry
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -137,21 +137,19 @@ def main():
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
 
-                log(f"  Set leverage {name} {lev}x (disabled)")
-                # okx_set_leverage(inst_id, lev)
+                log(f"  Set leverage {name} {lev}x")
+                okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, ctVal={ct_val})")
                 try:
-                    # ORDER PLACEMENT DISABLED — signal-only mode
-                    # result = okx_place_order(
-                    #     inst_id=inst_id, td_mode='cross',
-                    #     side=side, sz=str(sz),
-                    # )
-                    # log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
-                    # record_entry(name, price)
-                    log(f"  SIGNAL: {name} {direction} {sz}ct @ ${price:,.4f} (order disabled)")
+                    result = okx_place_order(
+                        inst_id=inst_id, td_mode='cross',
+                        side=side, sz=str(sz),
+                    )
+                    log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    record_entry(name, price)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                            f"Pyramid Signal: {name} {direction} @ ${price:,.4f}")
+                            f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
                 except Exception as trade_err:
                     log(f"  Order FAILED: {trade_err}")
                     if DISCORD_WEBHOOK:
