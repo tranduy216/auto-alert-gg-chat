@@ -142,3 +142,40 @@ def compute_results(curve, yearly_eq, base=BASE, days=None):
         yearly[y] = (yearly_eq[y] / prev - 1) * 100
 
     return {'cagr': cagr, 'dd': md, 'final': teq * base, 'yearly': yearly}
+
+
+def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
+                     btc_bull, ext_block, lev_coin, lei=-999):
+    """
+    Kiểm tra điều kiện entry — shared giữa backtest và live.
+    Returns: (should_enter, mult) — mult=0 nếu bị block extension.
+    """
+    near_ma = abs(cc - m_ma) / m_ma <= ma_buf if m_ma else False
+    vol_cond = idx >= 2 and (vols[idx] + vols[idx-1]) / 2 > vavg
+    can_enter = (not is_short) or (is_short and not btc_bull)
+
+    if not (can_enter and near_ma and vol_cond):
+        return False, 0
+
+    mult = winner_mult(entries, cc, is_short, lev_coin)
+
+    if entries:
+        if is_short:
+            highest_ep = max(e['ep'] for e in entries)
+            if (highest_ep - cc) / highest_ep * 100 > ext_block:
+                mult = 0
+        else:
+            lowest_ep = min(e['ep'] for e in entries)
+            if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
+                mult = 0
+
+    should = (idx - lei >= 0) and mult > 0
+    return should, mult
+
+
+def compute_roi(e, cc, is_short, lev):
+    """ROI của 1 entry."""
+    if is_short:
+        return (e['ep'] - cc) / e['ep'] * 100 * lev
+    return (cc - e['ep']) / e['ep'] * 100 * lev
+
