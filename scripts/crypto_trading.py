@@ -15,6 +15,7 @@ from backtest_shared import (
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
+    okx_set_leverage,
 )
 from backtest_shared import ENTRY_PCT
 
@@ -87,7 +88,7 @@ def main():
         sig = check_signals(da, btc_da, cfg, is_short)
         if sig:
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, sig[1]))
+            signals.append((name, dir, sig[1], cfg.get('lev', 1.8)))
             log(f"  {name}: {dir} @ {sig[1]:.4f}")
 
     if os.environ.get("OKX_API_KEY"):
@@ -111,7 +112,7 @@ def main():
 
             SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'PAXG': 'PAXG-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
 
-            for name, direction, price in signals:
+            for name, direction, price, lev in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
@@ -120,13 +121,19 @@ def main():
                     log(f"  {name}: already in position, skipped")
                     continue
 
+                if inst_id not in inst_map:
+                    log(f"  {name}: {inst_id} not available on OKX, skipped")
+                    continue
+
                 usd_val = eq * ENTRY_PCT
-                inst_info = inst_map.get(inst_id, {})
+                inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
 
+                log(f"  Set leverage {name} {lev}x")
+                okx_set_leverage(inst_id, lev)
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
