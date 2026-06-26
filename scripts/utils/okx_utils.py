@@ -174,9 +174,10 @@ def okx_place_algo(
             body["slOrdPx"] = "-1"
     elif ord_type == "move_order_stop" and callback_ratio:
         body["callbackRatio"] = callback_ratio
-        body["slTriggerPxType"] = "last"
-        body["slTriggerPx"] = ""
         body["slOrdPx"] = "-1"
+        if sl_trigger_px:
+            body["slTriggerPx"] = sl_trigger_px
+            body["slTriggerPxType"] = "last"
     return _okx_request("POST", "/api/v5/trade/order-algo", body)
 
 
