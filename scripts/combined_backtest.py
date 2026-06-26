@@ -163,7 +163,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
         if active and near_ma and vol_cond and (idx - lei >= 0) and mult > 0:
             mp = eq * ENTRY_PCT / lev_coin * mult
-            if (dep + mp) * lev_coin <= max_cap * total_val:
+            if dep + mp <= max_cap * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                 if is_short: e['lo'] = bl
                 else: e['hi'] = cc
@@ -180,7 +180,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                 dep = sum(e.get('mp', 0) for e in entries)
                 total_val = total_asset_value(entries, cc, eq, lev_coin)
                 mp = eq * ENTRY_PCT / lev_coin * mult
-                if (dep + mp) * lev_coin <= max_cap * total_val:
+                if dep + mp <= max_cap * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short}
                     if is_short: e['lo'] = bl
                     else: e['hi'] = cc
