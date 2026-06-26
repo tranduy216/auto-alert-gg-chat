@@ -116,17 +116,9 @@ def okx_place_order(
     pos_side: Optional[str] = None,
     sl_trigger_px: Optional[str] = None,
     reduce_only: bool = False,
+    trail_callback: Optional[str] = None,
 ) -> dict:
-    """Place an order.
-    
-    - td_mode: 'cross' for cross-margin
-    - side: 'buy' or 'sell'
-    - sz: size in contracts
-    - px: limit price (None = market order)
-    - pos_side: 'long' or 'short' (required for SWAP reduce)
-    - sl_trigger_px: stop-loss trigger price
-    - reduce_only: close position only (no net increase)
-    """
+    """Place an order. Attach trailing stop and/or stop loss via algo orders."""
     body: dict = {
         "instId": inst_id,
         "tdMode": td_mode,
@@ -140,15 +132,46 @@ def okx_place_order(
         body["posSide"] = pos_side
     if reduce_only:
         body["reduceOnly"] = True
+    algo_ords = []
     if sl_trigger_px:
-        body["attachAlgoOrds"] = [{
-            "slTriggerPx": sl_trigger_px,
-            "slOrdPx": "-1",
-            "sz": sz,
-            "ordType": "conditional",
+        algo_ords.append({
+            "slTriggerPx": sl_trigger_px, "slOrdPx": "-1",
+            "sz": sz, "ordType": "conditional",
             "side": "sell" if side == "buy" else "buy",
-        }]
+        })
+    if trail_callback:
+        algo_ords.append({
+            "slTriggerPxType": "last", "slTriggerPx": "",
+            "sz": "-1", "ordType": "move_order_stop",
+            "callbackRatio": trail_callback,
+            "side": "sell" if side == "buy" else "buy",
+        })
+    if algo_ords:
+        body["attachAlgoOrds"] = algo_ords
     return _okx_request("POST", "/api/v5/trade/order", body)
+
+
+def okx_place_algo(
+    inst_id: str, td_mode: str, side: str, sz: str,
+    ord_type: str, pos_side: Optional[str] = None,
+    tp_trigger_px: Optional[str] = None, callback_ratio: Optional[str] = None,
+) -> dict:
+    """Place a standalone algo order (trailing stop or TP)."""
+    body: dict = {
+        "instId": inst_id, "tdMode": td_mode,
+        "side": side, "sz": sz, "ordType": ord_type,
+    }
+    if pos_side:
+        body["posSide"] = pos_side
+    if ord_type == "conditional" and tp_trigger_px:
+        body["tpTriggerPx"] = tp_trigger_px
+        body["tpOrdPx"] = "-1"
+    elif ord_type == "move_order_stop" and callback_ratio:
+        body["callbackRatio"] = callback_ratio
+        body["slTriggerPxType"] = "last"
+        body["slTriggerPx"] = ""
+        body["slOrdPx"] = "-1"
+    return _okx_request("POST", "/api/v5/trade/order-algo", body)
 
 
 def okx_close_position(inst_id: str, pos_side: str = "net", mgn_mode: str = "cross") -> dict:

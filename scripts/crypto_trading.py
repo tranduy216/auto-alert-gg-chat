@@ -15,10 +15,10 @@ from backtest_shared import (
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
-    okx_set_leverage, okx_close_position,
+    okx_set_leverage, okx_close_position, okx_place_algo,
 )
 from utils.state_manager import has_entered_today, record_entry, get_state, set_state
-from backtest_shared import ENTRY_PCT, TRAIL_PCT
+from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
@@ -56,7 +56,7 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Check open positions: trailing stop for longs, TP ladder + trend exit for short BTC."""
+    """Set trailing stop for profitable longs. Close all shorts if BTC bull."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -80,48 +80,34 @@ def manage_positions(log, btc_bull=False):
         state = get_state(coin)
 
         if is_long:
-            trail_high = max(state.get('trail_high', 0), avg_px, mark_px)
-            if mark_px > trail_high:
-                trail_high = mark_px
-            if mark_px <= trail_high * TRAIL_PCT:
-                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (hi=${trail_high:,.2f}, drop={(1-mark_px/trail_high)*100:.1f}%)")
+            if state.get('trail_set'):
+                continue
+            lev = 1.8 if coin != 'BTC' else 1.6
+            roi = (mark_px - avg_px) / avg_px * 100 * lev
+            if roi >= 20:
+                log(f"  SET trail {coin}: ROI={roi:.1f}% (avg={avg_px:.4f}, mark={mark_px:.4f})")
                 try:
-                    okx_close_position(inst_id)
-                    set_state(coin, {'trail_high': 0, 'tp_stage': 0})
+                    okx_place_algo(
+                        inst_id=inst_id, td_mode='cross',
+                        side='sell', sz=str(pos_qty),
+                        ord_type='move_order_stop', callback_ratio='0.05',
+                    )
+                    set_state(coin, {'trail_set': True})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f}")
+                            f"TRAIL {coin}: set trailing stop @ ROI {roi:.1f}%")
                 except Exception as e:
-                    log(f"  CLOSE {coin} failed: {e}")
-            else:
-                set_state(coin, {'trail_high': trail_high})
+                    log(f"  TRAIL {coin} failed: {e}")
         else:
             if btc_bull:
-                log(f"  CLOSE {coin}: BTC bull regime (close all short)")
+                log(f"  CLOSE {coin}: BTC bull regime")
                 try:
                     okx_close_position(inst_id)
-                    set_state(coin, {'tp_stage': 0})
+                    set_state(coin, {'tp_stage': 0, 'trail_set': False})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
                 except Exception as e:
                     log(f"  CLOSE {coin} failed: {e}")
-                continue
-            tp_stage = state.get('tp_stage', 0)
-            if tp_stage < len(BTC_SHORT_TP):
-                trg, frac = BTC_SHORT_TP[tp_stage]
-                roi = (avg_px - mark_px) / avg_px * 100 * 1.6
-                if roi >= trg:
-                    close_sz = max(1, int(pos_qty * frac + 0.5))
-                    log(f"  TP {coin} stage {tp_stage+1}: ROI={roi:.1f}% → close {close_sz}ct")
-                    try:
-                        okx_place_order(inst_id=inst_id, td_mode='cross',
-                            side='buy', sz=str(close_sz), pos_side='short', reduce_only=True)
-                        set_state(coin, {'tp_stage': tp_stage + 1})
-                        if DISCORD_WEBHOOK:
-                            send_message(DISCORD_WEBHOOK,
-                                f"TP {coin} stage {tp_stage+1}: closed {frac*100:.0f}% @ ROI {roi:.1f}%")
-                    except Exception as e:
-                        log(f"  TP {coin} failed: {e}")
 
 
 def main():
@@ -241,7 +227,24 @@ def main():
                         side=side, sz=str(sz),
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
+                    if direction == 'SELL':
+                        # Set TP ladder for shorts at order time
+                        for trg, frac in BTC_SHORT_TP:
+                            tp_price = round(price * (1 - trg / (100 * lev)), 1)
+                            tp_sz = max(1, int(sz * frac + 0.5))
+                            try:
+                                okx_place_algo(
+                                    inst_id=inst_id, td_mode='cross',
+                                    side='buy', sz=str(tp_sz),
+                                    ord_type='conditional', pos_side='short',
+                                    tp_trigger_px=str(tp_price),
+                                )
+                            except Exception:
+                                pass
+                        log(f"  TP ladder set")
                     record_entry(name, price)
+                    if direction == 'BUY':
+                        set_state(name, {'trail_set': False})  # reset, will be set when profitable
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
