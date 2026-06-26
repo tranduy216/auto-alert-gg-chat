@@ -14,7 +14,7 @@ from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
     PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_paxg, total_asset_value, compute_results,
+    load_data, fetch_candles_okx, total_asset_value, compute_results,
     entry_conditions,
 )
 
@@ -162,18 +162,18 @@ def main():
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
-    paxg_da = fetch_paxg()
+    xau_da = fetch_candles_okx('XAUUSDT', 600) or []
 
     strategies = [
         ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG-L', 'PAXG', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
+        ('XAU-L',  'XAU',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
     results = {}
     for label, coin, is_short, max_cap, cfg in strategies:
         sym = f'{coin}USDT_4000_1609434000000'
-        da = paxg_da if coin == 'PAXG' else data.get(sym, [])
+        da = xau_da if coin == 'XAU' else data.get(sym, [])
         res = backtest_coin(coin, da, btc_da, is_short, max_cap, None, cfg)
         if res[1]: results[label] = res[1]
 

@@ -68,9 +68,9 @@ def main():
         errors.append("TRX data fetch FAILED")
         trx_da = []
 
-    paxg_da = fetch_candles('PAXGUSDT', 600)
+    paxg_da = fetch_candles('XAUUSDT', 600)
     if not paxg_da or len(paxg_da) < 200:
-        errors.append("PAXG data fetch FAILED")
+        errors.append("XAU data fetch FAILED")
         paxg_da = []
 
     if errors and DISCORD_WEBHOOK:
@@ -79,7 +79,7 @@ def main():
 
     strategies = [
         ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
+        ('XAU', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC',  btc_da,  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
@@ -110,7 +110,7 @@ def main():
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
 
-            SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'PAXG': 'PAXG-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
+            SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
 
             for name, direction, price, lev in signals:
                 inst_id = SYMBOL_OKX.get(name)

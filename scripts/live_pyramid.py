@@ -77,11 +77,11 @@ def main():
     print("Fetching market data...", file=sys.stderr)
     btc_da = fetch_candles('BTCUSDT', 600)
     trx_da = fetch_candles('TRXUSDT', 600)
-    paxg_da = fetch_candles('PAXGUSDT', 600)
+    paxg_da = fetch_candles('XAUUSDT', 600)
 
     strategies = [
         ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
+        ('XAU', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC',  btc_da,  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 

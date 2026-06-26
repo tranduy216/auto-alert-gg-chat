@@ -10,7 +10,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_paxg, entry_conditions, compute_results,
+    load_data, fetch_candles_okx, entry_conditions, compute_results,
 )
 
 # Multi-coin total_asset_value (different signature from single-coin version)
@@ -203,12 +203,12 @@ def run_pooled(data, strategies):
 
 def main():
     data = load_data()
-    paxg_da = fetch_paxg()
-    data['PAXGUSDT_POOL'] = paxg_da
+    xau_da = fetch_candles_okx('XAUUSDT', 600) or []
+    data['XAUUSDT_POOL'] = xau_da
 
     strategies = [
         ('TRX-L',  'TRXUSDT_4000_1609434000000', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG-L', 'PAXGUSDT_POOL',              False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
+        ('XAU-L',  'XAUUSDT_POOL',               False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 

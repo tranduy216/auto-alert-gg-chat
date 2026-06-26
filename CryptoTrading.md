@@ -9,7 +9,7 @@ Multi-coin pyramid strategy với shared capital pool. Long TRX/PAXG khi gần M
 | Coin | Direction | Leverage | MA | Buffer | Pyramid ROI | Filters |
 |------|-----------|----------|----|--------|-------------|---------|
 | TRX | Long | 1.8x | 15 | 5% | 3% | — |
-| PAXG | Long | 1.8x | 15 | 5% | 3% | Lower High |
+| XAU | Long | 1.8x | 15 | 5% | 3% | Lower High |
 | BTC | Short | 1.6x | 5 | 5% | 3% | — |
 
 ## Entry Logic (`entry_conditions`)

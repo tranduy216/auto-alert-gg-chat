@@ -150,10 +150,25 @@ def fetch_paxg(from_ts=None):
 def fetch_candles_okx(symbol, days=600):
     """Fetch OHLCV daily candles from OKX (primary data source). Returns 1d bars or None on failure."""
     try:
-        okx_symbol = symbol.replace('USDT', '-USDT')
+        base = symbol.replace('USDT', '')
+        okx_symbols = [f'{base}-USDT', f'{base}-USDT-SWAP']
         url = 'https://www.okx.com/api/v5/market/candles'
-        all_candles = []
-        before = ''
+        all_candles = []; before = ''
+        okx_symbol = None
+        for sym in okx_symbols:
+            params = {'instId': sym, 'bar': '1D', 'limit': 1}
+            try:
+                resp = requests.get(url, params=params, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get('code') == '0' and data.get('data'):
+                    okx_symbol = sym
+                    break
+            except Exception:
+                continue
+        if not okx_symbol:
+            print(f"[backtest_shared] OKX {symbol}: no valid instrument found", file=sys.stderr)
+            return None
         while len(all_candles) < days:
             params = {'instId': okx_symbol, 'bar': '1D', 'limit': min(300, days - len(all_candles))}
             if before:
