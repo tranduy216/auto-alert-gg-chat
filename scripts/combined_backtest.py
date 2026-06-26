@@ -14,7 +14,7 @@ from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
     PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor,
-    load_data, fetch_candles_okx, total_asset_value, compute_results,
+    load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions,
 )
 
@@ -162,7 +162,7 @@ def main():
     data = load_data()
     btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 
-    xau_da = fetch_candles_okx('XAUUSDT', 600) or []
+    xau_da = fetch_paxg()
 
     strategies = [
         ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
