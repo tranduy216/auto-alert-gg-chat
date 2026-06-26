@@ -18,6 +18,7 @@ from utils.okx_utils import (
     okx_set_leverage, okx_close_position, okx_place_algo,
 )
 from utils.state_manager import has_entered_today, record_entry, get_state, set_state
+from backtest_shared import ENTRY_PCT, TRAIL_PCT
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -56,7 +57,7 @@ def check_signals(coin_da, btc_da, cfg, is_short):
 
 
 def manage_positions(log, btc_bull=False):
-    """Set trailing stop for profitable longs. Close all shorts if BTC bull."""
+    """Trailing stop for longs via peak_price (20% below peak). Close all shorts if BTC bull."""
     try:
         pos = okx_get_positions()
     except Exception as e:
@@ -71,39 +72,35 @@ def manage_positions(log, btc_bull=False):
         if not coin:
             continue
 
-        avg_px = float(p.get('avgPx', 0))
         mark_px = float(p.get('markPx', 0))
-        if not avg_px or not mark_px:
+        if not mark_px:
             continue
 
         is_long = float(p.get('pos', 0)) > 0
         state = get_state(coin)
 
         if is_long:
-            if state.get('trail_set'):
-                continue
-            lev = 1.8 if coin != 'BTC' else 1.6
-            roi = (mark_px - avg_px) / avg_px * 100 * lev
-            if roi >= 20:
-                log(f"  SET trail {coin}: ROI={roi:.1f}% (avg={avg_px:.4f}, mark={mark_px:.4f})")
+            peak = max(state.get('peak_price', 0), mark_px)
+            if mark_px > peak:
+                peak = mark_px
+            if mark_px <= peak * TRAIL_PCT:
+                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak=${peak:,.2f}, drop={(1-mark_px/peak)*100:.1f}%)")
                 try:
-                    okx_place_algo(
-                        inst_id=inst_id, td_mode='cross',
-                        side='sell', sz=str(pos_qty),
-                        ord_type='move_order_stop', callback_ratio='0.05',
-                    )
-                    set_state(coin, {'trail_set': True})
+                    okx_close_position(inst_id)
+                    set_state(coin, {'peak_price': 0})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                            f"TRAIL {coin}: set trailing stop @ ROI {roi:.1f}%")
+                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (peak ${peak:,.2f})")
                 except Exception as e:
-                    log(f"  TRAIL {coin} failed: {e}")
+                    log(f"  CLOSE {coin} failed: {e}")
+            else:
+                set_state(coin, {'peak_price': peak})
         else:
             if btc_bull:
                 log(f"  CLOSE {coin}: BTC bull regime")
                 try:
                     okx_close_position(inst_id)
-                    set_state(coin, {'tp_stage': 0, 'trail_set': False})
+                    set_state(coin, {'peak_price': 0})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
                 except Exception as e:
@@ -243,8 +240,8 @@ def main():
                                 pass
                         log(f"  TP ladder set")
                     record_entry(name, price)
-                    if direction == 'BUY':
-                        set_state(name, {'trail_set': False})  # reset, will be set when profitable
+                    # Reset peak_price on new entry
+                    set_state(name, {'peak_price': price})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
