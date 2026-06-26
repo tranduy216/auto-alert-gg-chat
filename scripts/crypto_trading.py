@@ -74,8 +74,9 @@ def manage_positions(log, btc_bull=False):
         lev = COIN_LEV.get(coin, 1.8)
         try:
             okx_set_leverage(inst_id, lev)
-        except Exception:
-            pass
+            log(f"  Leverage re-set {lev}x for {coin}")
+        except Exception as lev_err:
+            log(f"  Leverage re-set failed for {coin}: {lev_err}")
         if not btc_bull or float(p.get('pos', 0)) > 0:
             continue
         log(f"  CLOSE {coin}: BTC bull regime")
@@ -205,16 +206,18 @@ def main():
                     okx_set_leverage(inst_id, lev)
                     log(f"  Leverage set {lev}x")
                     if direction == 'BUY':
-                        trail_pct = str(round(1 - trail, 2))
-                        okx_place_algo(
-                            inst_id=inst_id, td_mode='cross',
-                            side='sell', sz=str(sz),
-                            ord_type='move_order_stop',
-                            callback_ratio=trail_pct,
-                        )
-                        log(f"  Trailing stop set ({round((1-trail)*100)}%)")
+                        try:
+                            trail_pct = str(round(1 - trail, 2))
+                            okx_place_algo(
+                                inst_id=inst_id, td_mode='cross',
+                                side='sell', sz=str(sz),
+                                ord_type='move_order_stop',
+                                callback_ratio=trail_pct,
+                            )
+                            log(f"  Trailing stop set ({round((1-trail)*100)}%)")
+                        except Exception as trail_err:
+                            log(f"  Trailing stop FAILED (non-critical): {trail_err}")
                     if direction == 'SELL':
-                        # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
                             tp_price = round(price * (1 - trg / (100 * lev)), 1)
                             tp_sz = max(1, int(sz * frac + 0.5))
@@ -226,8 +229,8 @@ def main():
                                     tp_trigger_px=str(tp_price),
                                 )
     
-                            except Exception:
-                                pass
+                            except Exception as tp_err:
+                                log(f"  TP {trg}% failed: {tp_err}")
                         log(f"  TP ladder set")
                     record_entry(name, price)
                     if DISCORD_WEBHOOK:
