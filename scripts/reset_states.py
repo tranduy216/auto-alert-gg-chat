@@ -1,12 +1,6 @@
-#!/usr/bin/env python3
-"""One-time script to reset all Firestore states (trading + queued alerts)."""
-
-import json
-import os
-import sys
-
+"""One-time script to reset all Firestore states (trading + queued alerts + dedup)."""
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from utils.firebase_utils import get_db, is_firebase_enabled
 
 if not is_firebase_enabled():
@@ -15,7 +9,7 @@ if not is_firebase_enabled():
 
 db = get_db()
 
-collections = ["crypto_trading_states", "queued_alerts"]
+collections = ["trading_state", "queued_alerts", "sent_alert_hashes", "crypto_trading_states"]
 total = 0
 for col in collections:
     docs = db.collection(col).stream()
