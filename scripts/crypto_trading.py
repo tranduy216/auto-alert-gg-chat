@@ -17,7 +17,7 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position, okx_place_algo,
 )
-from utils.state_manager import has_entered_today, record_entry, get_state, set_state
+from utils.state_manager import has_entered_today, record_entry
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
