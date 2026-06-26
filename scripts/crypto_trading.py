@@ -15,12 +15,15 @@ from backtest_shared import (
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
-    okx_set_leverage,
+    okx_set_leverage, okx_close_position,
 )
-from utils.state_manager import has_entered_today, record_entry
-from backtest_shared import ENTRY_PCT
+from utils.state_manager import has_entered_today, record_entry, get_state, set_state
+from backtest_shared import ENTRY_PCT, TRAIL_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
+
+SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
+COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
 
 
 def check_signals(coin_da, btc_da, cfg, is_short):
@@ -50,6 +53,65 @@ def check_signals(coin_da, btc_da, cfg, is_short):
                                  ma=ma, highs=highs, lows=lows,
                                  ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     return should, cc
+
+
+def manage_positions(log):
+    """Check open positions: trailing stop for longs, TP ladder for short BTC."""
+    try:
+        pos = okx_get_positions()
+    except Exception as e:
+        log(f"  Position check failed: {e}")
+        return
+    for p in pos:
+        inst_id = p.get('instId', '')
+        pos_qty = abs(float(p.get('pos', 0)))
+        if pos_qty == 0:
+            continue
+        coin = COIN_FROM_INST.get(inst_id, '')
+        if not coin:
+            continue
+
+        avg_px = float(p.get('avgPx', 0))
+        mark_px = float(p.get('markPx', 0))
+        if not avg_px or not mark_px:
+            continue
+
+        is_long = float(p.get('pos', 0)) > 0
+        state = get_state(coin)
+
+        if is_long:
+            trail_high = max(state.get('trail_high', 0), avg_px, mark_px)
+            if mark_px > trail_high:
+                trail_high = mark_px
+            if mark_px <= trail_high * TRAIL_PCT:
+                log(f"  CLOSE {coin}: trailing stop @ ${mark_px:,.2f} (hi=${trail_high:,.2f}, drop={(1-mark_px/trail_high)*100:.1f}%)")
+                try:
+                    okx_close_position(inst_id)
+                    set_state(coin, {'trail_high': 0, 'tp_stage': 0})
+                    if DISCORD_WEBHOOK:
+                        send_message(DISCORD_WEBHOOK,
+                            f"CLOSE {coin}: trailing stop @ ${mark_px:,.2f}")
+                except Exception as e:
+                    log(f"  CLOSE {coin} failed: {e}")
+            else:
+                set_state(coin, {'trail_high': trail_high})
+        else:
+            tp_stage = state.get('tp_stage', 0)
+            if tp_stage < len(BTC_SHORT_TP):
+                trg, frac = BTC_SHORT_TP[tp_stage]
+                roi = (avg_px - mark_px) / avg_px * 100 * 1.6
+                if roi >= trg:
+                    close_sz = max(1, int(pos_qty * frac + 0.5))
+                    log(f"  TP {coin} stage {tp_stage+1}: ROI={roi:.1f}% → close {close_sz}ct")
+                    try:
+                        okx_place_order(inst_id=inst_id, td_mode='cross',
+                            side='buy', sz=str(close_sz), pos_side='short', reduce_only=True)
+                        set_state(coin, {'tp_stage': tp_stage + 1})
+                        if DISCORD_WEBHOOK:
+                            send_message(DISCORD_WEBHOOK,
+                                f"TP {coin} stage {tp_stage+1}: closed {frac*100:.0f}% @ ROI {roi:.1f}%")
+                    except Exception as e:
+                        log(f"  TP {coin} failed: {e}")
 
 
 def main():
@@ -104,14 +166,15 @@ def main():
                 eq = float(acct.get('totalEq', 0))
             log(f"Equity: ${eq:,.0f}")
 
+            log("Checking positions...")
+            manage_positions(log)
+
             pos = okx_get_positions()
             pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}
             log(f"Open positions: {len(pos_map)}")
 
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
-
-            SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
 
             for name, direction, price, lev in signals:
                 inst_id = SYMBOL_OKX.get(name)

@@ -115,6 +115,7 @@ def okx_place_order(
     px: Optional[str] = None,
     pos_side: Optional[str] = None,
     sl_trigger_px: Optional[str] = None,
+    reduce_only: bool = False,
 ) -> dict:
     """Place an order.
     
@@ -123,7 +124,8 @@ def okx_place_order(
     - sz: size in contracts
     - px: limit price (None = market order)
     - pos_side: 'long' or 'short' (required for SWAP reduce)
-    - sl_trigger_px: stop-loss trigger price (e.g. entry * 0.98 for LONG)
+    - sl_trigger_px: stop-loss trigger price
+    - reduce_only: close position only (no net increase)
     """
     body: dict = {
         "instId": inst_id,
@@ -136,6 +138,8 @@ def okx_place_order(
         body["px"] = px
     if pos_side:
         body["posSide"] = pos_side
+    if reduce_only:
+        body["reduceOnly"] = True
     if sl_trigger_px:
         body["attachAlgoOrds"] = [{
             "slTriggerPx": sl_trigger_px,
