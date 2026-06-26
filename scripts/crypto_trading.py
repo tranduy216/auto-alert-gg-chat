@@ -110,8 +110,8 @@ def main():
             f"*Fetch Errors — {ts:%Y-%m-%d %H:%M}*\n" + "\n".join(f"  {e}" for e in errors))
 
     strategies = [
-        ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('XAU', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
+        ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'trail': 0.78}),
+        ('XAU', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True, 'trail': 0.84}),
         ('BTC',  btc_da,  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
@@ -120,7 +120,7 @@ def main():
         sig = check_signals(da, btc_da, cfg, is_short)
         if sig:
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, sig[1], cfg.get('lev', 1.8)))
+            signals.append((name, dir, sig[1], cfg.get('lev', 1.8), cfg.get('trail', 0.80)))
             log(f"  {name}: {dir} @ {sig[1]:.4f}")
 
     if os.environ.get("OKX_API_KEY"):
@@ -153,7 +153,7 @@ def main():
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
 
-            for name, direction, price, lev in signals:
+            for name, direction, price, lev, trail in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
@@ -200,12 +200,14 @@ def main():
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
                     time.sleep(1.5)
                     if direction == 'BUY':
+                        trail_pct = str(round(1 - trail, 2))
                         okx_place_algo(
                             inst_id=inst_id, td_mode='cross',
                             side='sell', sz='-1',
-                            ord_type='move_order_stop', callback_ratio='0.20',
+                            ord_type='move_order_stop',
+                            callback_ratio=trail_pct,
                         )
-                        log("  Trailing stop set (20%)")
+                        log(f"  Trailing stop set ({round((1-trail)*100)}%)")
                     if direction == 'SELL':
                         # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
@@ -245,7 +247,7 @@ def main():
         log("OKX not configured — signal only")
 
     if DISCORD_WEBHOOK and signals:
-        summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p, _ in signals)
+        summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p, *_ in signals)
         send_message(DISCORD_WEBHOOK,
             f"*Pyramid Trading — {ts:%Y-%m-%d}*\n{summary}")
 
