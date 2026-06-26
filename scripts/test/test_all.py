@@ -1,8 +1,9 @@
 """
-Unit tests for backtest_shared, combined_backtest, pooled_backtest.
-Run: python3 -B -c "exec(open('scripts/test/test_all.py').read())"
+Unit tests for backtest_shared, combined_backtest, pooled_backtest, crypto_trading.
+Run: python3 -B scripts/test/test_all.py
 """
-import sys, json
+import sys, json, os, datetime, tempfile
+from unittest.mock import patch, Mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -180,6 +181,273 @@ for e in [{'ep': 100, 'mp': 0.1, 'rem': 1.0}, {'ep': 80, 'mp': 0.05, 'rem': 0.5}
 check("tp_schedule entries have 2 fields", all(len(t) == 2 for t in TP_SCHEDULE))
 check("tp_schedule targets ascending", all(
     TP_SCHEDULE[i][0] < TP_SCHEDULE[i+1][0] for i in range(len(TP_SCHEDULE)-1)))
+
+
+# ── fetch_candles_coingecko ──
+print("\n=== fetch_candles_coingecko() ===")
+from backtest_shared import fetch_candles_coingecko
+
+check("no API key returns None", fetch_candles_coingecko('BTCUSDT') is None)
+
+with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test_key'}):
+    check("unknown symbol returns None", fetch_candles_coingecko('ETHUSDT') is None)
+
+    # Mock success response: hourly bars aggregated to daily
+    with patch('backtest_shared.requests.get') as mock_get:
+        # Return enough hourly bars (>48) spread over 2 days
+        hour_prices = []
+        day1 = 1735689600000  # 2025-01-01 00:00
+        for h in range(24):
+            hour_prices.append([day1 + h * 3600000, 50000.0 + h * 10])
+        day2 = day1 + 86400000
+        for h in range(24):
+            hour_prices.append([day2 + h * 3600000, 50100.0 + h * 10])
+        mock_data = {'prices': hour_prices}
+        mock_resp = Mock()
+        mock_resp.json.return_value = mock_data
+        mock_get.return_value = mock_resp
+        result = fetch_candles_coingecko('BTCUSDT', 10)
+        check("returns daily bars on success", isinstance(result, list) and len(result) > 0)
+        if result:
+            check("aggregated to 2 daily bars", len(result) == 2)
+            d = result[0]
+            check("bar has close field", 'close' in d)
+            check("bar has high field", 'high' in d)
+            check("bar has low field", 'low' in d)
+            check("bar has time field", 'time' in d)
+
+with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test_key'}):
+    with patch('backtest_shared.requests.get') as mock_get:
+        mock_get.side_effect = Exception('Network error')
+        result = fetch_candles_coingecko('BTCUSDT', 10)
+        check("returns None on network error", result is None)
+
+    with patch('backtest_shared.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.json.return_value = {'prices': []}
+        mock_get.return_value = mock_resp
+        result = fetch_candles_coingecko('BTCUSDT', 10)
+        check("returns None when < 48 price points", result is None)
+
+
+# ── fetch_candles_cmc ──
+print("\n=== fetch_candles_cmc() ===")
+from backtest_shared import fetch_candles_cmc
+
+check("no API key returns None", fetch_candles_cmc('BTCUSDT') is None)
+
+with patch.dict(os.environ, {'CMC_API_KEY': 'test_key'}):
+    mock_data = {
+        'data': {
+            'BTC': {
+                'quotes': [
+                    {'time_open': '2025-01-01T00:00:00Z',
+                     'quote': {'USD': {'close': 50000, 'high': 51000, 'low': 49000, 'volume': 1000}}},
+                ]
+            }
+        }
+    }
+    with patch('backtest_shared.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.json.return_value = mock_data
+        mock_get.return_value = mock_resp
+        result = fetch_candles_cmc('BTCUSDT', 10)
+        check("returns daily bars on success", isinstance(result, list) and len(result) == 1)
+        if result:
+            d = result[0]
+            check("close matches", d['close'] == 50000)
+            check("high matches", d['high'] == 51000)
+            check("volume matches", d['volume'] == 1000)
+
+    with patch('backtest_shared.requests.get') as mock_get:
+        mock_get.side_effect = Exception('CMC error')
+        result = fetch_candles_cmc('BTCUSDT', 10)
+        check("returns None on error", result is None)
+
+    with patch('backtest_shared.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.json.return_value = {'data': {}}
+        mock_get.return_value = mock_resp
+        result = fetch_candles_cmc('BTCUSDT', 10)
+        check("returns None on empty data", result is None)
+
+
+# ── fetch_candles_okx autodetect ──
+print("\n=== fetch_candles_okx() autodetect ===")
+from backtest_shared import fetch_candles_okx
+
+def make_okx_resp(code='0', data=None):
+    return {'code': code, 'data': data or [], 'msg': ''}
+
+with patch('backtest_shared.requests.get') as mock_get:
+    # XAU: spot probe fails (empty), SWAP probe succeeds (has data)
+    calls = []
+    def side_effect(url, params=None, timeout=10):
+        calls.append(params)
+        resp = Mock()
+        inst_id = (params or {}).get('instId', '')
+        limit = (params or {}).get('limit', 300)
+        if inst_id == 'XAU-USDT-SWAP' and limit == 1:
+            # Probe returns valid data
+            resp.json.return_value = {'code': '0', 'data': [['1', '100', '105', '95', '102', '1', '1', '1', '1']], 'msg': ''}
+        elif inst_id == 'XAU-USDT-SWAP':
+            # Main data fetch
+            resp.json.return_value = {'code': '0', 'data': [['1700000000000', '100', '105', '95', '102', '1000', '100', '100000', '1']], 'msg': ''}
+        else:
+            resp.json.return_value = {'code': '0', 'data': [], 'msg': ''}
+        return resp
+    mock_get.side_effect = side_effect
+    result = fetch_candles_okx('XAUUSDT', 1)
+    check("detects SWAP when spot fails", result is not None and len(result) > 0)
+
+
+# ── fetch_candles priority chain ──
+print("\n=== fetch_candles() priority ===")
+from backtest_shared import fetch_candles
+
+# CoinGecko succeeds → returns immediately, no fallback needed
+with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test'}):
+    with patch('backtest_shared.fetch_candles_coingecko') as mock_cg, \
+         patch('backtest_shared.fetch_candles_cmc') as mock_cmc, \
+         patch('backtest_shared.fetch_candles_okx') as mock_okx:
+        mock_cg.return_value = [{'close': 100, 'high': 100, 'low': 100, 'volume': 0, 'time': 1}] * 200
+        result = fetch_candles('BTCUSDT', 10)
+        check("uses CoinGecko when available", result is not None and len(result) >= 200)
+        mock_cg.assert_called()
+        mock_cmc.assert_not_called()
+        mock_okx.assert_not_called()
+
+# CoinGecko fails → falls back to CMC
+with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test', 'CMC_API_KEY': 'test'}):
+    with patch('backtest_shared.fetch_candles_coingecko') as mock_cg, \
+         patch('backtest_shared.fetch_candles_cmc') as mock_cmc, \
+         patch('backtest_shared.fetch_candles_okx') as mock_okx:
+        mock_cg.return_value = None
+        mock_cmc.return_value = [{'close': 100, 'high': 100, 'low': 100, 'volume': 0, 'time': 1}] * 200
+        result = fetch_candles('BTCUSDT', 10)
+        check("falls back to CMC when CoinGecko fails", result is not None and len(result) >= 200)
+        mock_cg.assert_called()
+        mock_cmc.assert_called()
+        mock_okx.assert_not_called()
+
+# All fail → returns empty
+with patch('backtest_shared.fetch_candles_coingecko', return_value=None), \
+     patch('backtest_shared.fetch_candles_cmc', return_value=None), \
+     patch('backtest_shared.fetch_candles_okx', return_value=None):
+    result = fetch_candles('BTCUSDT', 10)
+    check("returns empty when all fail", result == [])
+
+
+# ── Daily cooldown (_last_entry.json) ──
+print("\n=== Daily cooldown ===")
+from crypto_trading import _load_last_entries, _save_last_entry, LAST_ENTRY_FILE
+
+# Save original path and use temp file
+original_path = LAST_ENTRY_FILE
+tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+tmp_path = Path(tmp.name)
+tmp.close()
+
+import crypto_trading
+crypto_trading.LAST_ENTRY_FILE = tmp_path
+
+try:
+    # Clean start
+    if tmp_path.exists():
+        tmp_path.unlink()
+    
+    entries = _load_last_entries()
+    check("empty file returns empty dict", entries == {})
+    
+    _save_last_entry('BTC', '2026-06-26')
+    entries = _load_last_entries()
+    check("saved entry persists", entries.get('BTC') == '2026-06-26')
+    
+    _save_last_entry('TRX', '2026-06-25')
+    entries = _load_last_entries()
+    check("multiple coins stored", len(entries) == 2)
+    check("today check blocks BTC", entries.get('BTC') == '2026-06-26')
+    
+    _save_last_entry('BTC', '2026-06-27')
+    entries = _load_last_entries()
+    check("overwrites existing coin entry", entries.get('BTC') == '2026-06-27')
+    
+    # Corrupted file
+    tmp_path.write_text('not json')
+    entries = _load_last_entries()
+    check("corrupted file returns empty dict", entries == {})
+
+finally:
+    crypto_trading.LAST_ENTRY_FILE = original_path
+    if tmp_path.exists():
+        tmp_path.unlink()
+
+
+# ── _try_fetch retry logic ──
+print("\n=== _try_fetch() retry ===")
+from backtest_shared import _try_fetch
+
+call_counts = [0]
+def flaky_fetcher(symbol, days):
+    call_counts[0] += 1
+    if call_counts[0] < 3:
+        return None
+    return [{'close': 100}] * 200
+
+result = _try_fetch(flaky_fetcher, 'BTC', 10, 'test')
+check("retries until success", result is not None and len(result) >= 200)
+check("called 3 times", call_counts[0] == 3)
+
+call_counts[0] = 0
+def always_fail(symbol, days):
+    call_counts[0] += 1
+    return None
+
+result = _try_fetch(always_fail, 'BTC', 10, 'test')
+check("returns None after 3 failures", result is None)
+check("called 3 times then gives up", call_counts[0] == 3)
+
+
+# ── entry_conditions filter params ──
+print("\n=== entry_conditions() filters ===")
+from backtest_shared import entry_conditions
+
+vols_big = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 100, 100]
+
+# Filter 1: MA Slope
+# ma at indices 0..2 are None (period=3), indices 3.. are valid
+ma_up = [None, None, None, 100, 101, 102, 103, 104, 105, 106, 107, 108]
+ma_down = [None, None, None, 108, 107, 106, 105, 104, 103, 102, 101, 100]
+idx = 6; cc = 104; vavg = 5
+
+s, _ = entry_conditions([], cc, idx, vols_big, vavg, ma_up[idx], 0.05, False, False, 25, 1.5, -999,
+                         ma=ma_up, ma_slope=True)
+check("MA slope rising allows long", s is True)
+
+s2, _ = entry_conditions([], cc, idx, vols_big, vavg, ma_down[idx], 0.05, False, False, 25, 1.5, -999,
+                          ma=ma_down, ma_slope=True)
+check("MA slope falling blocks long", s2 is False)
+
+# Filter 2: Lower High
+highs_lh = [100, 105, 102, 106, 102, 107, 108, 109, 110, 111, 112, 113]
+s3, _ = entry_conditions([], 112, 11, vols_big, vavg, 111, 0.03, False, False, 25, 1.5, -999,
+                          highs=highs_lh, lows=[80]*12, lower_high=True)
+check("lower_high filter allows when no pattern", s3 is True)
+
+# peaks: 110, 106(?) actually need 2 declining peaks
+highs_bad = [100, 110, 105, 108, 105, 110, 106, 108, 104, 103, 102, 101]
+s4, _ = entry_conditions([], 102, 11, vols_big, vavg, 103, 0.03, False, False, 25, 1.5, -999,
+                          highs=highs_bad, lows=[80]*12, lower_high=True)
+check("lower_high blocks when peaks declining", s4 is False)
+
+# Filter 3: Asymmetric buffer
+s5, _ = entry_conditions([], 97, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999,
+                          asym_buffer=True)
+check("asym_buffer below MA uses 2% buffer", s5 is False)
+
+s6, _ = entry_conditions([], 103, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999,
+                          asym_buffer=True)
+check("asym_buffer above MA uses normal buffer", s6 is True)
 
 
 # ── Summary ──
