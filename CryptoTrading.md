@@ -6,11 +6,11 @@ Multi-coin pyramid strategy với shared capital pool. Long TRX/PAXG khi gần M
 
 ## Portfolio
 
-| Coin | Direction | Leverage | MA | Buffer | Pyramid ROI |
-|------|-----------|----------|----|--------|-------------|
-| TRX | Long | 1.8x | 15 | 5% | 3% |
-| PAXG | Long | 1.8x | 15 | 5% | 3% |
-| BTC | Short | 1.6x | 5 | 5% | 3% |
+| Coin | Direction | Leverage | MA | Buffer | Pyramid ROI | Filters |
+|------|-----------|----------|----|--------|-------------|---------|
+| TRX | Long | 1.8x | 15 | 5% | 3% | — |
+| PAXG | Long | 1.8x | 15 | 5% | 3% | Lower High |
+| BTC | Short | 1.6x | 5 | 5% | 3% | — |
 
 ## Entry Logic (`entry_conditions`)
 
@@ -97,11 +97,11 @@ Entry size = `eq * ENTRY_PCT / lev * mult`. Cap: tổng margin ≤ 75% total ass
 
 | File | Role | Lines |
 |------|------|-------|
-| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions` | 211 |
-| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 221 |
-| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 227 |
-| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 95 |
-| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 106 |
+| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions`, `fetch_candles` (OKX→Binance) | 361 |
+| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 227 |
+| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 232 |
+| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 101 |
+| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 112 |
 | `scripts/crypto_trading_legacy.py` | Preserved old system for legacy scripts | 2254 |
 | `scripts/trading_config.py` | Coin profiles, SHORT_ALLOWED | 155 |
 | `scripts/test/test_all.py` | Unit tests (75 tests, 0 failures) | 188 |

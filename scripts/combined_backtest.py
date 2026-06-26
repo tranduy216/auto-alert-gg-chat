@@ -29,9 +29,13 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
     tp_sched = cfg.get('tp', TP_SCHEDULE)
     trail_pct = cfg.get('trail', TRAIL_PCT)
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
+    ma_slope = cfg.get('ma_slope', False)
+    lower_high = cfg.get('lower_high', False)
+    asym_buffer = cfg.get('asym_buffer', False)
 
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
+    highs = [c['high'] for c in da]; lows = [c['low'] for c in da]
     ma_short = sma(closes, ma_period); vol_ma20 = sma(vols, 20)
 
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
@@ -71,6 +75,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         should_enter, mult = entry_conditions(
             entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
             btc_bull, ext_block, lev_coin, lei,
+            ma=ma_short, highs=highs, lows=lows,
+            ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
         )
 
         # ── BTC regime exit (shorts exit on bull) ──
@@ -160,7 +166,7 @@ def main():
 
     strategies = [
         ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG-L', 'PAXG', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('PAXG-L', 'PAXG', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 

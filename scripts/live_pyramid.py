@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
-    sma, fetch_binance,
+    sma, fetch_candles,
     MA_BUF, MA_PERIOD, PYRAMID_ROI_DEFAULT, BTC_SHORT_TP, EXT_BLOCK_PCT,
     fetch_paxg, entry_conditions,
 )
@@ -25,9 +25,13 @@ def check_signal(coin_da, btc_da, is_short, cfg):
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
     ma_period = cfg.get('ma', MA_PERIOD)
     pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
+    ma_slope = cfg.get('ma_slope', False)
+    lower_high = cfg.get('lower_high', False)
+    asym_buffer = cfg.get('asym_buffer', False)
 
     closes = [c['close'] for c in coin_da]
     vols = [c['volume'] for c in coin_da]
+    highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma_short = sma(closes, ma_period)
     vol_ma20 = sma(vols, 20)
 
@@ -53,6 +57,8 @@ def check_signal(coin_da, btc_da, is_short, cfg):
     should_enter, mult = entry_conditions(
         [], cc, idx, vols, vavg, m_ma, ma_buf, is_short,
         btc_bull, ext_block, lev_coin, -999,
+        ma=ma_short, highs=highs, lows=lows,
+        ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
     )
 
     if not should_enter:
@@ -69,13 +75,13 @@ def check_signal(coin_da, btc_da, is_short, cfg):
 
 def main():
     print("Fetching market data...", file=sys.stderr)
-    btc_da = fetch_binance('BTCUSDT', 600)
-    trx_da = fetch_binance('TRXUSDT', 600)
+    btc_da = fetch_candles('BTCUSDT', 600)
+    trx_da = fetch_candles('TRXUSDT', 600)
     paxg_da = fetch_paxg()
 
     strategies = [
         ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('PAXG', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC',  btc_da,  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 

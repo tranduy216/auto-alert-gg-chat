@@ -128,6 +128,9 @@ def run_pooled(data, strategies):
             ma_buf = cfg.get('buf', 0.03)
             pyr_roi = cfg.get('pyr', 5)
             ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
+            ma_slope = cfg.get('ma_slope', False)
+            lower_high = cfg.get('lower_high', False)
+            asym_buffer = cfg.get('asym_buffer', False)
             entries = entries_map[label]
 
             m_ma = cd['ma_short'][idx]; vavg = cd['vol_ma20'][idx]
@@ -140,6 +143,8 @@ def run_pooled(data, strategies):
             should_enter, mult = entry_conditions(
                 entries, cc, idx, cd['vols'], vavg, m_ma, ma_buf, is_short,
                 btc_bull, ext_block, lev_coin, lei_map[label],
+                ma=cd['ma_short'], highs=cd['highs'], lows=cd['lows'],
+                ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
             )
 
             if should_enter:
@@ -203,7 +208,7 @@ def main():
 
     strategies = [
         ('TRX-L',  'TRXUSDT_4000_1609434000000', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('PAXG-L', 'PAXGUSDT_POOL',              False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
+        ('PAXG-L', 'PAXGUSDT_POOL',              False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
         ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
