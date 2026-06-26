@@ -220,9 +220,9 @@ def main():
     data['XAUUSDT_POOL'] = xau_da
 
     strategies = [
-        ('TRX-L',  'TRXUSDT_4000_1609434000000', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}),
-        ('XAU-L',  'XAUUSDT_POOL',               False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True}),
-        ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
+        ('TRX-L',  'TRXUSDT_4000_1609434000000', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2}),
+        ('XAU-L', 'XAUUSDT_POOL',               False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True}),
+        ('BTC-S',  'BTCUSDT_4000_1609434000000',  True, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 2, 'tp': BTC_SHORT_TP}),
     ]
 
     r = run_pooled(data, strategies)
