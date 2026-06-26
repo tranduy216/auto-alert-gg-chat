@@ -178,7 +178,7 @@ def main():
 
     strategies = [
         ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'trail': 0.78}),
-        ('XAU-L', 'XAU', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True, 'trail': 0.84}),
+        ('XAU-L', 'XAU', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'lower_high': True, 'trail': 0.82}),
         ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 1.6, 'tp': BTC_SHORT_TP}),
     ]
 
