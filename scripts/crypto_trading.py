@@ -204,9 +204,8 @@ def main():
                             inst_id=inst_id, td_mode='cross',
                             side='sell', sz='-1',
                             ord_type='move_order_stop', callback_ratio='0.20',
-                            sl_trigger_px=str(price),
                         )
-                        log(f"  Trailing stop set 20% from ${price:.4f}")
+                        log("  Trailing stop set (20%)")
                     if direction == 'SELL':
                         # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
