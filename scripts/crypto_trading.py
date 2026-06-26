@@ -227,6 +227,7 @@ def main():
                     import time as _t; _t.sleep(5)
                     if direction == 'BUY':
                         sl_px = str(round(price * 0.80, 4))
+                        _t.sleep(5)
                         okx_place_algo(
                             inst_id=inst_id, td_mode='cross',
                             side='sell', sz=str(sz),
@@ -234,15 +235,6 @@ def main():
                         )
                         log(f"  SL set @ {sl_px} (-20%)")
                     else:
-                        sl_px = str(round(price * 1.13, 1))
-                        _t.sleep(5)
-                        okx_place_algo(
-                            inst_id=inst_id, td_mode='cross',
-                            side='buy', sz=str(sz),
-                            ord_type='conditional', pos_side='short',
-                            sl_trigger_px=sl_px,
-                        )
-                        log(f"  SL set @ {sl_px} (+13%)")
                         _t.sleep(5)
                         # Set TP ladder for shorts
                         for trg, frac in BTC_SHORT_TP:
