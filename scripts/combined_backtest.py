@@ -49,7 +49,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
-    long_tp_hit = 0; short_tp_hit = 0
+    long_tp_hit = 0; short_tp_hit = 0; pyr_tier_hit = 0
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -95,7 +95,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     if not e.get('is_short'):
                         e['hi'] = peak_hi
 
-        # ── isDoubleSize: check ROI before TP (if roi > 10% → next entry ×2) ──
+        # ── isDoubleSize: check ROI before TP ──
         if not is_short and long_entries:
             pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
             if pos_roi > 10 and double_cd == 0:
