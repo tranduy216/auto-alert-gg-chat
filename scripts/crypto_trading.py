@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
-    sma, fetch_candles,
+    sma, fetch_candles, ENTRY_PCT,
     EXT_BLOCK_PCT, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
     entry_conditions,
 )
@@ -22,7 +22,6 @@ from utils.okx_utils import (
     okx_set_leverage, okx_close_position,
 )
 from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
-from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
@@ -41,11 +40,7 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
     vol_bars = cfg.get('vol_bars', 2)
-    green_min_count = cfg.get('green_min_count', 0)
-    green_window = cfg.get('green_window', 0)
-    green_vol_pct = cfg.get('green_vol_pct', 0)
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
-    opens = [c.get('open', c['close']) for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
@@ -62,13 +57,10 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
                                     btc_bull, ext_block, lev_coin, -999,
                                     ma=ma, highs=highs, lows=lows,
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
-                                    vol_bars=vol_bars, green_min_count=green_min_count,
-                                    green_window=green_window, green_vol_pct=green_vol_pct,
-                                    opens=opens, closes=closes)
+                                    vol_bars=vol_bars)
     if should and is_short:
         mult = 1.0
     mult *= cfg.get('_entry_mult', 1.0)
-    return should, mult, cc
     return should, mult, cc
 
 
@@ -135,20 +127,25 @@ def main():
 
     data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
 
+    entries_map = {}
+    pos_map = {}
     if os.environ.get("OKX_API_KEY"):
         try:
             okx_positions = okx_get_positions()
             entries_map, pos_map = sync_entries_with_positions(okx_positions, log)
         except Exception as e:
             log(f"  Entries sync skipped: {e}")
+            for coin in SYMBOL_OKX:
+                entries_map[coin] = get_entries(coin)
 
+    instruments = []
+    inst_map = {}
     if os.environ.get("OKX_API_KEY"):
         try:
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
         except Exception as e:
             log(f"  Instruments fetch failed: {e}")
-            instruments = []; inst_map = {}
 
     # ── Exit check (trailing/TP/SL for existing positions) ──
     if os.environ.get("OKX_API_KEY"):
@@ -183,7 +180,6 @@ def main():
             if not is_short:
                 exit_mode = cfg.get('exit_mode', 'trailing')
                 if exit_mode == 'ma_cross':
-                    cc_long = da[-1]['close']
                     ma_s = sma([c['close'] for c in da], cfg.get('ma_short', 40))
                     ma_l_vals = sma([c['close'] for c in da], cfg.get('ma_long', 90))
                     mbuf = cfg.get('ma_buf', 0.03)
@@ -280,8 +276,24 @@ def main():
         for coin in SYMBOL_OKX:
             entries_map[coin] = get_entries(coin)
 
-    # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
+    # ── Fetch account equity ──
+    eq = 0
     if os.environ.get("OKX_API_KEY"):
+        try:
+            acct = okx_get_account()
+            for d in acct.get('data', []):
+                if isinstance(d, dict):
+                    eq = float(d.get('totalEq', 0) or d.get('eq', 0) or 0)
+                    if eq > 0: break
+            if eq <= 0:
+                eq = float(acct.get('totalEq', 0))
+        except Exception as e:
+            log(f"  Account fetch failed: {e}")
+    if eq > 0:
+        log(f"Equity: ${eq:,.0f}")
+
+    # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
+    if os.environ.get("OKX_API_KEY") and eq > 0:
         for name, is_short, cfg in PYRAMID_STRATEGIES:
             if name not in TRADING_COIN_LIST: continue
             if is_short or not cfg.get('_pyramid', False): continue
@@ -323,18 +335,8 @@ def main():
             signals.append((name, dir, price, cfg.get('lev', 1.8), cfg.get('trail', 0.80), mult))
             log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x")
 
-    if os.environ.get("OKX_API_KEY"):
+    if os.environ.get("OKX_API_KEY") and eq > 0:
         try:
-            acct = okx_get_account()
-            eq = 0
-            for d in acct.get('data', []):
-                if isinstance(d, dict):
-                    eq = float(d.get('totalEq', 0) or d.get('eq', 0) or 0)
-                    if eq > 0: break
-            if eq <= 0:
-                eq = float(acct.get('totalEq', 0))
-            log(f"Equity: ${eq:,.0f}")
-
             btc_bull = False
             if btc_da and len(btc_da) >= 200:
                 btc_closes = [c['close'] for c in btc_da]
@@ -370,6 +372,10 @@ def main():
                     log(f"  {name}: already entered today, skipped")
                     continue
 
+                usd_val = eq * lev * ENTRY_PCT * mult
+                if direction == 'SELL':
+                    usd_val *= 2
+
                 if direction == 'SELL':
                     btc_pos = pos_map.get(inst_id, {})
                     existing_margin = float(btc_pos.get('margin', 0))
@@ -377,10 +383,6 @@ def main():
                     if existing_margin + new_margin > eq * SHORT_MAX_MARGIN:
                         log(f"  {name}: short cap {SHORT_MAX_MARGIN*100:.0f}% margin, skipped")
                         continue
-
-                usd_val = eq * lev * ENTRY_PCT * mult
-                if direction == 'SELL':
-                    usd_val *= 2
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
@@ -419,8 +421,10 @@ def main():
             import traceback; traceback.print_exc(file=sys.stderr)
             if DISCORD_WEBHOOK:
                 send_message(DISCORD_WEBHOOK, f"OKX setup ERROR: {e}")
-    else:
+    elif not os.environ.get("OKX_API_KEY"):
         log("OKX not configured — signal only")
+    else:
+        log("No equity — skip trading")
 
     if DISCORD_WEBHOOK and traded_signals:
         summary = "\n".join(f"  {n} {d} @ ${p:,.4f}" for n, d, p in traded_signals)

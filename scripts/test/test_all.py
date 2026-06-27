@@ -505,21 +505,24 @@ vols_lo = [10]*8 + [3, 3, 3]
 s15, _ = entry_conditions([], 100, 10, vols_lo, 5, 100, 0.05, False, False, 25, 1.5, -999, vol_bars=3)
 check("vol_bars=3: avg last 3 < vavg fails", s15 is False)
 
-# green_vol_pct: 70% green volume
-# volumes: 30, 30, 40, closes: 101, 102, 100, opens: 100, 101, 99 (bars 8,9,10)
-vols_g = [10]*8 + [30, 30, 40]
-closes_g = [90]*8 + [101, 102, 99]
-opens_g = [90]*8 + [100, 101, 100]
-s16, _ = entry_conditions([], 99, 10, vols_g, 5, 100, 0.05, False, False, 25, 1.5, -999,
-                           vol_bars=3, green_vol_pct=0.70, opens=opens_g, closes=closes_g)
-check("green_vol_pct=0.70: green vol 60/100 fails", s16 is False)
-# All 3 green: volumes 30,30,30, closes: 101,102,103
-vols_all_g = [10]*8 + [30, 30, 30]
-closes_all_g = [90]*8 + [101, 102, 103]
-opens_all_g = [90]*8 + [100, 101, 102]
-s17, _ = entry_conditions([], 103, 10, vols_all_g, 5, 100, 0.05, False, False, 25, 1.5, -999,
-                           vol_bars=3, green_vol_pct=0.70, opens=opens_all_g, closes=closes_all_g)
-check("green_vol_pct=0.70: all green 100% passes", s17 is True)
+# vol_bars=2 (default): avg last 2 > vavg passes
+vols2 = [10]*10 + [100, 100]
+s16, _ = entry_conditions([], 100, 11, vols2, 5, 100, 0.05, False, False, 25, 1.5, -999)
+check("vol_bars=2 default: avg last 2 > vavg passes", s16 is True)
+# vol_bars=2: avg last 2 < vavg fails
+vols2_lo = [10]*10 + [3, 3]
+s17, _ = entry_conditions([], 100, 11, vols2_lo, 5, 100, 0.05, False, False, 25, 1.5, -999)
+check("vol_bars=2 default: avg last 2 < vavg fails", s17 is False)
+# idx < vol_bars: vol_cond fails (idx=0, vol_bars=3)
+s18, _ = entry_conditions([], 100, 0, [100,100,100], 5, 100, 0.05, False, False, 25, 1.5, -999, vol_bars=3)
+check("vol_bars=3: idx<vol_bars fails", s18 is False)
+
+# ── compute_roi ──
+from backtest_shared import compute_roi
+check("compute_roi long pos", round(compute_roi({'ep': 100}, 110, False, 2.0), 2) == 20.0)  # (110-100)/100*200
+check("compute_roi long neg", round(compute_roi({'ep': 100}, 90, False, 2.0), 2) == -20.0)
+check("compute_roi short pos", round(compute_roi({'ep': 100}, 90, True, 2.0), 2) == 20.0)  # (100-90)/100*200
+check("compute_roi short neg", round(compute_roi({'ep': 100}, 110, True, 2.0), 2) == -20.0)
 
 # compute_results with days param
 r4 = compute_results([1.0, 1.05], {2025: 1.05}, 10000, days=365)
