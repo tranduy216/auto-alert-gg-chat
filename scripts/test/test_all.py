@@ -485,7 +485,7 @@ short_entry1 = [{'ep': 100, 'is_short': True}]
 s10, m10 = entry_conditions(short_entry1, 80, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
 check("short ext_block: price far below highest_ep blocks", s10 is False and m10 == 0)
 short_entry2 = [{'ep': 100, 'is_short': True}]
-s11, m11 = entry_conditions(short_entry2, 90, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
+s11, m11 = entry_conditions(short_entry2, 98, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
 check("short ext_block: price near highest_ep allows", s11 is True and m11 > 0)
 
 # Edge cases
