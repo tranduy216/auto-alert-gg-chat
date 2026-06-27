@@ -57,19 +57,8 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None, coin_name=None):
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     if should and is_short:
         mult = 1.0
-    # Pyramid tiers: force entry ×2 when price hits tier above lowest EP
-    is_pyr_tier = False
-    if not should and not is_short and entries:
-        pyr_tiers = cfg.get('pyramid_tiers', [])
-        pyr_tier = get_state(coin_name).get('pyr_tier', 0) if coin_name else 0
-        if pyr_tiers and pyr_tier < len(pyr_tiers):
-            lowest_ep = min(e['ep'] for e in entries)
-            trg = pyr_tiers[pyr_tier]
-            if cc >= lowest_ep * (1 + trg):
-                should = True
-                mult = 2.0
-                is_pyr_tier = True
-    return should, mult, cc, is_pyr_tier
+    # isDoubleSize: ×2 if position ROI > 10% (determined before entry)
+    return should, mult, cc
     return should, mult, cc
 
 
@@ -255,12 +244,12 @@ def main():
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
         da = data_map.get(name, [])
-        sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []), name)
+        sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []))
         if sig:
-            should, mult, price, is_pyr_tier = sig
+            should, mult, price = sig
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, price, cfg.get('lev', 1.8), cfg.get('trail', 0.80), mult, is_pyr_tier))
-            log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x" + (" PYRAMID" if is_pyr_tier else ""))
+            signals.append((name, dir, price, cfg.get('lev', 1.8), cfg.get('trail', 0.80), mult))
+            log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x")
 
     if os.environ.get("OKX_API_KEY"):
         try:
@@ -284,7 +273,7 @@ def main():
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
 
-            for name, direction, price, lev, trail, mult, is_pyr_tier in signals:
+            for name, direction, price, lev, trail, mult in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
@@ -344,9 +333,6 @@ def main():
                     log(f"  Leverage set {okx_lev}x")
                     record_entry(name, price)
                     add_entry(name, price, direction == 'SELL')
-                    if is_pyr_tier:
-                        pyr_tier = get_state(name).get('pyr_tier', 0)
-                        set_state(name, {'pyr_tier': pyr_tier + 1})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")

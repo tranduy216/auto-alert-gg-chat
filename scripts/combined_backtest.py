@@ -49,7 +49,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
-    long_tp_hit = 0; short_tp_hit = 0; pyr_tier_hit = 0
+    long_tp_hit = 0; short_tp_hit = 0
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -94,6 +94,12 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 for e in entries:
                     if not e.get('is_short'):
                         e['hi'] = peak_hi
+
+        # ── isDoubleSize: check ROI before TP (if roi > 10% → next entry ×2) ──
+        if not is_short and long_entries:
+            pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
+            if pos_roi > 10 and double_cd == 0:
+                double_cd = 2
 
         # ── Long: TP check (by avg EP) ──
         if not is_short and long_entries and tp_sched and 'tp' in cfg and long_tp_hit < len(tp_sched):
@@ -183,12 +189,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             mp = eq * ENTRY_PCT * mult
             if is_short:
                 mp *= 2
-            else:
-                if LONG_PYRAMID_DOUBLE and double_cd == 0 and long_entries:
-                    pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
-                    if pos_roi > 10:
-                        mp *= 2
-                        double_cd = 2
+            elif double_cd > 0:
+                mp *= 2
 
             if dep + mp <= max_margin * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
@@ -197,21 +199,6 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 if double_cd > 0:
                     double_cd -= 1
                 last_ep = cc; lei = idx
-
-        # ── Pyramid filter: need price beyond last entry (long: +X%, short: -Y%) ──
-        # ── Pyramid tiers: at 7/12/17% above lowest EP → ×2 entry ──
-        if not is_short and entries:
-            lowest_ep = min(e['ep'] for e in entries)
-            pyr_tiers = cfg.get('pyramid_tiers', [])
-            if pyr_tiers and pyr_tier_hit < len(pyr_tiers):
-                trg = pyr_tiers[pyr_tier_hit]
-                if cc >= lowest_ep * (1 + trg):
-                    mp = eq * ENTRY_PCT * 2  # ×2 size
-                    if dep + mp <= max_margin * total_val:
-                        e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc, 'lo': None}
-                        entries.append(e)
-                        pyr_tier_hit += 1
-                        last_ep = cc; lei = idx
 
         # ── Unrealized PnL ──
         ureal = 0
