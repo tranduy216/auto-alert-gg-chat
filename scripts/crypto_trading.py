@@ -82,7 +82,7 @@ def manage_positions(log, btc_bull=False):
             continue
         log(f"  CLOSE {coin}: BTC bull regime")
         try:
-            okx_close_position(inst_id, pos_side='short', mgn_mode='isolated')
+            okx_close_position(inst_id, pos_side='short', mgn_mode='cross')
             clear_entries(coin)
             if DISCORD_WEBHOOK:
                 send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
