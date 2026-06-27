@@ -25,7 +25,7 @@ def get_pos():
             return p
     return None
 
-def get_total_qty(inst_id):
+def get_total_qty(_inst_id):
     pos = get_pos()
     return abs(float(pos['pos'])) if pos else 0
 

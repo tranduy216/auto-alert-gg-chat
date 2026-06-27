@@ -16,7 +16,7 @@ from backtest_shared import (
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
-    okx_set_leverage, okx_place_algo,
+    okx_set_leverage,
 )
 from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
 from backtest_shared import ENTRY_PCT
@@ -237,18 +237,6 @@ def main():
                     time.sleep(1.5)
                     okx_set_leverage(inst_id, okx_lev)
                     log(f"  Leverage set {okx_lev}x")
-                    if direction == 'BUY':
-                        try:
-                            trail_pct = str(round(1 - trail, 2))
-                            okx_place_algo(
-                                inst_id=inst_id, td_mode=td_mode,
-                                side='sell', sz=str(sz),
-                                ord_type='move_order_stop',
-                                callback_ratio=trail_pct,
-                            )
-                            log(f"  Trailing stop set ({round((1-trail)*100)}%)")
-                        except Exception as trail_err:
-                            log(f"  Trailing stop FAILED (non-critical): {trail_err}")
                     record_entry(name, price)
                     add_entry(name, price, direction == 'SELL')
                     if DISCORD_WEBHOOK:

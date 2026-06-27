@@ -10,11 +10,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
+    PYRAMID_ROI_DEFAULT,
     EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
-    LONG_TP, LONG_MAX_MARGIN, LONG_PYRAMID_DOUBLE, MAX_CAP,
+    LONG_TP, LONG_MAX_MARGIN, LONG_PYRAMID_DOUBLE,
     SHORT_TP, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT,
-    SHORT_COOLDOWN_ENTRY, SL_COOLDOWN,
+    SHORT_COOLDOWN_ENTRY,
     load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions, winner_mult,
 )
