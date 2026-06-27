@@ -37,7 +37,7 @@ check("all same values", sma([10, 10, 10, 10], 2) == [None, 10.0, 10.0, 10.0])
 # ── shared: constants ──
 print("\n=== Constants ===")
 check("BASE = 10000", BASE == 10000)
-check("ENTRY_PCT = 0.0075", ENTRY_PCT == 0.0075)
+check("ENTRY_PCT = 0.011", abs(ENTRY_PCT - 0.011) < 0.0001)
 check("EXPO_PCT = 0.0075", EXPO_PCT == 0.0075)
 check("TRAIL_PCT = 0.80", TRAIL_PCT == 0.80)
 check("TP_SCHEDULE sum 1.0", sum(cf for _, cf in TP_SCHEDULE) == 1.0)

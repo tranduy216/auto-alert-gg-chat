@@ -19,15 +19,17 @@ def sma(values, period):
 # ── Constants ──
 
 BASE = 10000
-ENTRY_PCT = 0.0075       # 0.75% of exposure (1.5% position value at 2x lev)
+ENTRY_PCT = 0.011        # 1.1% margin per entry (~$300 on $14K at 2x)
 EXPO_PCT = 0.0075       # alias — margin % of equity per entry
-TRAIL_PCT = 0.80        # 20% trailing stop from extreme
+TRAIL_PCT = 0.80        # 20% trailing stop from extreme (long only)
 MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
-BTC_SHORT_TP = [(8, 0.10), (13, 0.25)]
-# Short TP: close 10% at 8% ROI, then 25% at 13% ROI. Remaining → trailing stop / BTC bull close-all.
+BTC_SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
+SHORT_MARGIN_CAP = 0.25    # max 25% margin (50% exposure at 2x)
+SHORT_SL_ROI = 7.0         # stop loss at 7% ROI for BTC short
+FIB_COOLDOWN = [0, 0, 3, 5, 8, 13, 21]  # cooldown bars after N stop losses
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
@@ -35,9 +37,10 @@ EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
 # ── Pyramid Strategies (single source of truth for all scripts) ──
 # Format: (coin, is_short, cfg)
 PYRAMID_STRATEGIES = [
-    ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.78}),
+    ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.79,
+                     'tp': [(40, 0.25), (70, 0.25), (100, 0.25), (130, 0.25)]}),
     ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82}),
-    ('BTC',  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 2, 'tp': BTC_SHORT_TP}),
+    ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80, 'tp': BTC_SHORT_TP}),
 ]
 
 

@@ -10,15 +10,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    BTC_SHORT_TP, EXT_BLOCK_PCT, PYRAMID_STRATEGIES,
+    BTC_SHORT_TP, EXT_BLOCK_PCT, SHORT_MARGIN_CAP, PYRAMID_STRATEGIES,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
-    okx_set_leverage, okx_close_position, okx_place_algo,
+    okx_set_leverage, okx_place_algo,
 )
-from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries
+from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -55,39 +55,14 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
                                     btc_bull, ext_block, lev_coin, -999,
                                     ma=ma, highs=highs, lows=lows,
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
-    if not should and entries and mult > 0:
+    if should and is_short:
+        mult = 1.0
+    if not should and entries and mult > 0 and not is_short:
         last_ep = entries[-1]['ep']
         roi = (cc - last_ep) / last_ep * 100 * lev_coin
         if roi >= pyr_roi:
             should = True
     return should, mult, cc
-
-
-def manage_positions(log, btc_bull=False):
-    """Close all shorts if BTC turns bull."""
-    if not btc_bull:
-        return
-    try:
-        pos = okx_get_positions()
-    except Exception as e:
-        log(f"  Position check failed: {e}")
-        return
-    for p in pos:
-        inst_id = p.get('instId', '')
-        pos_qty = abs(float(p.get('pos', 0)))
-        if pos_qty == 0:
-            continue
-        coin = COIN_FROM_INST.get(inst_id, '')
-        if not coin or float(p.get('pos', 0)) > 0:
-            continue
-        log(f"  CLOSE {coin}: BTC bull regime")
-        try:
-            okx_close_position(inst_id, pos_side='short', mgn_mode='cross')
-            clear_entries(coin)
-            if DISCORD_WEBHOOK:
-                send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
-        except Exception as e:
-            log(f"  CLOSE {coin} failed: {e}")
 
 
 def sync_entries_with_positions(okx_positions, log):
@@ -115,6 +90,9 @@ def sync_entries_with_positions(okx_positions, log):
                 entries_map[coin] = []
         elif stored and not has_position:
             clear_entries(coin)
+            if coin == 'BTC':
+                today = datetime.datetime.now().strftime('%Y-%m-%d')
+                set_state(coin, {'last_sl_date': today})
             log(f"  {coin}: cleared stale entries (position closed)")
             entries_map[coin] = []
         else:
@@ -183,13 +161,11 @@ def main():
             log(f"Equity: ${eq:,.0f}")
 
             btc_bull = False
-            btc_bull_exit = False
             if btc_da and len(btc_da) >= 200:
                 btc_closes = [c['close'] for c in btc_da]
                 btc_ma200 = sma(btc_closes, 200)
                 if btc_ma200[-1]:
                     btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
-                    btc_bull_exit = btc_closes[-1] > btc_ma200[-1] * 0.995
 
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
@@ -208,13 +184,29 @@ def main():
                     log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
+                if direction == 'SELL':
+                    last_sl = get_state(name).get('last_sl_date', '')
+                    if last_sl:
+                        days = (datetime.datetime.now() - datetime.datetime.strptime(last_sl, '%Y-%m-%d')).days
+                        if days < 1:
+                            log(f"  {name}: SL cooldown {days}d/1d, skipped")
+                            continue
+
+                if direction == 'SELL':
+                    btc_pos = pos_map.get(inst_id, {})
+                    existing_margin = float(btc_pos.get('margin', 0))
+                    new_margin = usd_val / lev
+                    if existing_margin + new_margin > eq * 0.25:
+                        log(f"  {name}: short cap 25% margin ({SHORT_MARGIN_CAP*400:.0f}% exp), skipped")
+                        continue
+
                 usd_val = eq * lev * ENTRY_PCT * mult
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
-                td_mode = 'cross'
+                td_mode = 'isolated' if direction == 'SELL' else 'cross'
                 okx_lev = round(lev)
 
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult:.1f}x, ctVal={ct_val})")
@@ -241,9 +233,11 @@ def main():
                         except Exception as trail_err:
                             log(f"  Trailing stop FAILED (non-critical): {trail_err}")
                     if direction == 'SELL':
+                        tp_sz_sum = 0
                         for trg, frac in BTC_SHORT_TP:
                             tp_price = round(price * (1 - trg / (100 * lev)), 1)
                             tp_sz = max(1, int(sz * frac + 0.5))
+                            tp_sz_sum += tp_sz
                             try:
                                 okx_place_algo(
                                     inst_id=inst_id, td_mode=td_mode,
@@ -253,7 +247,18 @@ def main():
                                 )
                             except Exception as tp_err:
                                 log(f"  TP {trg}% failed: {tp_err}")
-                        log(f"  TP ladder set")
+                        log(f"  TP ladder set ({tp_sz_sum}/{sz}ct)")
+                        sl_price = round(price * (1 + SHORT_SL_ROI / (100 * lev)), 1)
+                        try:
+                            okx_place_algo(
+                                inst_id=inst_id, td_mode=td_mode,
+                                side='buy', sz=str(sz),
+                                ord_type='conditional', pos_side='short',
+                                sl_trigger_px=str(sl_price),
+                            )
+                            log(f"  Stop loss set @ ${sl_price:,.1f} ({SHORT_SL_ROI}% ROI)")
+                        except Exception as sl_err:
+                            log(f"  SL failed: {sl_err}")
                     record_entry(name, price)
                     add_entry(name, price, direction == 'SELL')
                     if DISCORD_WEBHOOK:
@@ -265,8 +270,7 @@ def main():
                         send_message(DISCORD_WEBHOOK,
                             f"FAILED: {name} {direction} — {trade_err}")
 
-            log("Updating stoploss...")
-            manage_positions(log, btc_bull_exit)
+            log("Done trading.")
 
         except Exception as e:
             log(f"OKX setup error: {e}")

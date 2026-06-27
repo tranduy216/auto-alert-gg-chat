@@ -1,9 +1,7 @@
 """
 Combined Long + Short Pyramid Strategy (standalone per-coin)
-- Long: TRX, PAXG — MA pullback entry, no BTC gate
-- Short: BTC only — only when BTC < MA200
-- 75% max margin cap per coin (cap on margin, not position size)
-- Block pyramid adds when price >25% from lowest entry price
+- Long: TRX/XAU — MA pullback entry, trailing stop 20%, pyramid
+- Short: BTC — 1 entry only, TP ladder 4/7/10/13%, SL 7%, Fibonacci cooldown
 """
 from pathlib import Path
 import sys, datetime, requests, time
@@ -12,8 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE,
+    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
+    SHORT_MARGIN_CAP, SHORT_SL_ROI,
     load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions,
 )
@@ -41,9 +40,12 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
     btc_ma200 = sma(btc_closes, 200) if btc_closes else None
 
-    entries = []; eq = 1.0; lei = -999; last_ep = 0; base_ep = 0; sym_tp_stage = 0
+    entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}; ts_curve = []
     ff = fee_factor(lev_coin)
+    last_sl_bar = -999
+    _pyramid = cfg.get('_pyramid', not is_short)  # test flag
+    _mult = cfg.get('_mult', not is_short)         # test flag
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -64,14 +66,11 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         m_ma = ma_short[idx]; vavg = vol_ma20[idx]
         if m_ma is None or vavg is None or vavg == 0: continue
 
-        # BTC regime
         btc_bull = False
         if btc_ma200:
             btc_idx = min(idx, len(btc_closes) - 1)
             if btc_idx >= 200 and btc_ma200[btc_idx]:
-                # Entry generous: short when BTC < MA200 * 1.005; Exit tight: close when BTC > MA200 * 0.995
                 btc_bull = btc_closes[btc_idx] >= btc_ma200[btc_idx] * 1.005
-                btc_bull_exit = btc_closes[btc_idx] > btc_ma200[btc_idx] * 0.995
 
         # ── Entry check (shared) ──
         should_enter, mult = entry_conditions(
@@ -81,37 +80,15 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
             ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
         )
 
-        # ── BTC regime exit (shorts exit on bull) ──
-        for e in entries[:]:
-            if e.get('is_short') and btc_bull_exit:
-                raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
-                eq += raw * e.get('rem', 1.0) / 100 * ff
-                entries.remove(e)
-
-        # ── Short: TP ladder + pyramid (both based on base entry price) ──
-        if is_short and base_ep > 0:
-            base_roi = (base_ep - cc) / base_ep * 100 * lev_coin
-            while sym_tp_stage < len(tp_sched):
-                trg, cf = tp_sched[sym_tp_stage]
-                if base_roi >= trg:
-                    # Close cf% of all entries
-                    for e in entries[:]:
-                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw * cf / 100 * ff
-                        e['rem'] = e.get('rem', 1.0) - cf
-                    sym_tp_stage += 1
-                    # Add pyramid entry (except final stage = close all)
-                    if sym_tp_stage < len(tp_sched) and can_enter_short:
-                        mp = eq * ENTRY_PCT * mult
-                        if dep + mp <= max_cap * total_val:
-                            e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': True, 'hi': cc}
-                            entries.append(e)
-                            last_ep = cc; lei = idx
-                    if all(e.get('rem', 1.0) <= 0.001 for e in entries):
-                        entries.clear()
-                        break
-                else:
-                    break
+        # ── Short: SL check (7% ROI) ──
+        if is_short:
+            for e in entries[:]:
+                roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
+                if roi <= -SHORT_SL_ROI:
+                    raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                    eq += raw / 100 * ff
+                    entries.remove(e)
+                    last_sl_bar = idx
 
         # ── Short: TP ladder ──
         for e in entries[:]:
@@ -127,7 +104,22 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                         e['tp'] = tp_stage + 1
                         if e.get('rem', 1.0) <= 0.001: entries.remove(e)
 
-        # ── Long: stoploss update (20% below peak) ──
+        # ── Long: TP ladder (only if explicitly configured) ──
+        if 'tp' in cfg and not is_short and tp_sched:
+            for e in entries[:]:
+                if not e.get('is_short'):
+                    roi = (cc - e['ep']) / e['ep'] * 100 * lev_coin
+                    tp_stage = e.get('tp', 0)
+                    if tp_stage < len(tp_sched):
+                        trg, cf = tp_sched[tp_stage]
+                        if roi >= trg:
+                            raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
+                            eq += raw * cf / 100 * ff
+                            e['rem'] = e.get('rem', 1.0) - cf
+                            e['tp'] = tp_stage + 1
+                            if e.get('rem', 1.0) <= 0.001: entries.remove(e)
+
+        # ── Long: trailing stop ──
         long_entries = [e for e in entries if not e.get('is_short')]
         if long_entries:
             peak_hi = max(e.get('hi', cc) for e in long_entries)
@@ -151,23 +143,35 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         total_val = total_asset_value(entries, cc, eq, lev_coin)
 
         if should_enter:
-            mp = eq * ENTRY_PCT * mult
-            if dep + mp <= max_cap * total_val:
-                e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
-                entries.append(e)
-                last_ep = cc; lei = idx
-                if not base_ep:
-                    base_ep = cc  # first short entry sets base price
+            if is_short:
+                last_action = max(lei, last_sl_bar)
+                if idx - last_action < 1:
+                    should_enter = False
+                else:
+                    if not _mult:
+                        mult = 1.0
+                    short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
+                    if short_mp + eq * ENTRY_PCT * mult > SHORT_MARGIN_CAP:
+                        should_enter = False
 
-        # ── Pyramid (long: last_ep) ──
-        if not is_short and active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
-            roi = (cc - last_ep) / last_ep * 100 * lev_coin
+            if should_enter:
+                mp = eq * ENTRY_PCT * mult
+                if dep + mp <= max_cap * total_val:
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
+                          'hi': None if is_short else cc, 'lo': cc if is_short else None}
+                    entries.append(e)
+                    last_ep = cc; lei = idx
+
+        # ── Pyramid ──
+        if _pyramid and active and last_ep > 0 and (idx - lei >= 0) and mult > 0:
+            roi = (cc - last_ep) / last_ep * 100 * lev_coin if not is_short else (last_ep - cc) / last_ep * 100 * lev_coin
             if roi >= pyr_roi:
                 dep = sum(e.get('mp', 0) for e in entries)
                 total_val = total_asset_value(entries, cc, eq, lev_coin)
                 mp = eq * ENTRY_PCT * mult
                 if dep + mp <= max_cap * total_val:
-                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
+                          'hi': None if is_short else cc, 'lo': cc if is_short else None}
                     entries.append(e)
                     last_ep = cc; lei = idx
 
@@ -182,7 +186,6 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         curve.append(total_eq); ts_curve.append((da[idx]['time'], total_eq))
         if dt.month == 12: yearly_eq[yr] = total_eq
 
-    # Capture final partial year
     if curve:
         last_yr = datetime.datetime.fromtimestamp(da[-1]['time'] / 1000).year
         if last_yr not in yearly_eq:
@@ -209,7 +212,6 @@ def main():
         res = backtest_coin(coin, da, btc_da, is_short, max_cap, None, cfg)
         if res[1]: results[label] = res[1]
 
-    # Merge portfolio (equal-weight)
     curves = [results[s[0]]['ts_curve'] for s in strategies if s[0] in results]
     merged = {}
     for curve in curves:
