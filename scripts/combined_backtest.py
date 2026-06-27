@@ -196,6 +196,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                       'hi': None if is_short else cc, 'lo': cc if is_short else None}
                 entries.append(e)
+                if double_cd > 0:
+                    double_cd -= 1
                 last_ep = cc; lei = idx
 
         ureal = 0
