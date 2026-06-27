@@ -35,9 +35,9 @@ LONG_PYRAMID_DOUBLE = True  # ×2 entry size when position ROI > 10%
 LONG_PYRAMID_DOUBLE_COOLDOWN = 2  # after ×2, next 2 entries are normal
 
 # ── Short config ──
-SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
+SHORT_TP = [(3, 0.34), (6, 0.33), (9, 0.33)]  # 3 stages: close 33% each
 SHORT_MAX_MARGIN = 0.40 # max 40% margin per coin (80% exposure at 2x)
-SHORT_CLOSE_PCT = 0.16  # closeAll if price rises 16% from trough
+SHORT_CLOSE_PCT = 0.08  # closeAll if price rises 8% from trough
 SHORT_COOLDOWN_ENTRY = 2  # 2 days between short entries
 SL_COOLDOWN = 2          # 2 days after stop loss
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
@@ -53,7 +53,7 @@ PYRAMID_STRATEGIES = [
     ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.84,
                      'close_pct': 0.18}),
     ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
-                     'tp': [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]}),
+                     'tp': [(3, 0.34), (6, 0.33), (9, 0.33)]}),
 ]
 
 

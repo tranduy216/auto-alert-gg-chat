@@ -49,6 +49,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
+    long_tp_hit = 0; short_tp_hit = 0
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -95,17 +96,17 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         e['hi'] = peak_hi
 
         # ── Long: TP check (by avg EP) ──
-        if not is_short and long_entries and tp_sched and 'tp' in cfg:
+        if not is_short and long_entries and tp_sched and 'tp' in cfg and long_tp_hit < len(tp_sched):
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
             hit = 0
-            for stage in range(len(tp_sched)):
+            for stage in range(long_tp_hit, len(tp_sched)):
                 trg, cf = tp_sched[stage]
                 if roi >= trg:
                     hit = stage + 1
                 else:
                     break
-            if hit:
-                for stage in range(hit):
+            if hit > long_tp_hit:
+                for stage in range(long_tp_hit, hit):
                     trg, cf = tp_sched[stage]
                     total_long_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
                     close_amt = total_long_mp * cf
@@ -118,7 +119,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                             close_amt -= rem_frac * e['mp']
                             if e.get('rem', 1.0) <= 0.001:
                                 entries.remove(e)
-                    tp_sched = tp_sched[hit:]
+                    long_tp_hit = hit
 
         # ── Short: close check (trailing) ──
         if short_entries:
@@ -136,17 +137,17 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         e['lo'] = trough_lo
 
         # ── Short: TP check (by avg EP) ──
-        if is_short and short_entries and tp_sched:
+        if is_short and short_entries and tp_sched and short_tp_hit < len(tp_sched):
             roi = (avg_ep_short - cc) / avg_ep_short * 100 * lev_coin
             hit = 0
-            for stage in range(len(tp_sched)):
+            for stage in range(short_tp_hit, len(tp_sched)):
                 trg, cf = tp_sched[stage]
                 if roi >= trg:
                     hit = stage + 1
                 else:
                     break
-            if hit:
-                for stage in range(hit):
+            if hit > short_tp_hit:
+                for stage in range(short_tp_hit, hit):
                     trg, cf = tp_sched[stage]
                     total_short_mp = sum(e['mp'] * e.get('rem', 1.0) for e in short_entries)
                     close_amt = total_short_mp * cf
@@ -159,7 +160,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                             close_amt -= rem_frac * e['mp']
                             if e.get('rem', 1.0) <= 0.001:
                                 entries.remove(e)
-                    tp_sched = tp_sched[hit:]
+                    short_tp_hit = hit
 
         # ── Entry ──
         dep = sum(e.get('mp', 0) for e in entries)
@@ -183,19 +184,18 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             if is_short:
                 mp *= 2
             else:
-                # Long: ×2 when ROI > 10%
                 if LONG_PYRAMID_DOUBLE and double_cd == 0 and long_entries:
                     pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
                     if pos_roi > 10:
                         mp *= 2
                         double_cd = 2
-                if double_cd > 0:
-                    double_cd -= 1
 
             if dep + mp <= max_margin * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                       'hi': None if is_short else cc, 'lo': cc if is_short else None}
                 entries.append(e)
+                if double_cd > 0:
+                    double_cd -= 1
                 last_ep = cc; lei = idx
 
         # ── Unrealized PnL ──
