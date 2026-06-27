@@ -49,7 +49,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
-    long_tp_hit = 0; short_tp_hit = 0
+    long_tp_hit = 0; short_tp_hit = 0; pyr_tier_hit = 0
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -207,6 +207,20 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 should_enter = False
             if is_short and cc >= last_ep * (1 - short_confirm):
                 should_enter = False
+
+        # ── Pyramid tiers: at 7/12/17% above lowest EP → ×2 entry ──
+        if not is_short and entries:
+            lowest_ep = min(e['ep'] for e in entries)
+            pyr_tiers = cfg.get('pyramid_tiers', [])
+            if pyr_tiers and pyr_tier_hit < len(pyr_tiers):
+                trg = pyr_tiers[pyr_tier_hit]
+                if cc >= lowest_ep * (1 + trg):
+                    mp = eq * ENTRY_PCT * 2  # ×2 size
+                    if dep + mp <= max_margin * total_val:
+                        e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc, 'lo': None}
+                        entries.append(e)
+                        pyr_tier_hit += 1
+                        last_ep = cc; lei = idx
 
         # ── Unrealized PnL ──
         ureal = 0
