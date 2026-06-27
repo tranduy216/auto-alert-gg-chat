@@ -18,7 +18,7 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_place_algo,
 )
-from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
+from utils.state_manager import record_entry, get_entries, add_entry, clear_entries, get_state, set_state
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -180,16 +180,19 @@ def main():
                     continue
 
                 today = datetime.datetime.now().strftime('%Y-%m-%d')
-                if has_entered_today(name):
-                    log(f"  {name}: already entered today ({today}), skipped")
-                    continue
+                last_entry = get_state(name).get('last_entry_date', '')
+                if last_entry:
+                    days = (datetime.datetime.now() - datetime.datetime.strptime(last_entry, '%Y-%m-%d')).days
+                    if days < 2:
+                        log(f"  {name}: entry cooldown {days}d/2d, skipped")
+                        continue
 
                 if direction == 'SELL':
                     last_sl = get_state(name).get('last_sl_date', '')
                     if last_sl:
                         days = (datetime.datetime.now() - datetime.datetime.strptime(last_sl, '%Y-%m-%d')).days
-                        if days < 1:
-                            log(f"  {name}: SL cooldown {days}d/1d, skipped")
+                        if days < 2:
+                            log(f"  {name}: SL cooldown {days}d/2d, skipped")
                             continue
 
                 if direction == 'SELL':
@@ -201,6 +204,8 @@ def main():
                         continue
 
                 usd_val = eq * lev * ENTRY_PCT * mult
+                if direction == 'SELL':
+                    usd_val *= 2
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01

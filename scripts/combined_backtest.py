@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
+    PYRAMID_ROI_DEFAULT, TP_SCHEDULE,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
     SHORT_MARGIN_CAP, SHORT_SL_ROI,
     load_data, fetch_paxg, total_asset_value, compute_results,
@@ -145,7 +145,7 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
         if should_enter:
             if is_short:
                 last_action = max(lei, last_sl_bar)
-                if idx - last_action < 1:
+                if idx - last_action < 2:
                     should_enter = False
                 else:
                     if not _mult:
@@ -156,6 +156,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
 
             if should_enter:
                 mp = eq * ENTRY_PCT * mult
+                if is_short:
+                    mp *= 2
                 if dep + mp <= max_cap * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}

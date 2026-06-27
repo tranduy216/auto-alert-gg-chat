@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma,
-    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
+    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
     SHORT_MARGIN_CAP, SHORT_SL_ROI, winner_mult,
     load_data, fetch_paxg, entry_conditions, compute_results,
@@ -184,6 +184,8 @@ def run_pooled(data, strategies):
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                 mp = eq * ENTRY_PCT * mult / n
+                if is_short:
+                    mp *= 2
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}
