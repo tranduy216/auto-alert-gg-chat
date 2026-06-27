@@ -98,7 +98,7 @@ def main():
         try:
             r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
                 side='sell', sz=str(tp_sz),
-                ord_type='conditional', pos_side='long',
+                ord_type='conditional',
                 tp_trigger_px=str(tp_price))
             aid = r.get('data', [{}])[0].get('algoId', '?')
             log(f"  TP {trg_pct}% @ ${tp_price:.4f} sz={tp_sz} → {aid}")
@@ -142,7 +142,7 @@ def main():
     pos = get_pos()
     if pos:
         try:
-            okx_close_position(INST_ID, pos_side='long', mgn_mode='isolated')
+            okx_close_position(INST_ID, pos_side='net', mgn_mode='isolated')
             log("Position closed.")
         except Exception as e:
             log(f"Close FAILED: {e}")
