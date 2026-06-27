@@ -65,7 +65,6 @@ def run_pooled(data, strategies):
     last_sl_map = {label: -999 for label, _, _, _ in strategies}
     time_to_idx = {l: {t: i for i, t in enumerate(cd['times'])} for l, cd in coin_data.items()}
     # Per-coin states
-    double_cd_map = {label: 0 for label in coin_data}
     next_pyr_roi_map = {label: 8 for label in coin_data}
     pyr_bar_map = {label: -999 for label in coin_data}
     long_tp_hit_map = {label: 0 for label in coin_data}
@@ -256,26 +255,8 @@ def run_pooled(data, strategies):
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}
                     entries_map[label].append(e)
-                    if double_cd_map[label] > 0:
-                        double_cd_map[label] -= 1
                     last_ep_map[label] = cc
                     lei_map[label] = idx
-
-        # ── isDoubleSize: check ROI before pyramid ──
-        for label, cd in coin_data.items():
-            if cd['is_short']: continue
-            entries = entries_map[label]
-            long_entries = [e for e in entries if not e.get('is_short')]
-            if not long_entries: continue
-            total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
-            avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(total_mp, 1e-10)
-            idx = time_to_idx[label].get(ts)
-            if idx is None or idx < 200: continue
-            cc = cd['closes'][idx]
-            lev_coin = cd['cfg'].get('lev', 1.5)
-            pos_roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
-            if pos_roi > 10 and double_cd_map[label] == 0:
-                double_cd_map[label] = 3
 
         # ── Pyramid: ROI-based, 1/day ──
         for label, cd in coin_data.items():
