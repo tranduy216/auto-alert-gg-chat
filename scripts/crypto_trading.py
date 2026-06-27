@@ -57,14 +57,6 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None, coin_name=None):
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     if should and is_short:
         mult = 1.0
-    if should and entries:
-        last_ep = entries[-1]['ep']
-        long_confirm = cfg.get('long_confirm', 0.05)
-        short_confirm = cfg.get('short_confirm', 0.03)
-        if not is_short and cc <= last_ep * (1 + long_confirm):
-            should = False
-        if is_short and cc >= last_ep * (1 - short_confirm):
-            should = False
     # Pyramid tiers: force entry ×2 when price hits tier above lowest EP
     is_pyr_tier = False
     if not should and not is_short and entries:
