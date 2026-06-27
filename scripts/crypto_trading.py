@@ -251,7 +251,8 @@ def main():
                                 okx_place_algo(
                                     inst_id=inst_id, td_mode=td_mode,
                                     side='buy', sz=str(tp_sz),
-                                    ord_type='conditional', pos_side='short',
+                                    ord_type='conditional',
+                                    tp_trigger_px=str(tp_price),
                                     tp_trigger_px=str(tp_price),
                                 )
                             except Exception as tp_err:
@@ -262,7 +263,8 @@ def main():
                             okx_place_algo(
                                 inst_id=inst_id, td_mode=td_mode,
                                 side='buy', sz=str(sz),
-                                ord_type='conditional', pos_side='short',
+                                ord_type='conditional',
+                                sl_trigger_px=str(sl_price),
                                 sl_trigger_px=str(sl_price),
                             )
                             log(f"  Stop loss set @ ${sl_price:,.1f} ({SHORT_SL_ROI}% ROI)")
