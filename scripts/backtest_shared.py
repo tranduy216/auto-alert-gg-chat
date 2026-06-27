@@ -19,7 +19,8 @@ def sma(values, period):
 # ── Constants ──
 
 BASE = 10000
-ENTRY_PCT = 0.015       # 1.5% of equity per entry (including leverage)
+ENTRY_PCT = 0.0075       # 0.75% of exposure (1.5% position value at 2x lev)
+EXPO_PCT = 0.0075       # alias — margin % of equity per entry
 TRAIL_PCT = 0.80        # 20% trailing stop from extreme
 MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default

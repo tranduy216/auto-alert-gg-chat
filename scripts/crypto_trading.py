@@ -208,7 +208,7 @@ def main():
                     log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
-                usd_val = eq * ENTRY_PCT * mult
+                usd_val = eq * lev * ENTRY_PCT * mult
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
                 ct_val = float(ct_val_str) if ct_val_str else 0.01

@@ -114,7 +114,7 @@ def run_pooled(data, strategies):
                             e['rem'] = e.get('rem', 1.0) - cf
                         tp_stage_map[label] += 1
                         if tp_stage_map[label] < len(tp_sched) and is_short and not btc_bull:
-                            mp = eq * ENTRY_PCT / lev_coin
+                            mp = eq * ENTRY_PCT
                             total_dep = sum(sum(e2.get('mp', 0) for e2 in es) for es in entries_map.values())
                             total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                             if total_dep + mp <= MAX_CAP * total_val:
@@ -177,7 +177,7 @@ def run_pooled(data, strategies):
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                mp = eq * ENTRY_PCT / lev_coin * mult
+                mp = eq * ENTRY_PCT * mult
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                     entries.append(e)
@@ -196,7 +196,7 @@ def run_pooled(data, strategies):
                     total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                     closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                     total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                    mp = eq * ENTRY_PCT / lev_coin * mult
+                    mp = eq * ENTRY_PCT * mult
                     if total_dep + mp <= MAX_CAP * total_val:
                         e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short, 'hi': cc}
                         entries.append(e)

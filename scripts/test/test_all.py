@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest_shared import sma
 from backtest_shared import (
-    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
+    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE, EXPO_PCT,
     EXT_BLOCK_PCT, fee_factor,
     load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
 )
@@ -37,7 +37,8 @@ check("all same values", sma([10, 10, 10, 10], 2) == [None, 10.0, 10.0, 10.0])
 # ── shared: constants ──
 print("\n=== Constants ===")
 check("BASE = 10000", BASE == 10000)
-check("ENTRY_PCT = 0.015", ENTRY_PCT == 0.015)
+check("ENTRY_PCT = 0.0075", ENTRY_PCT == 0.0075)
+check("EXPO_PCT = 0.0075", EXPO_PCT == 0.0075)
 check("TRAIL_PCT = 0.80", TRAIL_PCT == 0.80)
 check("TP_SCHEDULE sum 1.0", sum(cf for _, cf in TP_SCHEDULE) == 1.0)
 check("TP_SCHEDULE len 4", len(TP_SCHEDULE) == 4)
