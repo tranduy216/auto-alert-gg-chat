@@ -34,4 +34,5 @@ jobs:
           OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
           OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
           TRADING_COIN_LIST: ${{ vars.TRADING_COIN_LIST }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
         run: python crypto_trading.py

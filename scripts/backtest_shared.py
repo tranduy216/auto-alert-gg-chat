@@ -143,7 +143,31 @@ def fetch_binance(symbol, days=600):
 
 
 def fetch_paxg(from_ts=None):
-    """Fetch PAXGUSDT 12h klines from Binance, aggregate → 1d bars."""
+    """Fetch PAXGUSDT daily bars. Reads raw 12h cache, aggregates to 1d.
+    Falls back to Binance API if cache unavailable."""
+    cache_path = Path(__file__).parent / "_klines_12h_5y.json"
+    cache_key = "PAXGUSDT_4000_1609434000000"
+    try:
+        if cache_path.exists():
+            raw = json.loads(cache_path.read_text())
+            cached = raw.get(cache_key)
+            if cached and isinstance(cached, list):
+                candles = cached
+                daily = []
+                for i in range(1, len(candles), 2):
+                    b2 = candles[i-1:i+1]
+                    daily.append({
+                        'open': b2[0].get('open', b2[0].get('close', 0)),
+                        'close': b2[-1]['close'],
+                        'high': max(x['high'] for x in b2),
+                        'low': min(x['low'] for x in b2),
+                        'volume': sum(x['volume'] for x in b2),
+                        'time': b2[0]['open_time'],
+                    })
+                print(f"[backtest_shared] Local cache {cache_key}: {len(daily)} daily bars", file=sys.stderr)
+                return daily
+    except Exception:
+        pass
     try:
         if from_ts is None:
             from_ts = int(datetime.datetime(2022, 1, 1).timestamp() * 1000)
