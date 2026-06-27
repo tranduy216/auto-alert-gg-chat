@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.okx_utils import okx_get_positions, okx_place_order, okx_get_account
-from backtest_shared import SHORT_MAX_MARGIN, ENTRY_PCT
+from backtest_shared import ENTRY_PCT
 from utils.state_manager import get_entries, set_state, get_state, add_entry
 
 INST_ID = 'BTC-USDT-SWAP'
