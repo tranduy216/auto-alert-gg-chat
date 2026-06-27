@@ -339,7 +339,7 @@ with patch('backtest_shared.fetch_candles_okx', return_value=None), \
 
 # ── Daily cooldown (state_manager) ──
 print("\n=== Daily cooldown ===")
-from utils.state_manager import get_state, set_state, has_entered_today, record_entry, LOCAL_FALLBACK
+from utils.state_manager import get_state, set_state, has_entered_today, record_entry, LOCAL_FALLBACK, get_entries, add_entry, clear_entries
 
 # Clean up local fallback before tests
 if LOCAL_FALLBACK.exists():
@@ -367,6 +367,25 @@ today = datetime.datetime.now().strftime('%Y-%m-%d')
 check("record_entry sets today", state.get('last_entry_date') == today)
 check("record_entry stores price", state.get('last_entry_price') == 4050.0)
 check("has_entered_today returns True", has_entered_today('XAU') is True)
+
+entries = get_entries('NO_COIN')
+check("get_entries returns empty list for unknown coin", entries == [])
+
+add_entry('TEST_C', 100.0, False)
+add_entry('TEST_C', 105.5, False)
+entries = get_entries('TEST_C')
+check("add_entry appends entries", len(entries) == 2)
+check("add_entry stores ep and is_short", entries[0] == {'ep': 100.0, 'is_short': False})
+check("add_entry stores second entry", entries[1] == {'ep': 105.5, 'is_short': False})
+
+clear_entries('TEST_C')
+check("clear_entries removes all", get_entries('TEST_C') == [])
+
+add_entry('BTC', 60000.0, True)
+entries = get_entries('BTC')
+check("short entry stored with is_short=True", entries[0] == {'ep': 60000.0, 'is_short': True})
+check("BTC date still intact", get_state('BTC').get('last_entry_date') == '2026-06-26')
+clear_entries('BTC')
 
 # Cleanup
 if LOCAL_FALLBACK.exists():

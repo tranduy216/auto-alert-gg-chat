@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Crypto Trading System (v5) — Simple, shared logic with backtest.
+Crypto Trading System (v6) — Shared logic with backtest.
 Uses entry_conditions from backtest_shared → same signals as historical backtest.
+Entries tracked via state_manager, synced with OKX positions each run.
 """
 import os, sys, time, datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    BTC_SHORT_TP, EXT_BLOCK_PCT,
+    BTC_SHORT_TP, EXT_BLOCK_PCT, PYRAMID_STRATEGIES,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
@@ -17,7 +18,7 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position, okx_place_algo,
 )
-from utils.state_manager import has_entered_today, record_entry
+from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries
 from backtest_shared import ENTRY_PCT
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
@@ -26,15 +27,17 @@ SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-S
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
 
 
-def check_signals(coin_da, btc_da, cfg, is_short):
+def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     """Check entry signal at latest bar using shared entry_conditions."""
     if not coin_da or len(coin_da) < 200: return None
+    if entries is None: entries = []
     lev_coin = cfg.get('lev', 1.8); ma_buf = cfg.get('buf', 0.03)
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
     ma_period = cfg.get('ma', 20)
     ma_slope = cfg.get('ma_slope', False)
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
+    pyr_roi = cfg.get('pyr', 5)
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
@@ -48,11 +51,16 @@ def check_signals(coin_da, btc_da, cfg, is_short):
         bi = min(idx, len(btc_closes) - 1)
         if bi >= 200 and btc_ma200[bi]:
             btc_bull = btc_closes[bi] > btc_ma200[bi]
-    should, _ = entry_conditions([], cc, idx, vols, vv, mm, ma_buf, is_short,
-                                 btc_bull, ext_block, lev_coin, -999,
-                                 ma=ma, highs=highs, lows=lows,
-                                 ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
-    return should, cc
+    should, mult = entry_conditions(entries, cc, idx, vols, vv, mm, ma_buf, is_short,
+                                    btc_bull, ext_block, lev_coin, -999,
+                                    ma=ma, highs=highs, lows=lows,
+                                    ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
+    if not should and entries and mult > 0:
+        last_ep = entries[-1]['ep']
+        roi = (cc - last_ep) / last_ep * 100 * lev_coin
+        if roi >= pyr_roi:
+            should = True
+    return should, mult, cc
 
 
 def manage_positions(log, btc_bull=False):
@@ -75,10 +83,43 @@ def manage_positions(log, btc_bull=False):
         log(f"  CLOSE {coin}: BTC bull regime")
         try:
             okx_close_position(inst_id, pos_side='short', mgn_mode='isolated')
+            clear_entries(coin)
             if DISCORD_WEBHOOK:
                 send_message(DISCORD_WEBHOOK, f"CLOSE {coin}: BTC bull regime")
         except Exception as e:
             log(f"  CLOSE {coin} failed: {e}")
+
+
+def sync_entries_with_positions(okx_positions, log):
+    """Sync Firestore entries with actual OKX positions."""
+    pos_map = {COIN_FROM_INST.get(p['instId']): p for p in okx_positions
+               if COIN_FROM_INST.get(p['instId']) and float(p.get('pos', 0)) != 0}
+    entries_map = {}
+    for coin in SYMBOL_OKX:
+        stored = get_entries(coin)
+        has_position = coin in pos_map
+        if not stored and not has_position:
+            entries_map[coin] = []
+            continue
+        if has_position and not stored:
+            p = pos_map[coin]
+            avg_px = float(p.get('avgPx', 0))
+            is_short = float(p.get('pos', 0)) < 0
+            if avg_px > 0:
+                entries = [{'ep': avg_px, 'is_short': is_short}]
+                entries_map[coin] = entries
+                for e in entries:
+                    add_entry(coin, e['ep'], e['is_short'])
+                log(f"  {coin}: reconstructed entry from OKX @ {avg_px}")
+            else:
+                entries_map[coin] = []
+        elif stored and not has_position:
+            clear_entries(coin)
+            log(f"  {coin}: cleared stale entries (position closed)")
+            entries_map[coin] = []
+        else:
+            entries_map[coin] = stored
+    return entries_map, pos_map
 
 
 def main():
@@ -107,20 +148,27 @@ def main():
         send_message(DISCORD_WEBHOOK,
             f"*Fetch Errors — {ts:%Y-%m-%d %H:%M}*\n" + "\n".join(f"  {e}" for e in errors))
 
-    strategies = [
-        ('TRX',  trx_da,  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.78}),
-        ('XAU', paxg_da, False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82}),
-        ('BTC',  btc_da,  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 2, 'tp': BTC_SHORT_TP}),
-    ]
+    data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
+
+    entries_map = {}
+    pos_map = {}
+    if os.environ.get("OKX_API_KEY"):
+        try:
+            okx_positions = okx_get_positions()
+            entries_map, pos_map = sync_entries_with_positions(okx_positions, log)
+        except Exception as e:
+            log(f"  Entries sync skipped: {e}")
 
     signals = []
     traded_count = 0
-    for name, da, is_short, cfg in strategies:
-        sig = check_signals(da, btc_da, cfg, is_short)
+    for name, is_short, cfg in PYRAMID_STRATEGIES:
+        da = data_map.get(name, [])
+        sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []))
         if sig:
+            should, mult, price = sig
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, sig[1], cfg.get('lev', 1.8), cfg.get('trail', 0.80)))
-            log(f"  {name}: {dir} @ {sig[1]:.4f}")
+            signals.append((name, dir, price, cfg.get('lev', 1.8), cfg.get('trail', 0.80), mult))
+            log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x")
 
     if os.environ.get("OKX_API_KEY"):
         try:
@@ -134,7 +182,6 @@ def main():
                 eq = float(acct.get('totalEq', 0))
             log(f"Equity: ${eq:,.0f}")
 
-            # BTC regime: entry < MA200*1.005 (generous), exit > MA200*0.995 (tight)
             btc_bull = False
             btc_bull_exit = False
             if btc_da and len(btc_da) >= 200:
@@ -144,15 +191,10 @@ def main():
                     btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
                     btc_bull_exit = btc_closes[-1] > btc_ma200[-1] * 0.995
 
-            # 1. Place new orders first
-            pos = okx_get_positions()
-            pos_map = {p['instId']: p for p in pos if float(p.get('pos', 0)) != 0}
-            log(f"Open positions: {len(pos_map)}")
-
             instruments = okx_get_instruments('SWAP')
             inst_map = {inst['instId']: inst for inst in instruments}
 
-            for name, direction, price, lev, trail in signals:
+            for name, direction, price, lev, trail, mult in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
@@ -166,18 +208,6 @@ def main():
                     log(f"  {name}: already entered today ({today}), skipped")
                     continue
 
-                mult = 1.0
-                if direction == 'BUY' and inst_id in pos_map:
-                    avg_px = float(pos_map[inst_id].get('avgPx', 0))
-                    if avg_px > 0:
-                        roi = (price - avg_px) / avg_px * 100 * lev
-                        if roi > 15:     mult = 2.5
-                        elif roi > 10:   mult = 2.0
-                        elif roi > 5:    mult = 1.5
-                        elif roi > 0:    mult = 1.2
-                        elif roi > -5:   mult = 0.75
-                        else:            mult = 0.5
-
                 usd_val = eq * ENTRY_PCT * mult
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
@@ -187,7 +217,7 @@ def main():
                 td_mode = 'isolated' if direction == 'SELL' else 'cross'
                 okx_lev = round(lev)
 
-                log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult}x, ctVal={ct_val})")
+                log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult:.1f}x, ctVal={ct_val})")
                 try:
                     result = okx_place_order(
                         inst_id=inst_id, td_mode=td_mode,
@@ -225,6 +255,7 @@ def main():
                                 log(f"  TP {trg}% failed: {tp_err}")
                         log(f"  TP ladder set")
                     record_entry(name, price)
+                    add_entry(name, price, direction == 'SELL')
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                             f"TRADE: {name} {direction} {sz}ct @ ${price:,.4f}")
@@ -234,7 +265,6 @@ def main():
                         send_message(DISCORD_WEBHOOK,
                             f"FAILED: {name} {direction} — {trade_err}")
 
-            # 2. Update stoploss for longs + check close-all for shorts (always run)
             log("Updating stoploss...")
             manage_positions(log, btc_bull_exit)
 
@@ -247,7 +277,7 @@ def main():
         log("OKX not configured — signal only")
 
     if DISCORD_WEBHOOK and traded_count > 0:
-        summary = "\n".join(f"• {n} {d} @ ${p:,.4f}" for n, d, p, *_ in signals)
+        summary = "\n".join(f"  {n} {d} @ ${p:,.4f}" for n, d, p, *_ in signals)
         send_message(DISCORD_WEBHOOK,
             f"*Pyramid Trading — {ts:%Y-%m-%d}*\n{summary}")
 

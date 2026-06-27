@@ -78,3 +78,21 @@ def record_entry(coin: str, price: float) -> None:
         'last_entry_date': today,
         'last_entry_price': price,
     })
+
+
+def get_entries(coin: str) -> list:
+    """Return list of open entry dicts: [{'ep': float, 'is_short': bool}, ...]"""
+    state = get_state(coin)
+    return state.get('entries', [])
+
+
+def add_entry(coin: str, ep: float, is_short: bool) -> None:
+    """Append a new entry to the coin's open entries list."""
+    entries = get_entries(coin)
+    entries.append({'ep': ep, 'is_short': is_short})
+    set_state(coin, {'entries': entries})
+
+
+def clear_entries(coin: str) -> None:
+    """Clear all open entries for a coin (position fully closed)."""
+    set_state(coin, {'entries': []})

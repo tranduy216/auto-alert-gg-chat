@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT, TP_SCHEDULE, BTC_SHORT_TP,
-    MAX_CAP, EXT_BLOCK_PCT, fee_factor,
+    PYRAMID_ROI_DEFAULT, TP_SCHEDULE,
+    MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
     load_data, fetch_paxg, total_asset_value, compute_results,
     entry_conditions,
 )
@@ -199,11 +199,8 @@ def main():
 
     xau_da = fetch_paxg()
 
-    strategies = [
-        ('TRX-L',  'TRX',  False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.78}),
-        ('XAU-L', 'XAU', False, MAX_CAP, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82}),
-        ('BTC-S',  'BTC',  True,  MAX_CAP, {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 2, 'tp': BTC_SHORT_TP}),
-    ]
+    strategies = [(f'{coin}-{"S" if is_short else "L"}', coin, is_short, MAX_CAP, cfg)
+                  for coin, is_short, cfg in PYRAMID_STRATEGIES]
 
     results = {}
     for label, coin, is_short, max_cap, cfg in strategies:

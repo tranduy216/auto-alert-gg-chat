@@ -31,6 +31,14 @@ MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
 
+# ── Pyramid Strategies (single source of truth for all scripts) ──
+# Format: (coin, is_short, cfg)
+PYRAMID_STRATEGIES = [
+    ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.78}),
+    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82}),
+    ('BTC',  True,  {'ma': 5,  'buf': 0.05, 'pyr': 3, 'lev': 2, 'tp': BTC_SHORT_TP}),
+]
+
 
 def fee_factor(lev):
     """Factor applied to PnL for round-trip fees."""
@@ -284,7 +292,7 @@ def fetch_candles_cmc(symbol, days=600):
         return None
 
 
-def _try_fetch(fetcher, symbol, days, label):
+def _try_fetch(fetcher, symbol, days, _label):
     """Try one fetcher with 3 attempts, 0.5s cooldown."""
     for attempt in range(3):
         data = fetcher(symbol, days)
