@@ -16,7 +16,6 @@ from utils.okx_utils import (
 INST_ID = 'LINK-USDT-SWAP'
 LEV = 2
 TP_SCHED = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
-TRAIL_CALLBACK = '0.20'
 
 def log(msg): print(f"[{datetime.datetime.now():%H:%M:%S}] {msg}")
 
@@ -26,18 +25,13 @@ def get_pos():
             return p
     return None
 
-def cancel_algos(inst_id):
-    for ot in ['conditional', 'move_order_stop']:
-        orders = okx_get_algo_orders(inst_id, ot)
-        if orders:
-            ids = [o['algoId'] for o in orders]
-            okx_cancel_algo(inst_id, ids)
-            log(f"  Cancelled {len(ids)} {ot}")
-            time.sleep(0.5)
+def get_total_qty(inst_id):
+    pos = get_pos()
+    return abs(float(pos['pos'])) if pos else 0
 
 def main():
     print("=" * 60)
-    print("OKX LINK TEST — TP Ladder + Trailing Stop (auto)")
+    print("OKX LINK TEST — TP Ladder + Trailing Stop")
     print("=" * 60)
 
     # 1. Account
@@ -48,15 +42,21 @@ def main():
 
     # 2. Instrument
     instruments = okx_get_instruments('SWAP')
-    inst_info = next((i for i in instruments if i['instId'] == INST_ID), None)
-    if not inst_info:
+    inst = next((i for i in instruments if i['instId'] == INST_ID), None)
+    if not inst:
         log(f"ERROR: {INST_ID} not found"); return
-    ct_val = float(inst_info.get('ctVal', '0.01'))
-    lot_sz = float(inst_info.get('lotSz', '1'))
-    log(f"ctVal={ct_val}  lotSz={lot_sz}  maxLev={inst_info.get('lever','?')}x")
+    ct_val = float(inst.get('ctVal', '0.01'))
+    lot_sz = float(inst.get('lotSz', '1'))
+    log(f"ctVal={ct_val}  lotSz={lot_sz}  maxLev={inst.get('lever','?')}x")
 
     # 3. Cancel existing
-    cancel_algos(INST_ID)
+    for ot in ['conditional', 'move_order_stop']:
+        orders = okx_get_algo_orders(INST_ID, ot)
+        if orders:
+            ids = [o['algoId'] for o in orders]
+            okx_cancel_algo(INST_ID, ids)
+            log(f"  Cancelled {len(ids)} {ot}")
+            time.sleep(0.5)
 
     # 4. Check existing
     pos = get_pos()
@@ -82,35 +82,41 @@ def main():
     pos_qty = abs(float(pos['pos']))
     log(f"Filled: {pos_qty}ct @ ${avg_px:.2f}")
 
-    # 6. TP ladder
-    tp_ids = []
+    # 6. TP ladder — only non-overlapping sizes
+    total_ct = int(pos_qty / lot_sz) * lot_sz  # round to lotSz
+    placed = 0
+    remaining = total_ct
     for trg_pct, frac in TP_SCHED:
+        tp_sz = max(lot_sz, int(total_ct * frac / lot_sz) * lot_sz)
+        tp_sz = min(tp_sz, remaining - lot_sz * (1 if len(TP_SCHED) - placed > 1 else 0))
+        tp_sz = round(tp_sz, 6) if isinstance(lot_sz, float) and lot_sz < 1 else int(tp_sz)
+        if tp_sz <= 0: break
         tp_price = round(avg_px * (1 + trg_pct / (100 * LEV)), 4)
-        tp_sz = max(1, int(pos_qty * frac + 0.5))
         try:
             r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
                 side='sell', sz=str(tp_sz),
                 ord_type='conditional', pos_side='long',
                 tp_trigger_px=str(tp_price))
             aid = r.get('data', [{}])[0].get('algoId', '?')
-            tp_ids.append(aid)
             log(f"  TP {trg_pct}% @ ${tp_price:.4f} sz={tp_sz} → {aid}")
+            remaining -= tp_sz
+            placed += 1
         except Exception as e:
             log(f"  TP {trg_pct}% FAILED: {e}")
-    log(f"TP: {len(tp_ids)}/{len(TP_SCHED)} ok")
+    log(f"TP placed: {placed}")
 
-    # 7. Trailing stop
-    trail_sz = pos_qty - sum(max(1, int(pos_qty * f + 0.5)) for _, f in TP_SCHED)
-    if trail_sz <= 0:
-        trail_sz = pos_qty
-    try:
-        r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
-            side='sell', sz=str(trail_sz),
-            ord_type='move_order_stop', callback_ratio=TRAIL_CALLBACK)
-        aid = r.get('data', [{}])[0].get('algoId', '?')
-        log(f"Trail: {trail_sz}ct cb={TRAIL_CALLBACK} → {aid}")
-    except Exception as e:
-        log(f"Trail FAILED: {e}")
+    # 7. Trailing stop on whatever remains
+    if remaining > 0:
+        try:
+            r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
+                side='sell', sz=str(remaining),
+                ord_type='move_order_stop', callback_ratio='0.20')
+            aid = r.get('data', [{}])[0].get('algoId', '?')
+            log(f"Trail: {remaining}ct cb=0.20 → {aid}")
+        except Exception as e:
+            log(f"Trail FAILED: {e}")
+    else:
+        log(f"TP covers 100%, no trailing stop needed")
 
     # 8. Show algos
     log("\n--- Algo orders ---")
@@ -119,7 +125,14 @@ def main():
             log(f"  [{ot}] sz={o.get('sz','?')} TP={o.get('tpTriggerPx','-')} CB={o.get('callbackRatio','-')}%")
 
     # 9. Cleanup
-    cancel_algos(INST_ID)
+    for ot in ['conditional', 'move_order_stop']:
+        orders = okx_get_algo_orders(INST_ID, ot)
+        if orders:
+            ids = [o['algoId'] for o in orders]
+            if ids:
+                okx_cancel_algo(INST_ID, ids)
+                log(f"Cancelled {len(ids)} {ot}")
+                time.sleep(0.5)
     pos = get_pos()
     if pos:
         try:
