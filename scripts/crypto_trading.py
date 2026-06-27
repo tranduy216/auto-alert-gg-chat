@@ -37,7 +37,6 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     ma_slope = cfg.get('ma_slope', False)
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
-    pyr_roi = cfg.get('pyr', 5)
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
@@ -57,11 +56,6 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     if should and is_short:
         mult = 1.0
-    if not should and entries and mult > 0 and not is_short:
-        last_ep = entries[-1]['ep']
-        roi = (cc - last_ep) / last_ep * 100 * lev_coin
-        if roi >= pyr_roi:
-            should = True
     return should, mult, cc
 
 

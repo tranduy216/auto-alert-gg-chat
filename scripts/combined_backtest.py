@@ -1,6 +1,6 @@
 """
 Combined Long + Short Pyramid Strategy
-- Long: TRX/XAU — TP 5-stage, trailing close, pyramid ×2 at 10% ROI
+- Long: TRX/XAU — TP 5-stage, trailing close, ×2 sizing at 10% ROI
 - Short: BTC — TP 4-stage, trailing close, no pyramid, 2d cooldown
 """
 from pathlib import Path
