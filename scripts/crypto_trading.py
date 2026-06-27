@@ -40,7 +40,10 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
     vol_bars = cfg.get('vol_bars', 2)
+    green_min_count = cfg.get('green_min_count', 0)
+    green_window = cfg.get('green_window', 0)
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
+    opens = [c.get('open', c['close']) for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
     btc_closes = [c['close'] for c in btc_da] if btc_da else None
@@ -57,7 +60,8 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
                                     btc_bull, ext_block, lev_coin, -999,
                                     ma=ma, highs=highs, lows=lows,
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
-                                    vol_bars=vol_bars)
+                                    vol_bars=vol_bars, green_min_count=green_min_count,
+                                    green_window=green_window, opens=opens, closes=closes)
     if not should:
         return None
     if is_short:

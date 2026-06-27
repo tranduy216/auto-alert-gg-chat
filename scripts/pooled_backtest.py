@@ -39,13 +39,14 @@ def run_pooled(data, strategies):
         if not da: continue
         closes = [c['close'] for c in da]
         vols = [c['volume'] for c in da]
+        opens = [c.get('open', c['close']) for c in da]
         highs = [c['high'] for c in da]
         lows = [c['low'] for c in da]
         times = [c['time'] for c in da]
         ma_short = sma(closes, cfg.get('ma', 20))
         vol_ma20 = sma(vols, 20)
         coin_data[label] = {
-            'closes': closes, 'vols': vols,
+            'closes': closes, 'vols': vols, 'opens': opens,
             'highs': highs, 'lows': lows,
             'times': times, 'ma_short': ma_short, 'vol_ma20': vol_ma20,
             'n': len(closes), 'is_short': is_short, 'cfg': cfg,
@@ -215,6 +216,8 @@ def run_pooled(data, strategies):
             lower_high = cfg.get('lower_high', False)
             asym_buffer = cfg.get('asym_buffer', False)
             vol_bars = cfg.get('vol_bars', 2)
+            green_min_count = cfg.get('green_min_count', 0)
+            green_window = cfg.get('green_window', 0)
             entries = entries_map[label]
 
             m_ma = cd['ma_short'][idx]; vavg = cd['vol_ma20'][idx]
@@ -225,7 +228,8 @@ def run_pooled(data, strategies):
                 btc_bull, ext_block, lev_coin, lei_map[label],
                 ma=cd['ma_short'], highs=cd['highs'], lows=cd['lows'],
                 ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
-                vol_bars=vol_bars,
+                vol_bars=vol_bars, green_min_count=green_min_count,
+                green_window=green_window, opens=cd['opens'], closes=cd['closes'],
             )
 
             if should_enter:

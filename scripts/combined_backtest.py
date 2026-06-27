@@ -32,10 +32,13 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
     vol_bars = cfg.get('vol_bars', 2)
+    green_min_count = cfg.get('green_min_count', 0)
+    green_window = cfg.get('green_window', 0)
     max_margin = SHORT_MAX_MARGIN if is_short else LONG_MAX_MARGIN
 
     closes = [c['close'] for c in da]; n = len(closes)
     vols = [c['volume'] for c in da]
+    opens = [c.get('open', c['close']) for c in da]
     highs = [c['high'] for c in da]; lows = [c['low'] for c in da]
     ma_short = sma(closes, ma_period); vol_ma20 = sma(vols, 20)
 
@@ -68,7 +71,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             btc_bull, ext_block, lev_coin, lei,
             ma=ma_short, highs=highs, lows=lows,
             ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
-            vol_bars=vol_bars,
+            vol_bars=vol_bars, green_min_count=green_min_count,
+            green_window=green_window, opens=opens, closes=closes,
         )
 
         active_entries = entries[:]

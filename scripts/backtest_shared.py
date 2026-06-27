@@ -45,11 +45,11 @@ MAX_CAP = 0.75          # max margin deployed (backtest only)
 PYRAMID_STRATEGIES = [
     ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.82,
                      'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)],
-                     'vol_bars': 3}),
+                     'vol_bars': 3, 'green_min_count': 3, 'green_window': 7}),
     ('XAU', False, {'ma': 20, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82,
                      'exit_mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'ma_buf': 0.03,
                      '_entry_mult': 1.5, '_pyramid': True,
-                     'vol_bars': 3}),
+                     'vol_bars': 3, 'green_min_count': 3, 'green_window': 7}),
     ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
                      'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]}),
 ]
@@ -73,6 +73,7 @@ def load_data(filepath=None):
         for i in range(1, len(candles), 2):
             b2 = candles[i-1:i+1]
             daily.append({
+                'open': b2[0].get('open', b2[0].get('close', 0)),
                 'close': b2[-1]['close'],
                 'high': max(x['high'] for x in b2),
                 'low': min(x['low'] for x in b2),
@@ -112,6 +113,7 @@ def fetch_binance(symbol, days=600):
         for i in range(1, len(candles), 2):
             b2 = candles[i-1:i+1]
             daily.append({
+                'open': float(b2[0][1]),
                 'close': float(b2[-1][4]), 'high': max(float(x[2]) for x in b2),
                 'low': min(float(x[3]) for x in b2), 'volume': sum(float(x[5]) for x in b2),
                 'time': b2[0][0],
@@ -157,6 +159,7 @@ def fetch_paxg(from_ts=None):
         for i in range(1, len(candles), 2):
             b2 = candles[i-1:i+1]
             daily.append({
+                'open': float(b2[0][1]),
                 'close': float(b2[-1][4]),
                 'high': max(float(x[2]) for x in b2),
                 'low': min(float(x[3]) for x in b2),
@@ -227,6 +230,7 @@ def fetch_candles_okx(symbol, days=600):
         daily = []
         for k in all_candles:
             daily.append({
+                'open': float(k[1]),
                 'close': float(k[4]),
                 'high': float(k[2]),
                 'low': float(k[3]),
@@ -261,7 +265,7 @@ def fetch_candles_coingecko(symbol, days=600):
             day = ts // (86400 * 1000)
             d = daily_map.get(day)
             if d is None:
-                daily_map[day] = {'high': price, 'low': price, 'close': price, 'time': day * 86400 * 1000}
+                daily_map[day] = {'open': price, 'high': price, 'low': price, 'close': price, 'time': day * 86400 * 1000}
             else:
                 d['high'] = max(d['high'], price)
                 d['low'] = min(d['low'], price)
@@ -294,6 +298,7 @@ def fetch_candles_cmc(symbol, days=600):
         for q in quotes:
             quote = q.get('quote', {}).get('USD', {})
             daily.append({
+                'open': float(quote.get('open', quote.get('close', 0))),
                 'close': float(quote.get('close', 0)),
                 'high': float(quote.get('high', 0)),
                 'low': float(quote.get('low', 0)),
@@ -396,16 +401,20 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
                      btc_bull, ext_block, lev_coin, lei=-999,
                      ma=None, highs=None, lows=None,
                      ma_slope=False, lower_high=False, asym_buffer=False,
-                     vol_bars=2):
+                     vol_bars=2, green_min_count=0, green_window=0,
+                     opens=None, closes=None):
     """
     Kiểm tra điều kiện entry — shared giữa backtest và live.
     Returns: (should_enter, mult) — mult luôn là giá trị đúng (dùng cho pyramid).
 
     Optional filters:
-      ma_slope    : Long requires MA rising, Short requires MA falling
-      lower_high  : Long blocked if 2 recent peaks forming lower highs
-      asym_buffer : 5% buffer above MA, 2% buffer below MA (default 3%)
-      vol_bars    : Number of recent bars for volume average check (default 2)
+      ma_slope       : Long requires MA rising, Short requires MA falling
+      lower_high     : Long blocked if 2 recent peaks forming lower highs
+      asym_buffer    : 5% buffer above MA, 2% buffer below MA (default 3%)
+      vol_bars       : Number of recent bars for volume average check (default 2)
+      green_min_count: Require N green candles in green_window for long (default 0=off)
+      green_window   : Window for green candle count (default = vol_bars)
+      opens          : List of open prices for green candle check
     """
     effective_buf = ma_buf
     if asym_buffer and m_ma and cc < m_ma:
@@ -444,6 +453,17 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
                     peaks.append(win_highs[i])
             if len(peaks) >= 2 and peaks[-1] < peaks[-2]:
                 return False, 1.0
+
+    # Filter 3 — Green candle count (long only, avoid dead cat bounce)
+    if not is_short and green_min_count > 0 and opens is not None and closes is not None:
+        gwin = green_window if green_window > 0 else vol_bars
+        window = min(gwin, idx + 1)
+        green_cnt = 0
+        for i in range(idx - window + 1, idx + 1):
+            if opens[i] is not None and closes[i] is not None and closes[i] > opens[i]:
+                green_cnt += 1
+        if green_cnt < green_min_count:
+            return False, 1.0
 
     # Compute mult dù entry có fire hay không (pyramid cần mult)
     mult = winner_mult(entries, cc, is_short, lev_coin)

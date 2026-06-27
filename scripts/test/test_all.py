@@ -115,7 +115,7 @@ sample = list(data.values())[0]
 check("data has bars", len(sample) > 0)
 if sample:
     bar = sample[0]
-    check("bar has all fields", all(k in bar for k in ['close','high','low','volume','time']))
+    check("bar has all fields", all(k in bar for k in ['open','close','high','low','volume','time']))
     check("bar high >= close", bar['high'] >= bar['close'])
     check("bar low <= close", bar['low'] <= bar['close'])
     check("bar volume >= 0", bar['volume'] >= 0)
@@ -221,6 +221,7 @@ with patch.dict(os.environ, {'COINGECKO_API_KEY': 'test_key'}):
         if result:
             check("aggregated to 2 daily bars", len(result) == 2)
             d = result[0]
+            check("bar has open field", 'open' in d)
             check("bar has close field", 'close' in d)
             check("bar has high field", 'high' in d)
             check("bar has low field", 'low' in d)
