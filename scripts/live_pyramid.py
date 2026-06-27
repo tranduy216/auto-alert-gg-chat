@@ -7,12 +7,16 @@ import sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
+import os
+
 from backtest_shared import (
     sma, fetch_candles,
     MA_BUF, MA_PERIOD, EXT_BLOCK_PCT,
     PYRAMID_STRATEGIES,
     entry_conditions,
 )
+
+TRADING_COIN_LIST = [c.strip() for c in os.environ.get('TRADING_COIN_LIST', '').splitlines() if c.strip()]
 from utils.state_manager import get_entries
 
 
@@ -82,7 +86,9 @@ def main():
     paxg_da = fetch_candles('XAUUSDT', 600)
 
     data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
-    strategies = [(name, data_map.get(name, []), is_short, cfg) for name, is_short, cfg in PYRAMID_STRATEGIES]
+    strategies = [(name, data_map.get(name, []), is_short, cfg)
+                   for name, is_short, cfg in PYRAMID_STRATEGIES
+                   if not TRADING_COIN_LIST or name in TRADING_COIN_LIST]
 
     now = datetime.datetime.now()
     print("=" * 60)
