@@ -10,7 +10,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
-    SHORT_MARGIN_CAP, SHORT_SL_ROI, winner_mult,
+    SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, SHORT_COOLDOWN_ENTRY, winner_mult,
     load_data, fetch_paxg, entry_conditions, compute_results,
 )
 
@@ -101,7 +101,7 @@ def run_pooled(data, strategies):
             if is_short:
                 for e in entries[:]:
                     roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
-                    if roi <= -SHORT_SL_ROI:
+                    if roi <= -(SHORT_CLOSE_PCT * 100 * lev_coin):
                         raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                         eq += raw / 100 * ff
                         entries.remove(e)
@@ -170,7 +170,7 @@ def run_pooled(data, strategies):
                     else:
                         mult = 1.0
                         short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
-                        if short_mp + eq * ENTRY_PCT * mult > SHORT_MARGIN_CAP:
+                        if short_mp + eq * ENTRY_PCT * mult > SHORT_MAX_MARGIN:
                             should_enter = False
 
             if should_enter:
@@ -183,7 +183,9 @@ def run_pooled(data, strategies):
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                mp = eq * ENTRY_PCT * mult / n
+                mp = eq * ENTRY_PCT * mult / n * cfg.get('_entry_mult', 1.0)
+                if is_short:
+                    mp *= 2 * cfg.get('_entry_mult', 1.0)
                 if is_short:
                     mp *= 2
                 if total_dep + mp <= MAX_CAP * total_val:
