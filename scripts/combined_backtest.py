@@ -46,7 +46,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
-    long_tp_hit = 0; short_tp_hit = 0; next_pyr_roi = 10; pyr_bar = -999
+    long_tp_hit = 0; short_tp_hit = 0; next_pyr_roi = 8; pyr_bar = -999
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
@@ -211,7 +211,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
         # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry, next += 7%% ──
         if cfg.get('_pyramid', False) and not is_short and long_entries and avg_ep_long and idx - pyr_bar >= 1:
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
-            if roi >= next_pyr_roi:
+            if roi >= next_pyr_roi and next_pyr_roi <= 40:
                 mt = eq * ENTRY_PCT * cfg.get('_entry_mult', 1.0)
                 if dep + mt <= max_margin * total_val:
                     e = {'ep': cc, 'mp': mt, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
@@ -220,7 +220,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     pyr_bar = idx
                     last_ep = cc; lei = idx
         if not is_short and not long_entries:
-            next_pyr_roi = 10
+            next_pyr_roi = 8
 
         ureal = 0
         for e in entries:
