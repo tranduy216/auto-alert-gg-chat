@@ -37,7 +37,7 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     ma_slope = cfg.get('ma_slope', False)
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
-    pyr_roi = cfg.get('pyr', 5)
+    closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
@@ -59,15 +59,12 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
         mult = 1.0
     if should and entries:
         last_ep = entries[-1]['ep']
-        if not is_short and cc <= last_ep * 1.05:
+        long_confirm = cfg.get('long_confirm', 0.05)
+        short_confirm = cfg.get('short_confirm', 0.03)
+        if not is_short and cc <= last_ep * (1 + long_confirm):
             should = False
-        if is_short and cc >= last_ep * 0.97:
+        if is_short and cc >= last_ep * (1 - short_confirm):
             should = False
-    if not should and entries and mult > 0 and not is_short:
-        last_ep = entries[-1]['ep']
-        roi = (cc - last_ep) / last_ep * 100 * lev_coin
-        if roi >= pyr_roi and cc > last_ep * 1.05:
-            should = True
     return should, mult, cc
     return should, mult, cc
 

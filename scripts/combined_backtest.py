@@ -198,12 +198,14 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     double_cd -= 1
                 last_ep = cc; lei = idx
 
-        # ── Pyramid filter: need price beyond last entry (long: +5%, short: -3%) ──
+        # ── Pyramid filter: need price beyond last entry (long: +X%, short: -Y%) ──
         if should_enter and entries:
             last_ep = entries[-1]['ep']
-            if not is_short and cc <= last_ep * 1.05:
+            long_confirm = cfg.get('long_confirm', 0.05)
+            short_confirm = cfg.get('short_confirm', 0.03)
+            if not is_short and cc <= last_ep * (1 + long_confirm):
                 should_enter = False
-            if is_short and cc >= last_ep * 0.97:
+            if is_short and cc >= last_ep * (1 - short_confirm):
                 should_enter = False
 
         # ── Unrealized PnL ──
