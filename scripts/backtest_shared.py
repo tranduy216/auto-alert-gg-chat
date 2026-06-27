@@ -23,16 +23,12 @@ ENTRY_PCT = 0.011        # 1.1% margin per entry (~$300 on $14K at 2x)
 TRAIL_PCT = 0.80        # 20% trailing stop from extreme (long only)
 MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
-PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
 BTC_SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
 
 # ── Long config ──
-LONG_TP = [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]  # close 60%, 40% remains
-LONG_CLOSE_PCT = 0.20   # closeAll if price drops 20% from avg entry (PaxG: 0.18)
-LONG_MAX_MARGIN = 0.75  # max 75% margin per coin
-LONG_PYRAMID_DOUBLE = True  # ×2 entry size when position ROI > 10%
-LONG_PYRAMID_DOUBLE_COOLDOWN = 2  # after ×2, next 2 entries are normal
+LONG_TP = [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]
+LONG_MAX_MARGIN = 0.75
 
 # ── Short config ──
 SHORT_TP = [(4, 0.30), (8, 0.40), (12, 0.30)]  # 3 stages: close 30/40/30%
@@ -406,10 +402,6 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
       lower_high: Long blocked if 2 recent peaks forming lower highs
       asym_buffer: 5% buffer above MA, 2% buffer below MA
     """
-    effective_buf = ma_buf
-    if asym_buffer and m_ma and cc < m_ma:
-        effective_buf = 0.02
-
     effective_buf = ma_buf
     if asym_buffer and m_ma and cc < m_ma:
         effective_buf = 0.02

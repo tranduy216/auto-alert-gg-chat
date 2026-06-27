@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    MA_BUF, MA_PERIOD, PYRAMID_ROI_DEFAULT, EXT_BLOCK_PCT,
+    MA_BUF, MA_PERIOD, EXT_BLOCK_PCT,
     PYRAMID_STRATEGIES,
     entry_conditions,
 )
@@ -27,7 +27,6 @@ def check_signal(coin_da, btc_da, is_short, cfg, coin_name):
     ma_buf = cfg.get('buf', MA_BUF)
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
     ma_period = cfg.get('ma', MA_PERIOD)
-    pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
     ma_slope = cfg.get('ma_slope', False)
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)

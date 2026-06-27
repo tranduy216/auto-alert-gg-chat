@@ -10,9 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    PYRAMID_ROI_DEFAULT,
     EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
-    LONG_TP, LONG_MAX_MARGIN, LONG_PYRAMID_DOUBLE,
+    LONG_TP, LONG_MAX_MARGIN,
     SHORT_TP, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT,
     SHORT_COOLDOWN_ENTRY,
     load_data, fetch_paxg, total_asset_value, compute_results,
@@ -26,11 +25,9 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     lev_coin = cfg.get('lev', 1.8)
     ma_period = cfg.get('ma', MA_PERIOD)
     ma_buf = cfg.get('buf', MA_BUF)
-    pyr_roi = cfg.get('pyr', PYRAMID_ROI_DEFAULT)
     tp_sched = cfg.get('tp', SHORT_TP if is_short else LONG_TP)
     trail_pct = cfg.get('trail', TRAIL_PCT)
     ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
-    close_pct = cfg.get('close_pct', 0.20)
     ma_slope = cfg.get('ma_slope', False)
     lower_high = cfg.get('lower_high', False)
     asym_buffer = cfg.get('asym_buffer', False)
