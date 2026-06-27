@@ -49,13 +49,16 @@ def main():
     lot_sz = float(inst.get('lotSz', '1'))
     log(f"ctVal={ct_val}  lotSz={lot_sz}  maxLev={inst.get('lever','?')}x")
 
-    # 3. Cancel existing
+    # 3. Cancel existing — ignore errors
     for ot in ['conditional', 'move_order_stop']:
         orders = okx_get_algo_orders(INST_ID, ot)
         if orders:
             ids = [o['algoId'] for o in orders]
-            okx_cancel_algo(INST_ID, ids)
-            log(f"  Cancelled {len(ids)} {ot}")
+            try:
+                okx_cancel_algo(INST_ID, ids)
+                log(f"  Cancelled {len(ids)} {ot}")
+            except Exception as e:
+                log(f"  Cancel {ot} failed (non-critical): {e}")
             time.sleep(0.5)
 
     # 4. Check existing
@@ -130,9 +133,12 @@ def main():
         if orders:
             ids = [o['algoId'] for o in orders]
             if ids:
-                okx_cancel_algo(INST_ID, ids)
-                log(f"Cancelled {len(ids)} {ot}")
-                time.sleep(0.5)
+                try:
+                    okx_cancel_algo(INST_ID, ids)
+                    log(f"Cancelled {len(ids)} {ot}")
+                    time.sleep(0.5)
+                except Exception as e:
+                    log(f"Cancel {ot} failed: {e}")
     pos = get_pos()
     if pos:
         try:
