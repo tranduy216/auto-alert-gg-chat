@@ -147,7 +147,7 @@ def main():
     if os.environ.get("OKX_API_KEY"):
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         for name, is_short, cfg in PYRAMID_STRATEGIES:
-            if TRADING_COIN_LIST and name not in TRADING_COIN_LIST: continue
+            if name not in TRADING_COIN_LIST: continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
             if not da or not coin_entries: continue
@@ -276,7 +276,7 @@ def main():
     # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
     if os.environ.get("OKX_API_KEY"):
         for name, is_short, cfg in PYRAMID_STRATEGIES:
-            if TRADING_COIN_LIST and name not in TRADING_COIN_LIST: continue
+            if name not in TRADING_COIN_LIST: continue
             if is_short or not cfg.get('_pyramid', False): continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
@@ -306,7 +306,7 @@ def main():
     signals = []
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
-        if TRADING_COIN_LIST and name not in TRADING_COIN_LIST: continue
+        if name not in TRADING_COIN_LIST: continue
         da = data_map.get(name, [])
         sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []))
         if sig:

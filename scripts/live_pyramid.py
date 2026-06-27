@@ -88,7 +88,7 @@ def main():
     data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
     strategies = [(name, data_map.get(name, []), is_short, cfg)
                    for name, is_short, cfg in PYRAMID_STRATEGIES
-                   if not TRADING_COIN_LIST or name in TRADING_COIN_LIST]
+                   if name in TRADING_COIN_LIST]
 
     now = datetime.datetime.now()
     print("=" * 60)
