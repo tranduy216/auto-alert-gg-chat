@@ -89,7 +89,7 @@ def get_entries(coin: str) -> list:
 def add_entry(coin: str, ep: float, is_short: bool) -> None:
     """Append a new entry to the coin's open entries list."""
     entries = get_entries(coin)
-    entries.append({'ep': ep, 'is_short': is_short})
+    entries.append({'ep': ep, 'is_short': is_short, 'hi': ep, 'lo': ep})
     set_state(coin, {'entries': entries})
 
 

@@ -16,7 +16,7 @@ from backtest_shared import (
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
-    okx_set_leverage,
+    okx_set_leverage, okx_close_position,
 )
 from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
 from backtest_shared import ENTRY_PCT
@@ -81,7 +81,7 @@ def sync_entries_with_positions(okx_positions, log):
             avg_px = float(p.get('avgPx', 0))
             is_short = float(p.get('pos', 0)) < 0
             if avg_px > 0:
-                entries = [{'ep': avg_px, 'is_short': is_short}]
+                entries = [{'ep': avg_px, 'is_short': is_short, 'hi': avg_px, 'lo': avg_px}]
                 entries_map[coin] = entries
                 for e in entries:
                     add_entry(coin, e['ep'], e['is_short'])
@@ -128,14 +128,102 @@ def main():
 
     data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
 
-    entries_map = {}
-    pos_map = {}
     if os.environ.get("OKX_API_KEY"):
         try:
             okx_positions = okx_get_positions()
             entries_map, pos_map = sync_entries_with_positions(okx_positions, log)
         except Exception as e:
             log(f"  Entries sync skipped: {e}")
+
+    # ── Exit check (trailing/TP/SL for existing positions) ──
+    if os.environ.get("OKX_API_KEY"):
+        for name, is_short, cfg in PYRAMID_STRATEGIES:
+            coin_entries = entries_map.get(name, [])
+            da = data_map.get(name, [])
+            if not da or not coin_entries: continue
+            cc = da[-1]['close']; hi = da[-1]['high']; bl = da[-1]['low']
+            lev = cfg.get('lev', 2); trail = cfg.get('trail', 0.80)
+            tp = cfg.get('tp'); close_pct = cfg.get('close_pct', 0.20)
+            inst_id = SYMBOL_OKX.get(name)
+            pos = pos_map.get(inst_id, {})
+
+            # Update peak/trough for each entry
+            for e in coin_entries:
+                if e.get('is_short'):
+                    lo = e.get('lo', cc)
+                    e['lo'] = min(lo, bl)
+                else:
+                    hi_prev = e.get('hi', cc)
+                    e['hi'] = max(hi_prev, hi)
+
+            # Compute avg weighted EP
+            total_mp = sum(e['mp'] for e in coin_entries if 'mp' in e) or len(coin_entries)
+            avg_ep = sum(e['ep'] * (e.get('mp', 1) if 'mp' in e else 1) for e in coin_entries) / total_mp
+
+            roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
+
+            # Long: trailing stop
+            if not is_short:
+                peak = max(e.get('hi', cc) for e in coin_entries)
+                if cc <= peak * trail:
+                    log(f"  {name}: trailing stop (cc={cc:.4f} <= peak={peak:.4f} * {trail})")
+                    try:
+                        okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
+                        clear_entries(name)
+                        log(f"  {name}: position closed")
+                    except Exception as e:
+                        log(f"  {name}: close FAILED: {e}")
+                    continue
+
+            # Long: TP check
+            if not is_short and tp:
+                for stage in range(len(tp)):
+                    trg, cf = tp[stage]
+                    if roi >= trg:
+                        pos_qty = abs(float(pos.get('pos', 0)))
+                        if pos_qty <= 0: break
+                        close_ct = max(1, int(pos_qty * cf + 0.5))
+                        try:
+                            okx_place_order(inst_id=inst_id, td_mode='cross',
+                                side='sell', sz=str(close_ct), reduce_only=True)
+                            log(f"  {name}: TP {trg}% → close {close_ct}ct")
+                        except Exception as e:
+                            log(f"  {name}: TP {trg}% FAILED: {e}")
+
+            # Short: trailing stop
+            if is_short:
+                trough = min(e.get('lo', cc) for e in coin_entries)
+                if cc >= trough * (1 + close_pct):
+                    log(f"  {name}: trailing stop (cc={cc:.4f} >= trough={trough:.4f} * {1+close_pct})")
+                    try:
+                        okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
+                        clear_entries(name)
+                        today = datetime.datetime.now().strftime('%Y-%m-%d')
+                        set_state(name, {'last_sl_date': today})
+                        log(f"  {name}: position closed")
+                    except Exception as e:
+                        log(f"  {name}: close FAILED: {e}")
+                    continue
+
+            # Short: TP check
+            if is_short and tp:
+                for stage in range(len(tp)):
+                    trg, cf = tp[stage]
+                    if roi >= trg:
+                        pos_qty = abs(float(pos.get('pos', 0)))
+                        if pos_qty <= 0: break
+                        close_ct = max(1, int(pos_qty * cf + 0.5))
+                        try:
+                            okx_place_order(inst_id=inst_id, td_mode='cross',
+                                side='buy', sz=str(close_ct), reduce_only=True)
+                            log(f"  {name}: TP {trg}% → close {close_ct}ct")
+                        except Exception as e:
+                            log(f"  {name}: TP {trg}% FAILED: {e}")
+
+            # Update entries in state_manager
+            clear_entries(name)
+            for e in coin_entries:
+                add_entry(name, e['ep'], e.get('is_short', False))
 
     signals = []
     traded_count = 0
@@ -193,15 +281,6 @@ def main():
                         days = (datetime.datetime.now() - datetime.datetime.strptime(last_entry, '%Y-%m-%d')).days
                         if days < 2:
                             log(f"  {name}: short entry cooldown {days}d/2d, skipped")
-                            continue
-                elif has_entered_today(name):
-                    log(f"  {name}: already entered today, skipped")
-                    continue
-
-                if direction == 'SELL':
-                        days = (datetime.datetime.now() - datetime.datetime.strptime(last_entry, '%Y-%m-%d')).days
-                        if days < 2:
-                            log(f"  {name}: bear cooldown {days}d/2d, skipped")
                             continue
                 elif has_entered_today(name):
                     log(f"  {name}: already entered today, skipped")
