@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backtest_shared import sma
 from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
-    EXT_BLOCK_PCT, fee_factor, BTC_SHORT_TP, SHORT_SL_ROI, PYRAMID_STRATEGIES,
+    EXT_BLOCK_PCT, fee_factor, BTC_SHORT_TP, PYRAMID_STRATEGIES,
+    LONG_TP, SHORT_TP, SHORT_CLOSE_PCT,
     load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
 )
 from combined_backtest import backtest_coin as combined_backtest
@@ -39,7 +40,6 @@ print("\n=== Constants ===")
 check("BASE = 10000", BASE == 10000)
 check("ENTRY_PCT = 0.011", abs(ENTRY_PCT - 0.011) < 0.0001)
 check("TRAIL_PCT = 0.80", TRAIL_PCT == 0.80)
-check("SHORT_SL_ROI = 7.0", abs(SHORT_SL_ROI - 7.0) < 0.1)
 check("BTC_SHORT_TP len 4", len(BTC_SHORT_TP) == 4)
 check("BTC_SHORT_TP first (4,0.25)", BTC_SHORT_TP[0] == (4, 0.25))
 check("BTC_SHORT_TP targets ascending", all(BTC_SHORT_TP[i][0] < BTC_SHORT_TP[i+1][0] for i in range(len(BTC_SHORT_TP)-1)))
@@ -48,6 +48,12 @@ check("TP_SCHEDULE sum 1.0", sum(cf for _, cf in TP_SCHEDULE) == 1.0)
 check("TP_SCHEDULE len 4", len(TP_SCHEDULE) == 4)
 check("MAX_CAP = 0.75", MAX_CAP == 0.75)
 check("FEE_RATE = 0.0005", FEE_RATE == 0.0005)
+check("EXT_BLOCK_PCT = 25", EXT_BLOCK_PCT == 25)
+check("SHORT_CLOSE_PCT = 0.08", abs(SHORT_CLOSE_PCT - 0.08) < 0.001)
+check("LONG_TP len 5", len(LONG_TP) == 5)
+check("SHORT_TP len 3", len(SHORT_TP) == 3)
+check("LONG_TP sum 0.6", abs(sum(cf for _, cf in LONG_TP) - 0.6) < 0.001)
+check("SHORT_TP sum 1.0", abs(sum(cf for _, cf in SHORT_TP) - 1.0) < 0.001)
 check("EXT_BLOCK_PCT = 25", EXT_BLOCK_PCT == 25)
 
 # ── shared: fee_factor ──
@@ -471,6 +477,14 @@ s8, m8 = entry_conditions(entries_lossy, 105, 6, vols_big, vavg, 100, 0.05, Fals
 check("ext_block: price near highest_ep allows", s8 is True and m8 > 0)
 s9, m9 = entry_conditions([], 100, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999)
 check("ext_block: no entries bypasses", s9 is True and m9 == 1.0)
+
+# Short ext_block (15% from highest_ep)
+short_entry1 = [{'ep': 100, 'is_short': True}]
+s10, m10 = entry_conditions(short_entry1, 80, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
+check("short ext_block: price far below highest_ep blocks", s10 is False and m10 == 0)
+short_entry2 = [{'ep': 100, 'is_short': True}]
+s11, m11 = entry_conditions(short_entry2, 90, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
+check("short ext_block: price near highest_ep allows", s11 is True and m11 > 0)
 
 
 # ── Summary ──
