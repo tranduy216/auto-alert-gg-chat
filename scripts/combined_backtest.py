@@ -78,16 +78,27 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
         avg_ep_long = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(sum(e['mp'] * e.get('rem', 1.0) for e in long_entries), 1e-10) if long_entries else None
         avg_ep_short = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in short_entries) / max(sum(e['mp'] * e.get('rem', 1.0) for e in short_entries), 1e-10) if short_entries else None
 
-        # ── Long: close check (trailing) ──
+        # ── Long: close check (trailing or MA crossover) ──
         if long_entries:
-            peak_hi = max(max(e.get('hi', cc) for e in long_entries), hi)
-            if cc <= peak_hi * trail_pct:
+            exit_mode = cfg.get('exit_mode', 'trailing')
+            if exit_mode == 'ma_cross':
+                ma_s = sma(closes, cfg.get('ma_short', 40))
+                ma_l = sma(closes, cfg.get('ma_long', 90))
+                mbuf = cfg.get('ma_buf', 0.03)
+                close_trigger = (idx >= cfg.get('ma_long', 90)
+                                 and ma_s[idx] is not None and ma_l[idx] is not None
+                                 and ma_s[idx] < ma_l[idx] * (1 - mbuf))
+            else:
+                peak_hi = max(max(e.get('hi', cc) for e in long_entries), hi)
+                close_trigger = cc <= peak_hi * trail_pct
+
+            if close_trigger:
                 for e in entries[:]:
                     if not e.get('is_short'):
                         raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                         eq += raw / 100 * ff
                         entries.remove(e)
-            else:
+            elif exit_mode != 'ma_cross':
                 for e in entries:
                     if not e.get('is_short'):
                         e['hi'] = peak_hi

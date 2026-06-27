@@ -45,8 +45,8 @@ MAX_CAP = 0.75          # max margin deployed (backtest only)
 PYRAMID_STRATEGIES = [
     ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.82,
                      'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]}),
-    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82,
-                     'close_pct': 0.18}),
+    ('XAU', False, {'ma': 20, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82,
+                     'exit_mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'ma_buf': 0.03}),
     ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
                      'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]}),
 ]
