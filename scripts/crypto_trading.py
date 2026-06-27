@@ -194,13 +194,6 @@ def main():
                         if days < 2:
                             log(f"  {name}: short entry cooldown {days}d/2d, skipped")
                             continue
-                elif not btc_bull:
-                    last_entry = get_state(name).get('last_entry_date', '')
-                    if last_entry:
-                        days = (datetime.datetime.now() - datetime.datetime.strptime(last_entry, '%Y-%m-%d')).days
-                        if days < 2:
-                            log(f"  {name}: bear cooldown {days}d/2d, skipped")
-                            continue
                 elif has_entered_today(name):
                     log(f"  {name}: already entered today, skipped")
                     continue
