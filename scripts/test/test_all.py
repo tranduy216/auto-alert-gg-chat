@@ -488,6 +488,16 @@ short_entry2 = [{'ep': 100, 'is_short': True}]
 s11, m11 = entry_conditions(short_entry2, 90, 6, vols_big, vavg, 100, 0.05, True, False, 25, 1.5, -999)
 check("short ext_block: price near highest_ep allows", s11 is True and m11 > 0)
 
+# Edge cases
+# idx < 2 → vol_cond fails
+s12, _ = entry_conditions([], 100, 0, [10, 100], 50, 100, 0.05, False, False, 25, 1.5, -999)
+check("vol_cond: idx<2 fails", s12 is False)
+# BTC gate blocks short
+s13, _ = entry_conditions([], 100, 6, vols_big, vavg, 100, 0.05, True, True, 25, 1.5, -999)
+check("BTC bull blocks short", s13 is False)
+# compute_results with days param
+r4 = compute_results([1.0, 1.05], {2025: 1.05}, 10000, days=365)
+check("compute_results with days param", abs(r4['cagr']) < 100)
 
 # ── Summary ──
 print(f"\n{'='*40}")
