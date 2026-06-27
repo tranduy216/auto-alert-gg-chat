@@ -49,7 +49,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     ff = fee_factor(lev_coin)
     double_cd = 0
     last_sl_bar = -999
-    long_tp_hit = 0; short_tp_hit = 0; pyr_tier_hit = 0
+    long_tp_hit = 0; short_tp_hit = 0
 
     for idx in range(200, n):
         cc = closes[idx]; hi = da[idx]['high']; bl = da[idx]['low']
