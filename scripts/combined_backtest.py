@@ -194,7 +194,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     should_enter = False
 
         if should_enter:
-            mp = eq * ENTRY_PCT * mult
+            mp = eq * ENTRY_PCT * mult * cfg.get('_entry_mult', 1.0)
             if is_short:
                 mp *= 2
             elif double_cd > 0:

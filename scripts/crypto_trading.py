@@ -57,7 +57,7 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None, coin_name=None):
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     if should and is_short:
         mult = 1.0
-    # isDoubleSize: ×2 if position ROI > 10% (determined before entry)
+    mult *= cfg.get('_entry_mult', 1.0)
     return should, mult, cc
     return should, mult, cc
 
