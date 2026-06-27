@@ -50,7 +50,7 @@ PYRAMID_STRATEGIES = [
     ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.79,
                      'close_pct': 0.20,
                      'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]}),
-    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.84,
+    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82,
                      'close_pct': 0.18}),
     ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
                      'tp': [(3, 0.34), (6, 0.33), (9, 0.33)]}),
