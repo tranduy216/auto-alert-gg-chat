@@ -177,7 +177,8 @@ def main():
 
             # Long: TP check
             if not is_short and tp:
-                for stage in range(len(tp)):
+                tp_hit = get_state(name).get('tp_hit', 0)
+                for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
                     if roi >= trg:
                         pos_qty = abs(float(pos.get('pos', 0)))
@@ -187,8 +188,11 @@ def main():
                             okx_place_order(inst_id=inst_id, td_mode='cross',
                                 side='sell', sz=str(close_ct), reduce_only=True)
                             log(f"  {name}: TP {trg}% → close {close_ct}ct")
+                            set_state(name, {'tp_hit': stage + 1})
                         except Exception as e:
                             log(f"  {name}: TP {trg}% FAILED: {e}")
+                    else:
+                        break
 
             # Short: trailing stop
             if is_short:
@@ -207,7 +211,8 @@ def main():
 
             # Short: TP check
             if is_short and tp:
-                for stage in range(len(tp)):
+                tp_hit = get_state(name).get('tp_hit', 0)
+                for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
                     if roi >= trg:
                         pos_qty = abs(float(pos.get('pos', 0)))
@@ -217,8 +222,11 @@ def main():
                             okx_place_order(inst_id=inst_id, td_mode='cross',
                                 side='buy', sz=str(close_ct), reduce_only=True)
                             log(f"  {name}: TP {trg}% → close {close_ct}ct")
+                            set_state(name, {'tp_hit': stage + 1})
                         except Exception as e:
                             log(f"  {name}: TP {trg}% FAILED: {e}")
+                    else:
+                        break
 
             # Update entries in state_manager
             clear_entries(name)
@@ -230,6 +238,7 @@ def main():
         for coin in SYMBOL_OKX:
             entries_map[coin] = get_entries(coin)
 
+    # ── Entry check ──
     signals = []
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
