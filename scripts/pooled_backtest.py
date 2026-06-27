@@ -1,6 +1,6 @@
 """
-Pooled Backtest — shared $10k equity, first-come-first-served signals.
-All coins share one capital pool. Logic synced with combined_backtest.py.
+Pooled Backtest — shared $10k equity, FCFS signals.
+Fully synced with combined_backtest.py.
 """
 import sys, datetime
 from pathlib import Path
@@ -64,6 +64,12 @@ def run_pooled(data, strategies):
     last_ep_map = {label: 0 for label, _, _, _ in strategies}
     last_sl_map = {label: -999 for label, _, _, _ in strategies}
     time_to_idx = {l: {t: i for i, t in enumerate(cd['times'])} for l, cd in coin_data.items()}
+    # Per-coin states
+    double_cd_map = {label: 0 for label in coin_data}
+    next_pyr_roi_map = {label: 8 for label in coin_data}
+    pyr_bar_map = {label: -999 for label in coin_data}
+    long_tp_hit_map = {label: 0 for label in coin_data}
+    short_tp_hit_map = {label: 0 for label in coin_data}
 
     eq = 1.0; curve = []; yearly_eq = {}; ts_curve = []
 
@@ -97,52 +103,110 @@ def run_pooled(data, strategies):
                     eq += raw * e.get('rem', 1.0) / 100 * ff
                     entries.remove(e)
 
-            # Short: SL check
-            if is_short:
-                for e in entries[:]:
-                    roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin
-                    if roi <= -(SHORT_CLOSE_PCT * 100 * lev_coin):
-                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw / 100 * ff
-                        entries.remove(e)
-                        last_sl_map[label] = idx
-
-            # Short + Long: TP ladder
-            for e in entries[:]:
-                roi = (e['ep'] - cc) / e['ep'] * 100 * lev_coin if is_short else (cc - e['ep']) / e['ep'] * 100 * lev_coin
-                tp_stage = e.get('tp', 0)
-                if tp_stage < len(tp_sched):
-                    trg, cf = tp_sched[tp_stage]
-                    if roi >= trg:
-                        raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin if is_short else (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
-                        eq += raw * cf / 100 * ff
-                        e['rem'] = e.get('rem', 1.0) - cf
-                        e['tp'] = tp_stage + 1
-                        if e.get('rem', 1.0) <= 0.001:
-                            entries.remove(e)
-
-            # Long: trailing stop
+            # Long: close check (trailing or MA crossover)
             long_entries = [e for e in entries if not e.get('is_short')]
             if long_entries:
-                peak_hi = max(e.get('hi', cc) for e in long_entries)
-                peak_hi = max(peak_hi, hi)
-                if cc <= peak_hi * trail_pct:
+                exit_mode = cfg.get('exit_mode', 'trailing')
+                if exit_mode == 'ma_cross':
+                    ma_s = sma(cd['closes'], cfg.get('ma_short', 40))
+                    ma_l_vals = sma(cd['closes'], cfg.get('ma_long', 90))
+                    mbuf = cfg.get('ma_buf', 0.03)
+                    close_trigger = (idx >= cfg.get('ma_long', 90)
+                                     and ma_s[idx] is not None and ma_l_vals[idx] is not None
+                                     and ma_s[idx] < ma_l_vals[idx] * (1 - mbuf))
+                else:
+                    peak_hi = max(max(e.get('hi', cc) for e in long_entries), hi)
+                    close_trigger = cc <= peak_hi * trail_pct
+
+                if close_trigger:
                     for e in entries[:]:
                         if not e.get('is_short'):
                             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                             eq += raw / 100 * ff
                             entries.remove(e)
-                else:
+                elif exit_mode != 'ma_cross':
                     for e in entries:
                         if not e.get('is_short'):
                             e['hi'] = peak_hi
+
+            # Short: trailing close
+            short_entries = [e for e in entries if e.get('is_short')]
+            if short_entries:
+                trough_lo = min(min(e.get('lo', cc) for e in short_entries), bl)
+                if cc >= trough_lo * (1 + SHORT_CLOSE_PCT):
+                    for e in entries[:]:
+                        if e.get('is_short'):
+                            raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
+                            eq += raw / 100 * ff
+                            entries.remove(e)
+                    last_sl_map[label] = idx
+                else:
+                    for e in entries:
+                        if e.get('is_short'):
+                            e['lo'] = trough_lo
+
+            # TP check (by avg EP)
+            long_tp_entries = [e for e in entries if not e.get('is_short')] if 'tp' in cfg else []
+            short_tp_entries = [e for e in entries if e.get('is_short')] if tp_sched else []
+            
+            if long_tp_entries and long_tp_hit_map[label] < len(tp_sched):
+                total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_tp_entries)
+                avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_tp_entries) / max(total_mp, 1e-10)
+                roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
+                hit = 0
+                for stage in range(long_tp_hit_map[label], len(tp_sched)):
+                    trg, cf = tp_sched[stage]
+                    if roi >= trg:
+                        hit = stage + 1
+                    else:
+                        break
+                if hit > long_tp_hit_map[label]:
+                    for stage in range(long_tp_hit_map[label], hit):
+                        trg, cf = tp_sched[stage]
+                        close_amt = total_mp * cf
+                        for e in entries[:]:
+                            if not e.get('is_short') and close_amt > 0:
+                                rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
+                                raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
+                                eq += raw / 100 * ff
+                                e['rem'] = e.get('rem', 1.0) - rem_frac
+                                close_amt -= rem_frac * e['mp']
+                                if e.get('rem', 1.0) <= 0.001:
+                                    entries.remove(e)
+                        long_tp_hit_map[label] = hit
+
+            if short_tp_entries:
+                total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in short_tp_entries)
+                avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in short_tp_entries) / max(total_mp, 1e-10)
+                roi = (avg_ep - cc) / avg_ep * 100 * lev_coin
+                hit = 0
+                for stage in range(short_tp_hit_map[label], len(tp_sched)):
+                    trg, cf = tp_sched[stage]
+                    if roi >= trg:
+                        hit = stage + 1
+                    else:
+                        break
+                if hit > short_tp_hit_map[label]:
+                    for stage in range(short_tp_hit_map[label], hit):
+                        trg, cf = tp_sched[stage]
+                        close_amt = total_mp * cf
+                        for e in entries[:]:
+                            if e.get('is_short') and close_amt > 0:
+                                rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
+                                raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
+                                eq += raw / 100 * ff
+                                e['rem'] = e.get('rem', 1.0) - rem_frac
+                                close_amt -= rem_frac * e['mp']
+                                if e.get('rem', 1.0) <= 0.001:
+                                    entries.remove(e)
+                        short_tp_hit_map[label] = hit
 
         # ── Entries (collect signals, split capital equally) ──
         fired_signals = []
         for label, cd in coin_data.items():
             idx = time_to_idx[label].get(ts)
             if idx is None or idx < 200: continue
-            cc = cd['closes'][idx]; hi = cd['highs'][idx]; bl = cd['lows'][idx]
+            cc = cd['closes'][idx]
             is_short = cd['is_short']; cfg = cd['cfg']
             lev_coin = cfg.get('lev', 1.5)
             ma_buf = cfg.get('buf', 0.03)
@@ -165,13 +229,15 @@ def run_pooled(data, strategies):
             if should_enter:
                 if is_short:
                     last_action = max(lei_map[label], last_sl_map[label])
-                    if idx - last_action < 1:
+                    if idx - last_action < SHORT_COOLDOWN_ENTRY:
                         should_enter = False
                     else:
                         mult = 1.0
                         short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
                         if short_mp + eq * ENTRY_PCT * mult > SHORT_MAX_MARGIN:
                             should_enter = False
+                elif not is_short:
+                    mult = winner_mult(entries, cc, False, lev_coin)
 
             if should_enter:
                 fired_signals.append((label, is_short, mult, cc, cfg))
@@ -185,41 +251,61 @@ def run_pooled(data, strategies):
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                 mp = eq * ENTRY_PCT * mult / n * cfg.get('_entry_mult', 1.0)
                 if is_short:
-                    mp *= 2 * cfg.get('_entry_mult', 1.0)
-                if is_short:
+                    mp *= 2
+                elif not is_short and double_cd_map[label] > 0:
                     mp *= 2
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}
                     entries_map[label].append(e)
+                    if double_cd_map[label] > 0:
+                        double_cd_map[label] -= 1
                     last_ep_map[label] = cc
                     lei_map[label] = idx
 
-        # ── Pyramid (long only) ──
+        # ── isDoubleSize: check ROI before pyramid ──
         for label, cd in coin_data.items():
             if cd['is_short']: continue
+            entries = entries_map[label]
+            long_entries = [e for e in entries if not e.get('is_short')]
+            if not long_entries: continue
+            total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
+            avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(total_mp, 1e-10)
             idx = time_to_idx[label].get(ts)
             if idx is None or idx < 200: continue
             cc = cd['closes'][idx]
-            cfg = cd['cfg']
-            lev_coin = cfg.get('lev', 1.5)
-            pyr_roi = cfg.get('pyr', 5)
+            lev_coin = cd['cfg'].get('lev', 1.5)
+            pos_roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
+            if pos_roi > 10 and double_cd_map[label] == 0:
+                double_cd_map[label] = 3
+
+        # ── Pyramid: ROI-based, 1/day ──
+        for label, cd in coin_data.items():
+            if cd['is_short'] or not cd['cfg'].get('_pyramid', False): continue
             entries = entries_map[label]
-
-            if not entries or last_ep_map[label] <= 0: continue
-            if idx - lei_map[label] < 0: continue
-
-            roi = (cc - last_ep_map[label]) / last_ep_map[label] * 100 * lev_coin
-            if roi >= pyr_roi:
+            long_entries = [e for e in entries if not e.get('is_short')]
+            if not long_entries:
+                next_pyr_roi_map[label] = 8
+                continue
+            idx = time_to_idx[label].get(ts)
+            if idx is None or idx < 200: continue
+            if idx - pyr_bar_map[label] < 1: continue
+            cc = cd['closes'][idx]
+            total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
+            avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(total_mp, 1e-10)
+            lev_coin = cd['cfg'].get('lev', 1.5)
+            roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
+            if roi >= next_pyr_roi_map[label]:
+                mp = eq * ENTRY_PCT * cd['cfg'].get('_entry_mult', 1.0)
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                pyr_mult = winner_mult(entries, cc, False, lev_coin)
-                mp = eq * ENTRY_PCT * pyr_mult
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
                     entries.append(e)
+                    next_pyr_roi_map[label] += 7
+                    pyr_bar_map[label] = idx
                     last_ep_map[label] = cc
                     lei_map[label] = idx
 
@@ -261,7 +347,7 @@ def main():
                   for coin, is_short, cfg in PYRAMID_STRATEGIES]
 
     r = run_pooled(data, strategies)
-    print("POOLED BACKTEST — Shared $10k, first-come-first-served signals")
+    print("POOLED BACKTEST — Shared $10k, FCFS signals (fully synced)")
     print("=" * 70)
     print(f"{'Metric':<20} {'Value':>15}")
     print("-" * 70)
