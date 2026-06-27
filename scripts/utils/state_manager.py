@@ -91,7 +91,8 @@ def add_entry(coin: str, ep: float, is_short: bool, hi: float = None, lo: float 
     entries = get_entries(coin)
     hi = hi if hi is not None else ep
     lo = lo if lo is not None else ep
-    entries.append({'ep': ep, 'is_short': is_short, 'hi': hi, 'lo': lo})
+    now = datetime.datetime.now().isoformat()
+    entries.append({'ep': ep, 'is_short': is_short, 'hi': hi, 'lo': lo, 'time': now})
     set_state(coin, {'entries': entries})
 
 

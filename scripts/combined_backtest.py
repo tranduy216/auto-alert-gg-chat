@@ -15,25 +15,26 @@ from backtest_shared import (
     SHORT_TP, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT,
     SHORT_COOLDOWN_ENTRY,
     load_data, fetch_paxg, total_asset_value, compute_results,
-    entry_conditions, winner_mult,
+    entry_conditions, winner_mult, avg_entry,
 )
 
 
 def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     if not da or len(da) < 60: return coin, None
     if cfg is None: cfg = {}
-    lev_coin = cfg.get('lev', 1.8)
-    ma_period = cfg.get('ma', MA_PERIOD)
-    ma_buf = cfg.get('buf', MA_BUF)
-    tp_sched = cfg.get('tp', SHORT_TP if is_short else LONG_TP)
-    trail_pct = cfg.get('trail', TRAIL_PCT)
-    ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
-    ma_slope = cfg.get('ma_slope', False)
-    lower_high = cfg.get('lower_high', False)
-    asym_buffer = cfg.get('asym_buffer', False)
-    vol_bars = cfg.get('vol_bars', 2)
-    green_min_count = cfg.get('green_min_count', 0)
-    green_window = cfg.get('green_window', 0)
+    e_cfg = cfg.get('entry', {}); exit_cfg = cfg.get('exit', {})
+    lev_coin = e_cfg.get('lev', 1.8)
+    ma_period = e_cfg.get('ma', MA_PERIOD)
+    ma_buf = e_cfg.get('buffer', MA_BUF)
+    tp_sched = exit_cfg.get('tp', SHORT_TP if is_short else LONG_TP)
+    trail_pct = exit_cfg.get('trail', TRAIL_PCT)
+    ext_block = e_cfg.get('ext_block', EXT_BLOCK_PCT)
+    ma_slope = e_cfg.get('ma_slope', False)
+    lower_high = e_cfg.get('lower_high', False)
+    asym_buffer = e_cfg.get('asym_buffer', False)
+    vol_bars = e_cfg.get('vol_bars', 2)
+    green_min_count = e_cfg.get('green_min_count', 0)
+    green_window = e_cfg.get('green_window', 0)
     max_margin = SHORT_MAX_MARGIN if is_short else LONG_MAX_MARGIN
 
     closes = [c['close'] for c in da]; n = len(closes)
@@ -80,22 +81,22 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
         # ── Compute avg EP per side (long/short) ──
         long_entries = [e for e in active_entries if not e.get('is_short')]
         short_entries = [e for e in active_entries if e.get('is_short')]
-        avg_ep_long = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(sum(e['mp'] * e.get('rem', 1.0) for e in long_entries), 1e-10) if long_entries else None
-        avg_ep_short = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in short_entries) / max(sum(e['mp'] * e.get('rem', 1.0) for e in short_entries), 1e-10) if short_entries else None
+        avg_ep_long, _ = avg_entry(long_entries) if long_entries else (None, 0)
+        avg_ep_short, _ = avg_entry(short_entries) if short_entries else (None, 0)
 
         # ── Long: close check (trailing or MA crossover) ──
         if long_entries:
-            exit_mode = cfg.get('exit_mode', 'trailing')
+            exit_mode = exit_cfg.get('mode', 'trailing')
             if exit_mode == 'ma_cross':
-                ma_s = sma(closes, cfg.get('ma_short', 40))
-                ma_l = sma(closes, cfg.get('ma_long', 90))
-                mbuf = cfg.get('ma_buf', 0.03)
-                close_trigger = (idx >= cfg.get('ma_long', 90)
+                ma_s = sma(closes, exit_cfg.get('ma_short', 40))
+                ma_l = sma(closes, exit_cfg.get('ma_long', 90))
+                mbuf = exit_cfg.get('buffer', 0.03)
+                close_trigger = (idx >= exit_cfg.get('ma_long', 90)
                                  and ma_s[idx] is not None and ma_l[idx] is not None
                                  and ma_s[idx] < ma_l[idx] * (1 - mbuf))
             else:
                 peak_hi = max(max(e.get('hi', cc) for e in long_entries), hi)
-                close_trigger = cc <= peak_hi * trail_pct
+                close_trigger = bl <= peak_hi * trail_pct
 
             if close_trigger:
                 for e in entries[:]:
@@ -103,6 +104,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                         eq += raw / 100 * ff
                         entries.remove(e)
+                if not [e for e in entries if not e.get('is_short')]:
+                    long_tp_hit = 0
             elif exit_mode != 'ma_cross':
                 for e in entries:
                     if not e.get('is_short'):
@@ -121,7 +124,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             if hit > long_tp_hit:
                 for stage in range(long_tp_hit, hit):
                     trg, cf = tp_sched[stage]
-                    total_long_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
+                    _, total_long_mp = avg_entry(long_entries)
                     close_amt = total_long_mp * cf
                     for e in entries[:]:
                         if not e.get('is_short') and close_amt > 0:
@@ -133,17 +136,21 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                             if e.get('rem', 1.0) <= 0.001:
                                 entries.remove(e)
                     long_tp_hit = hit
+                if not [e for e in entries if not e.get('is_short')]:
+                    long_tp_hit = 0
 
         # ── Short: close check (trailing) ──
         if short_entries:
             trough_lo = min(min(e.get('lo', cc) for e in short_entries), bl)
-            if cc >= trough_lo * (1 + SHORT_CLOSE_PCT):
+            if hi >= trough_lo * (1 + SHORT_CLOSE_PCT):
                 for e in entries[:]:
                     if e.get('is_short'):
                         raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                         eq += raw / 100 * ff
                         entries.remove(e)
                 last_sl_bar = idx
+                if not [e for e in entries if e.get('is_short')]:
+                    short_tp_hit = 0
             else:
                 for e in entries:
                     if e.get('is_short'):
@@ -162,7 +169,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             if hit > short_tp_hit:
                 for stage in range(short_tp_hit, hit):
                     trg, cf = tp_sched[stage]
-                    total_short_mp = sum(e['mp'] * e.get('rem', 1.0) for e in short_entries)
+                    _, total_short_mp = avg_entry(short_entries)
                     close_amt = total_short_mp * cf
                     for e in entries[:]:
                         if e.get('is_short') and close_amt > 0:
@@ -174,6 +181,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                             if e.get('rem', 1.0) <= 0.001:
                                 entries.remove(e)
                     short_tp_hit = hit
+                if not [e for e in entries if e.get('is_short')]:
+                    short_tp_hit = 0
 
         # ── Entry ──
         dep = sum(e.get('mp', 0) for e in entries)
@@ -193,7 +202,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     should_enter = False
 
         if should_enter:
-            mp = eq * ENTRY_PCT * mult * cfg.get('_entry_mult', 1.0)
+            mp = eq * ENTRY_PCT * mult * cfg.get('pyramid', {}).get('entry_mult', 1.0)
             if is_short:
                 mp *= 2
 
@@ -204,10 +213,10 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 last_ep = cc; lei = idx
 
         # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry, next += 7%% ──
-        if cfg.get('_pyramid', False) and not is_short and long_entries and avg_ep_long and idx - pyr_bar >= 1:
+        if cfg.get('pyramid', {}).get('enabled', False) and not is_short and long_entries and avg_ep_long and idx - pyr_bar >= 1:
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
             if roi >= next_pyr_roi:
-                mt = eq * ENTRY_PCT * cfg.get('_entry_mult', 1.0)
+                mt = eq * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 if dep + mt <= max_margin * total_val:
                     e = {'ep': cc, 'mp': mt, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
                     entries.append(e)
@@ -287,7 +296,7 @@ def main():
             row = f"{label:<12}"
             for y in years:
                 row += f"{r['yearly'].get(y, 0):>+7.1f}%"
-            row += f"{r['cagr']:>+7.1f}%  {r['dd']:>7.1f}%  {cfg.get('lev', 1.5):>4.1f}x"
+            row += f"{r['cagr']:>+7.1f}%  {r['dd']:>7.1f}%  {cfg.get('entry', {}).get('lev', 1.5):>4.1f}x"
             print(row)
     print("-" * 70)
     row = f"{'Portfolio':<12}"

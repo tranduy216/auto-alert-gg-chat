@@ -6,14 +6,18 @@ import json, os, sys, datetime, requests, time
 from pathlib import Path
 
 def sma(values, period):
-    """Simple Moving Average."""
+    """Simple Moving Average — O(N) with rolling sum."""
     period = int(period)
     result = []
+    rolling_sum = 0.0
     for i in range(len(values)):
+        rolling_sum += values[i]
         if i < period - 1:
             result.append(None)
         else:
-            result.append(sum(values[i - period + 1 : i + 1]) / period)
+            if i >= period:
+                rolling_sum -= values[i - period]
+            result.append(rolling_sum / period)
     return result
 
 # ── Constants ──
@@ -40,18 +44,31 @@ EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
 FEE_RATE = 0.0005       # 0.05% per side
 MAX_CAP = 0.75          # max margin deployed (backtest only)
 
+# ── Winner Multiplier Table ──
+WINNER_MULT_TABLE = [
+    (15, 2.5),
+    (10, 2.0),
+    (5, 1.5),
+    (0, 1.2),
+    (-5, 0.75),
+]
+
 # ── Pyramid Strategies (single source of truth for all scripts) ──
-# Format: (coin, is_short, cfg)
+# Format: (coin, is_short, cfg)  — cfg = {entry: {...}, exit: {...}, pyramid: {...}}
 PYRAMID_STRATEGIES = [
-    ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.82,
-                     'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)],
-                     'vol_bars': 3}),
-    ('XAU', False, {'ma': 20, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82,
-                     'exit_mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'ma_buf': 0.03,
-                     '_entry_mult': 1.5, '_pyramid': True,
-                     'vol_bars': 3}),
-    ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
-                     'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]}),
+    ('TRX', False, {
+        'entry': {'ma': 15, 'buffer': 0.05, 'vol_bars': 3, 'lev': 2},
+        'exit':  {'trail': 0.82, 'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]},
+    }),
+    ('XAU', False, {
+        'entry': {'ma': 20, 'buffer': 0.05, 'vol_bars': 3, 'lev': 2, 'lower_high': True},
+        'exit':  {'mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'buffer': 0.03},
+        'pyramid': {'enabled': True, 'entry_mult': 1.5},
+    }),
+    ('BTC', True, {
+        'entry': {'ma': 5, 'buffer': 0.07, 'lev': 2},
+        'exit':  {'trail': 0.80, 'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]},
+    }),
 ]
 
 
@@ -349,12 +366,27 @@ def winner_mult(entries, cc, is_short, lev):
             roi = (cc - e['ep']) / e['ep'] * 100 * lev
         rois.append(roi)
     avg = sum(rois) / len(rois)
-    if avg > 15:     return 2.5
-    elif avg > 10:   return 2.0
-    elif avg > 5:    return 1.5
-    elif avg > 0:    return 1.2
-    elif avg > -5:   return 0.75
-    else:            return 0.5
+    for threshold, mult in WINNER_MULT_TABLE:
+        if avg > threshold:
+            return mult
+    return 0.5
+
+
+def avg_entry(entries):
+    """Return (avg_price, total_weight) weighted by mp * rem (backtest) or 1 (live)."""
+    if not entries:
+        return None, 0
+    total_weight = 0
+    weighted_sum = 0
+    for e in entries:
+        if 'mp' in e:
+            w = e['mp'] * e.get('rem', 1.0)
+        else:
+            w = 1
+        total_weight += w
+        weighted_sum += e['ep'] * w
+    avg = weighted_sum / total_weight if total_weight > 0 else None
+    return avg, total_weight
 
 
 # ── Asset Value ──

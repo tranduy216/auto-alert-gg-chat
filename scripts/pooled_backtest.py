@@ -11,7 +11,7 @@ from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
     SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, SHORT_COOLDOWN_ENTRY, winner_mult,
-    load_data, fetch_paxg, entry_conditions, compute_results,
+    load_data, fetch_paxg, entry_conditions, compute_results, avg_entry,
 )
 
 
@@ -43,7 +43,7 @@ def run_pooled(data, strategies):
         highs = [c['high'] for c in da]
         lows = [c['low'] for c in da]
         times = [c['time'] for c in da]
-        ma_short = sma(closes, cfg.get('ma', 20))
+        ma_short = sma(closes, cfg.get('entry', {}).get('ma', 20))
         vol_ma20 = sma(vols, 20)
         coin_data[label] = {
             'closes': closes, 'vols': vols, 'opens': opens,
@@ -91,9 +91,10 @@ def run_pooled(data, strategies):
             if idx is None or idx < 200: continue
             cc = cd['closes'][idx]; hi = cd['highs'][idx]; bl = cd['lows'][idx]
             is_short = cd['is_short']; cfg = cd['cfg']
-            lev_coin = cfg.get('lev', 1.5)
-            tp_sched = cfg.get('tp', TP_SCHEDULE)
-            trail_pct = cfg.get('trail', TRAIL_PCT)
+            e_cfg = cfg.get('entry', {}); exit_cfg = cfg.get('exit', {})
+            lev_coin = e_cfg.get('lev', 1.5)
+            tp_sched = exit_cfg.get('tp', TP_SCHEDULE)
+            trail_pct = exit_cfg.get('trail', TRAIL_PCT)
             ff = fee_factor(lev_coin)
             entries = entries_map[label]
 
@@ -103,21 +104,23 @@ def run_pooled(data, strategies):
                     raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                     eq += raw * e.get('rem', 1.0) / 100 * ff
                     entries.remove(e)
+            if not [e for e in entries if e.get('is_short')]:
+                short_tp_hit_map[label] = 0
 
             # Long: close check (trailing or MA crossover)
             long_entries = [e for e in entries if not e.get('is_short')]
             if long_entries:
-                exit_mode = cfg.get('exit_mode', 'trailing')
+                exit_mode = exit_cfg.get('mode', 'trailing')
                 if exit_mode == 'ma_cross':
-                    ma_s = sma(cd['closes'], cfg.get('ma_short', 40))
-                    ma_l_vals = sma(cd['closes'], cfg.get('ma_long', 90))
-                    mbuf = cfg.get('ma_buf', 0.03)
-                    close_trigger = (idx >= cfg.get('ma_long', 90)
+                    ma_s = sma(cd['closes'], exit_cfg.get('ma_short', 40))
+                    ma_l_vals = sma(cd['closes'], exit_cfg.get('ma_long', 90))
+                    mbuf = exit_cfg.get('buffer', 0.03)
+                    close_trigger = (idx >= exit_cfg.get('ma_long', 90)
                                      and ma_s[idx] is not None and ma_l_vals[idx] is not None
                                      and ma_s[idx] < ma_l_vals[idx] * (1 - mbuf))
                 else:
                     peak_hi = max(max(e.get('hi', cc) for e in long_entries), hi)
-                    close_trigger = cc <= peak_hi * trail_pct
+                    close_trigger = bl <= peak_hi * trail_pct
 
                 if close_trigger:
                     for e in entries[:]:
@@ -125,6 +128,8 @@ def run_pooled(data, strategies):
                             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                             eq += raw / 100 * ff
                             entries.remove(e)
+                    if not [e for e in entries if not e.get('is_short')]:
+                        long_tp_hit_map[label] = 0
                 elif exit_mode != 'ma_cross':
                     for e in entries:
                         if not e.get('is_short'):
@@ -134,13 +139,15 @@ def run_pooled(data, strategies):
             short_entries = [e for e in entries if e.get('is_short')]
             if short_entries:
                 trough_lo = min(min(e.get('lo', cc) for e in short_entries), bl)
-                if cc >= trough_lo * (1 + SHORT_CLOSE_PCT):
+                if hi >= trough_lo * (1 + SHORT_CLOSE_PCT):
                     for e in entries[:]:
                         if e.get('is_short'):
                             raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
                             eq += raw / 100 * ff
                             entries.remove(e)
                     last_sl_map[label] = idx
+                    if not [e for e in entries if e.get('is_short')]:
+                        short_tp_hit_map[label] = 0
                 else:
                     for e in entries:
                         if e.get('is_short'):
@@ -151,8 +158,7 @@ def run_pooled(data, strategies):
             short_tp_entries = [e for e in entries if e.get('is_short')] if tp_sched else []
             
             if long_tp_entries and long_tp_hit_map[label] < len(tp_sched):
-                total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_tp_entries)
-                avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_tp_entries) / max(total_mp, 1e-10)
+                avg_ep, total_mp = avg_entry(long_tp_entries)
                 roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
                 hit = 0
                 for stage in range(long_tp_hit_map[label], len(tp_sched)):
@@ -175,10 +181,11 @@ def run_pooled(data, strategies):
                                 if e.get('rem', 1.0) <= 0.001:
                                     entries.remove(e)
                         long_tp_hit_map[label] = hit
+                if not [e for e in entries if not e.get('is_short')]:
+                    long_tp_hit_map[label] = 0
 
             if short_tp_entries:
-                total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in short_tp_entries)
-                avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in short_tp_entries) / max(total_mp, 1e-10)
+                avg_ep, total_mp = avg_entry(short_tp_entries)
                 roi = (avg_ep - cc) / avg_ep * 100 * lev_coin
                 hit = 0
                 for stage in range(short_tp_hit_map[label], len(tp_sched)):
@@ -201,6 +208,8 @@ def run_pooled(data, strategies):
                                 if e.get('rem', 1.0) <= 0.001:
                                     entries.remove(e)
                         short_tp_hit_map[label] = hit
+                if not [e for e in entries if e.get('is_short')]:
+                    short_tp_hit_map[label] = 0
 
         # ── Entries (collect signals, split capital equally) ──
         fired_signals = []
@@ -209,15 +218,16 @@ def run_pooled(data, strategies):
             if idx is None or idx < 200: continue
             cc = cd['closes'][idx]
             is_short = cd['is_short']; cfg = cd['cfg']
-            lev_coin = cfg.get('lev', 1.5)
-            ma_buf = cfg.get('buf', 0.03)
-            ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
-            ma_slope = cfg.get('ma_slope', False)
-            lower_high = cfg.get('lower_high', False)
-            asym_buffer = cfg.get('asym_buffer', False)
-            vol_bars = cfg.get('vol_bars', 2)
-            green_min_count = cfg.get('green_min_count', 0)
-            green_window = cfg.get('green_window', 0)
+            e_cfg = cfg.get('entry', {})
+            lev_coin = e_cfg.get('lev', 1.5)
+            ma_buf = e_cfg.get('buffer', 0.03)
+            ext_block = e_cfg.get('ext_block', EXT_BLOCK_PCT)
+            ma_slope = e_cfg.get('ma_slope', False)
+            lower_high = e_cfg.get('lower_high', False)
+            asym_buffer = e_cfg.get('asym_buffer', False)
+            vol_bars = e_cfg.get('vol_bars', 2)
+            green_min_count = e_cfg.get('green_min_count', 0)
+            green_window = e_cfg.get('green_window', 0)
             entries = entries_map[label]
 
             m_ma = cd['ma_short'][idx]; vavg = cd['vol_ma20'][idx]
@@ -253,9 +263,9 @@ def run_pooled(data, strategies):
             for label, is_short, mult, cc, cfg in fired_signals:
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
-                lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
+                lev_map = {l: coin_data[l]['cfg'].get('entry', {}).get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                mp = eq * ENTRY_PCT * mult / n * cfg.get('_entry_mult', 1.0)
+                mp = eq * ENTRY_PCT * mult / n * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 if is_short:
                     mp *= 2
                 if total_dep + mp <= MAX_CAP * total_val:
@@ -267,7 +277,7 @@ def run_pooled(data, strategies):
 
         # ── Pyramid: ROI-based, 1/day ──
         for label, cd in coin_data.items():
-            if cd['is_short'] or not cd['cfg'].get('_pyramid', False): continue
+            if cd['is_short'] or not cd['cfg'].get('pyramid', {}).get('enabled', False): continue
             entries = entries_map[label]
             long_entries = [e for e in entries if not e.get('is_short')]
             if not long_entries:
@@ -277,12 +287,11 @@ def run_pooled(data, strategies):
             if idx is None or idx < 200: continue
             if idx - pyr_bar_map[label] < 1: continue
             cc = cd['closes'][idx]
-            total_mp = sum(e['mp'] * e.get('rem', 1.0) for e in long_entries)
-            avg_ep = sum(e['ep'] * e['mp'] * e.get('rem', 1.0) for e in long_entries) / max(total_mp, 1e-10)
-            lev_coin = cd['cfg'].get('lev', 1.5)
+            avg_ep, _ = avg_entry(long_entries)
+            lev_coin = cd['cfg'].get('entry', {}).get('lev', 1.5)
             roi = (cc - avg_ep) / avg_ep * 100 * lev_coin
             if roi >= next_pyr_roi_map[label]:
-                mp = eq * ENTRY_PCT * cd['cfg'].get('_entry_mult', 1.0)
+                mp = eq * ENTRY_PCT * cd['cfg'].get('pyramid', {}).get('entry_mult', 1.0)
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}

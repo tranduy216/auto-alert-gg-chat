@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma, fetch_candles, ENTRY_PCT,
     EXT_BLOCK_PCT, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
-    entry_conditions,
+    entry_conditions, avg_entry,
 )
 
 _raw = os.environ.get('TRADING_COIN_LIST', '')
@@ -33,15 +33,16 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     """Check entry signal at latest bar using shared entry_conditions."""
     if not coin_da or len(coin_da) < 200: return None
     if entries is None: entries = []
-    lev_coin = cfg.get('lev', 1.8); ma_buf = cfg.get('buf', 0.03)
-    ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
-    ma_period = cfg.get('ma', 20)
-    ma_slope = cfg.get('ma_slope', False)
-    lower_high = cfg.get('lower_high', False)
-    asym_buffer = cfg.get('asym_buffer', False)
-    vol_bars = cfg.get('vol_bars', 2)
-    green_min_count = cfg.get('green_min_count', 0)
-    green_window = cfg.get('green_window', 0)
+    e_cfg = cfg.get('entry', {})
+    lev_coin = e_cfg.get('lev', 1.8); ma_buf = e_cfg.get('buffer', 0.03)
+    ext_block = e_cfg.get('ext_block', EXT_BLOCK_PCT)
+    ma_period = e_cfg.get('ma', 20)
+    ma_slope = e_cfg.get('ma_slope', False)
+    lower_high = e_cfg.get('lower_high', False)
+    asym_buffer = e_cfg.get('asym_buffer', False)
+    vol_bars = e_cfg.get('vol_bars', 2)
+    green_min_count = e_cfg.get('green_min_count', 0)
+    green_window = e_cfg.get('green_window', 0)
     closes = [c['close'] for c in coin_da]; vols = [c['volume'] for c in coin_da]
     opens = [c.get('open', c['close']) for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
@@ -66,12 +67,15 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
         return None
     if is_short:
         mult = 1.0
-    mult *= cfg.get('_entry_mult', 1.0)
+    mult *= cfg.get('pyramid', {}).get('entry_mult', 1.0)
     return should, mult, cc
 
 
+def _reset_position_state(name):
+    set_state(name, {'tp_hit': 0, 'tp_date': '', 'next_pyr_roi': 8, 'pyr_date': ''})
+
+
 def sync_entries_with_positions(okx_positions, log):
-    """Sync Firestore entries with actual OKX positions."""
     pos_map = {COIN_FROM_INST.get(p['instId']): p for p in okx_positions
                if COIN_FROM_INST.get(p['instId']) and float(p.get('pos', 0)) != 0}
     entries_map = {}
@@ -82,19 +86,11 @@ def sync_entries_with_positions(okx_positions, log):
             entries_map[coin] = []
             continue
         if has_position and not stored:
-            p = pos_map[coin]
-            avg_px = float(p.get('avgPx') or 0)
-            is_short = float(p.get('pos', 0)) < 0
-            if avg_px > 0:
-                entries = [{'ep': avg_px, 'is_short': is_short, 'hi': avg_px, 'lo': avg_px}]
-                entries_map[coin] = entries
-                for e in entries:
-                    add_entry(coin, e['ep'], e['is_short'])
-                log(f"  {coin}: reconstructed entry from OKX @ {avg_px}")
-            else:
-                entries_map[coin] = []
+            log(f"  {coin}: WARNING — OKX has position but Firestore entries missing, skip")
+            entries_map[coin] = []
         elif stored and not has_position:
             clear_entries(coin)
+            _reset_position_state(coin)
             if coin == 'BTC':
                 today = datetime.datetime.now().strftime('%Y-%m-%d')
                 set_state(coin, {'last_sl_date': today})
@@ -162,8 +158,9 @@ def main():
             da = data_map.get(name, [])
             if not da or not coin_entries: continue
             cc = da[-1]['close']; hi = da[-1]['high']; bl = da[-1]['low']
-            lev = cfg.get('lev', 2); trail = cfg.get('trail', 0.80)
-            tp = cfg.get('tp');             close_pct = cfg.get('close_pct', SHORT_CLOSE_PCT)
+            e_cfg = cfg.get('entry', {}); exit_cfg = cfg.get('exit', {})
+            lev = e_cfg.get('lev', 2); trail = exit_cfg.get('trail', 0.80)
+            tp = exit_cfg.get('tp');     close_pct = exit_cfg.get('close_pct', SHORT_CLOSE_PCT)
             inst_id = SYMBOL_OKX.get(name)
             pos = pos_map.get(inst_id, {})
 
@@ -177,20 +174,19 @@ def main():
                     e['hi'] = max(hi_prev, hi)
 
             # Compute avg weighted EP
-            total_mp = sum(e['mp'] for e in coin_entries if 'mp' in e) or len(coin_entries)
-            avg_ep = sum(e['ep'] * (e.get('mp', 1) if 'mp' in e else 1) for e in coin_entries) / total_mp
+            avg_ep, _ = avg_entry(coin_entries)
 
             roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
 
             # Long: close check (trailing or MA crossover)
             if not is_short:
-                exit_mode = cfg.get('exit_mode', 'trailing')
+                exit_mode = exit_cfg.get('mode', 'trailing')
                 if exit_mode == 'ma_cross':
-                    ma_s = sma([c['close'] for c in da], cfg.get('ma_short', 40))
-                    ma_l_vals = sma([c['close'] for c in da], cfg.get('ma_long', 90))
-                    mbuf = cfg.get('ma_buf', 0.03)
+                    ma_s = sma([c['close'] for c in da], exit_cfg.get('ma_short', 40))
+                    ma_l_vals = sma([c['close'] for c in da], exit_cfg.get('ma_long', 90))
+                    mbuf = exit_cfg.get('buffer', 0.03)
                     idx_close = len(da) - 1
-                    close_trig = (idx_close >= cfg.get('ma_long', 90)
+                    close_trig = (idx_close >= exit_cfg.get('ma_long', 90)
                                    and ma_s[idx_close] is not None
                                    and ma_l_vals[idx_close] is not None
                                    and ma_s[idx_close] < ma_l_vals[idx_close] * (1 - mbuf))
@@ -199,17 +195,19 @@ def main():
                         try:
                             okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
                             clear_entries(name)
+                            _reset_position_state(name)
                             log(f"  {name}: position closed")
                         except Exception as e:
                             log(f"  {name}: close FAILED: {e}")
                         continue
                 else:
                     peak = max(e.get('hi', cc) for e in coin_entries)
-                    if cc <= peak * trail:
-                        log(f"  {name}: trailing stop (cc={cc:.4f} <= peak={peak:.4f} * {trail})")
+                    if bl <= peak * trail:
+                        log(f"  {name}: trailing stop (lo={bl:.4f} <= peak={peak:.4f} * {trail})")
                         try:
                             okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
                             clear_entries(name)
+                            _reset_position_state(name)
                             log(f"  {name}: position closed")
                         except Exception as e:
                             log(f"  {name}: close FAILED: {e}")
@@ -239,11 +237,12 @@ def main():
             # Short: trailing stop
             if is_short:
                 trough = min(e.get('lo', cc) for e in coin_entries)
-                if cc >= trough * (1 + close_pct):
-                    log(f"  {name}: trailing stop (cc={cc:.4f} >= trough={trough:.4f} * {1+close_pct})")
+                if hi >= trough * (1 + close_pct):
+                    log(f"  {name}: trailing stop (hi={hi:.4f} >= trough={trough:.4f} * {1+close_pct})")
                     try:
                         okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
                         clear_entries(name)
+                        _reset_position_state(name)
                         today = datetime.datetime.now().strftime('%Y-%m-%d')
                         set_state(name, {'last_sl_date': today})
                         log(f"  {name}: position closed")
@@ -302,19 +301,18 @@ def main():
     if os.environ.get("OKX_API_KEY") and eq > 0:
         for name, is_short, cfg in PYRAMID_STRATEGIES:
             if name not in TRADING_COIN_LIST: continue
-            if is_short or not cfg.get('_pyramid', False): continue
+            if is_short or not cfg.get('pyramid', {}).get('enabled', False): continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
             if not da or not coin_entries: continue
             cc = da[-1]['close']
-            lev = cfg.get('lev', 2)
-            total_mp = sum(e['mp'] for e in coin_entries if 'mp' in e) or len(coin_entries)
-            avg_ep = sum(e['ep'] * (e.get('mp', 1) if 'mp' in e else 1) for e in coin_entries) / total_mp
+            lev = cfg['entry'].get('lev', 2)
+            avg_ep, _ = avg_entry(coin_entries)
             roi = (cc - avg_ep) / avg_ep * 100 * lev
             pyr_roi = get_state(name).get('next_pyr_roi', 8)
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
-                usd_val = eq * lev * ENTRY_PCT * cfg.get('_entry_mult', 1.0)
+                usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 inst_id = SYMBOL_OKX.get(name)
                 ct_val = float(next((i.get('ctVal', '0.01') for i in instruments if i['instId'] == inst_id), '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
@@ -338,7 +336,7 @@ def main():
         if sig:
             should, mult, price = sig
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, price, cfg.get('lev', 1.8), cfg.get('trail', 0.80), mult))
+            signals.append((name, dir, price, cfg['entry'].get('lev', 1.8), cfg.get('exit', {}).get('trail', 0.80), mult))
             log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x")
 
     if os.environ.get("OKX_API_KEY") and eq > 0:
