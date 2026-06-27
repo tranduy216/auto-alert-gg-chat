@@ -65,10 +65,10 @@ def main():
     pos = get_pos()
     if not pos:
         log("No position found after order"); return
-    avg_px = float(pos.get('avgPx', 0))
+    avg_px = float(pos.get('avgPx') or pos.get('avgPx') or 0)
     pos_qty = abs(float(pos['pos']))
-    margin = float(pos.get('margin', 0))
-    upl = float(pos.get('upl', 0))
+    margin = float(pos.get('margin') or 0)
+    upl = float(pos.get('upl') or 0)
     log(f"Position: {pos_qty}ct @ ${avg_px:.2f}  Margin=${margin:.2f}  UPL=${upl:.2f}")
 
     # 5. Close partial (50%)

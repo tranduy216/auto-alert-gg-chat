@@ -78,7 +78,7 @@ def sync_entries_with_positions(okx_positions, log):
             continue
         if has_position and not stored:
             p = pos_map[coin]
-            avg_px = float(p.get('avgPx', 0))
+            avg_px = float(p.get('avgPx') or 0)
             is_short = float(p.get('pos', 0)) < 0
             if avg_px > 0:
                 entries = [{'ep': avg_px, 'is_short': is_short, 'hi': avg_px, 'lo': avg_px}]
