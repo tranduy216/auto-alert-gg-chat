@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    BTC_SHORT_TP, EXT_BLOCK_PCT, SHORT_MARGIN_CAP, SHORT_SL_ROI, PYRAMID_STRATEGIES,
+    EXT_BLOCK_PCT, SHORT_MARGIN_CAP, PYRAMID_STRATEGIES,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
@@ -215,7 +215,7 @@ def main():
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
-                td_mode = 'isolated' if direction == 'SELL' else 'cross'
+                td_mode = 'cross'
                 okx_lev = round(lev)
 
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult:.1f}x, ctVal={ct_val})")
@@ -241,35 +241,6 @@ def main():
                             log(f"  Trailing stop set ({round((1-trail)*100)}%)")
                         except Exception as trail_err:
                             log(f"  Trailing stop FAILED (non-critical): {trail_err}")
-                    if direction == 'SELL':
-                        tp_sz_sum = 0
-                        for trg, frac in BTC_SHORT_TP:
-                            tp_price = round(price * (1 - trg / (100 * lev)), 1)
-                            tp_sz = max(1, int(sz * frac + 0.5))
-                            tp_sz_sum += tp_sz
-                            try:
-                                okx_place_algo(
-                                    inst_id=inst_id, td_mode=td_mode,
-                                    side='buy', sz=str(tp_sz),
-                                    ord_type='conditional',
-                                    tp_trigger_px=str(tp_price),
-                                    tp_trigger_px=str(tp_price),
-                                )
-                            except Exception as tp_err:
-                                log(f"  TP {trg}% failed: {tp_err}")
-                        log(f"  TP ladder set ({tp_sz_sum}/{sz}ct)")
-                        sl_price = round(price * (1 + SHORT_SL_ROI / (100 * lev)), 1)
-                        try:
-                            okx_place_algo(
-                                inst_id=inst_id, td_mode=td_mode,
-                                side='buy', sz=str(sz),
-                                ord_type='conditional',
-                                sl_trigger_px=str(sl_price),
-                                sl_trigger_px=str(sl_price),
-                            )
-                            log(f"  Stop loss set @ ${sl_price:,.1f} ({SHORT_SL_ROI}% ROI)")
-                        except Exception as sl_err:
-                            log(f"  SL failed: {sl_err}")
                     record_entry(name, price)
                     add_entry(name, price, direction == 'SELL')
                     if DISCORD_WEBHOOK:
