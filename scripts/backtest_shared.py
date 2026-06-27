@@ -451,6 +451,10 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
         lowest_ep = min(e['ep'] for e in entries)
         if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
             mult = 0
+    elif entries and is_short:
+        highest_ep = max(e['ep'] for e in entries)
+        if (highest_ep - cc) / highest_ep * 100 > 15:
+            mult = 0
 
     should = (can_enter and near_ma and vol_cond and idx - lei >= 0 and mult > 0)
     return should, mult
