@@ -27,7 +27,7 @@ SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-S
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
 
 
-def check_signals(coin_da, btc_da, cfg, is_short, entries=None, coin_name=None):
+def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     """Check entry signal at latest bar using shared entry_conditions."""
     if not coin_da or len(coin_da) < 200: return None
     if entries is None: entries = []
@@ -132,6 +132,14 @@ def main():
         except Exception as e:
             log(f"  Entries sync skipped: {e}")
 
+    if os.environ.get("OKX_API_KEY"):
+        try:
+            instruments = okx_get_instruments('SWAP')
+            inst_map = {inst['instId']: inst for inst in instruments}
+        except Exception as e:
+            log(f"  Instruments fetch failed: {e}")
+            instruments = []; inst_map = {}
+
     # ── Exit check (trailing/TP/SL for existing positions) ──
     if os.environ.get("OKX_API_KEY"):
         for name, is_short, cfg in PYRAMID_STRATEGIES:
@@ -159,18 +167,39 @@ def main():
 
             roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
 
-            # Long: trailing stop
+            # Long: close check (trailing or MA crossover)
             if not is_short:
-                peak = max(e.get('hi', cc) for e in coin_entries)
-                if cc <= peak * trail:
-                    log(f"  {name}: trailing stop (cc={cc:.4f} <= peak={peak:.4f} * {trail})")
-                    try:
-                        okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
-                        clear_entries(name)
-                        log(f"  {name}: position closed")
-                    except Exception as e:
-                        log(f"  {name}: close FAILED: {e}")
-                    continue
+                exit_mode = cfg.get('exit_mode', 'trailing')
+                if exit_mode == 'ma_cross':
+                    cc_long = da[-1]['close']
+                    ma_s = sma([c['close'] for c in da], cfg.get('ma_short', 40))
+                    ma_l_vals = sma([c['close'] for c in da], cfg.get('ma_long', 90))
+                    mbuf = cfg.get('ma_buf', 0.03)
+                    idx_close = len(da) - 1
+                    close_trig = (idx_close >= cfg.get('ma_long', 90)
+                                   and ma_s[idx_close] is not None
+                                   and ma_l_vals[idx_close] is not None
+                                   and ma_s[idx_close] < ma_l_vals[idx_close] * (1 - mbuf))
+                    if close_trig:
+                        log(f"  {name}: MA crossover close (MA40<MA90*{1-mbuf})")
+                        try:
+                            okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
+                            clear_entries(name)
+                            log(f"  {name}: position closed")
+                        except Exception as e:
+                            log(f"  {name}: close FAILED: {e}")
+                        continue
+                else:
+                    peak = max(e.get('hi', cc) for e in coin_entries)
+                    if cc <= peak * trail:
+                        log(f"  {name}: trailing stop (cc={cc:.4f} <= peak={peak:.4f} * {trail})")
+                        try:
+                            okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
+                            clear_entries(name)
+                            log(f"  {name}: position closed")
+                        except Exception as e:
+                            log(f"  {name}: close FAILED: {e}")
+                        continue
 
             # Long: TP check (1x per day)
             if not is_short and tp:
@@ -239,6 +268,34 @@ def main():
         for coin in SYMBOL_OKX:
             entries_map[coin] = get_entries(coin)
 
+    # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
+    if os.environ.get("OKX_API_KEY"):
+        for name, is_short, cfg in PYRAMID_STRATEGIES:
+            if is_short or not cfg.get('_pyramid', False): continue
+            coin_entries = entries_map.get(name, [])
+            da = data_map.get(name, [])
+            if not da or not coin_entries: continue
+            cc = da[-1]['close']
+            lev = cfg.get('lev', 2)
+            total_mp = sum(e['mp'] for e in coin_entries if 'mp' in e) or len(coin_entries)
+            avg_ep = sum(e['ep'] * (e.get('mp', 1) if 'mp' in e else 1) for e in coin_entries) / total_mp
+            roi = (cc - avg_ep) / avg_ep * 100 * lev
+            pyr_roi = get_state(name).get('next_pyr_roi', 8)
+            pyr_date = get_state(name).get('pyr_date', '')
+            if roi >= pyr_roi and pyr_date != today:
+                usd_val = eq * lev * ENTRY_PCT * cfg.get('_entry_mult', 1.0)
+                inst_id = SYMBOL_OKX.get(name)
+                ct_val = float(next((i.get('ctVal', '0.01') for i in instruments if i['instId'] == inst_id), '0.01'))
+                sz = max(1, int(usd_val / (cc * ct_val)))
+                try:
+                    r = okx_place_order(inst_id=inst_id, td_mode='cross',
+                        side='buy', sz=str(sz))
+                    log(f"  {name}: PYRAMID @ ${cc:.4f} ({roi:.1f}% ROI)")
+                    add_entry(name, cc, False)
+                    set_state(name, {'next_pyr_roi': pyr_roi + 7, 'pyr_date': today})
+                except Exception as e:
+                    log(f"  {name}: PYRAMID FAILED: {e}")
+
     # ── Entry check ──
     signals = []
     traded_count = 0
@@ -269,9 +326,6 @@ def main():
                 btc_ma200 = sma(btc_closes, 200)
                 if btc_ma200[-1]:
                     btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
-
-            instruments = okx_get_instruments('SWAP')
-            inst_map = {inst['instId']: inst for inst in instruments}
 
             for name, direction, price, lev, trail, mult in signals:
                 inst_id = SYMBOL_OKX.get(name)

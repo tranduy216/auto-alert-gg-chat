@@ -252,8 +252,6 @@ def run_pooled(data, strategies):
                 mp = eq * ENTRY_PCT * mult / n * cfg.get('_entry_mult', 1.0)
                 if is_short:
                     mp *= 2
-                elif not is_short and double_cd_map[label] > 0:
-                    mp *= 2
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}

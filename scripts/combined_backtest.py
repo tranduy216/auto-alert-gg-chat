@@ -44,7 +44,6 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
     entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}; ts_curve = []
     ff = fee_factor(lev_coin)
-    double_cd = 0
     last_sl_bar = -999
     long_tp_hit = 0; short_tp_hit = 0; next_pyr_roi = 8; pyr_bar = -999
 
@@ -102,12 +101,6 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 for e in entries:
                     if not e.get('is_short'):
                         e['hi'] = peak_hi
-
-        # ── isDoubleSize: check ROI before TP ──
-        if not is_short and long_entries:
-            pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
-            if pos_roi > 10 and double_cd == 0:
-                double_cd = 3
 
         # ── Long: TP check (by avg EP) ──
         if not is_short and long_entries and tp_sched and 'tp' in cfg and long_tp_hit < len(tp_sched):
@@ -197,15 +190,11 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
             mp = eq * ENTRY_PCT * mult * cfg.get('_entry_mult', 1.0)
             if is_short:
                 mp *= 2
-            elif double_cd > 0:
-                mp *= 2
 
             if dep + mp <= max_margin * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                       'hi': None if is_short else cc, 'lo': cc if is_short else None}
                 entries.append(e)
-                if double_cd > 0:
-                    double_cd -= 1
                 last_ep = cc; lei = idx
 
         # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry, next += 7%% ──
