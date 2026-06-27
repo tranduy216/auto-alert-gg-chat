@@ -495,6 +495,32 @@ check("vol_cond: idx<2 fails", s12 is False)
 # BTC gate blocks short
 s13, _ = entry_conditions([], 100, 6, vols_big, vavg, 100, 0.05, True, True, 25, 1.5, -999)
 check("BTC bull blocks short", s13 is False)
+
+# vol_bars: 3 bars avg > vavg (vavg=5, volumes: 10,10,10,100,100,100,100,100...)
+vols3 = [10]*10 + [100, 100, 100]
+s14, _ = entry_conditions([], 100, 11, vols3, 5, 100, 0.05, False, False, 25, 1.5, -999, vol_bars=3)
+check("vol_bars=3: avg last 3 > vavg passes", s14 is True)
+# vol_bars=3: avg last 3 < vavg fails
+vols_lo = [10]*8 + [3, 3, 3]
+s15, _ = entry_conditions([], 100, 10, vols_lo, 5, 100, 0.05, False, False, 25, 1.5, -999, vol_bars=3)
+check("vol_bars=3: avg last 3 < vavg fails", s15 is False)
+
+# green_vol_pct: 70% green volume
+# volumes: 30, 30, 40, closes: 101, 102, 100, opens: 100, 101, 99 (bars 8,9,10)
+vols_g = [10]*8 + [30, 30, 40]
+closes_g = [90]*8 + [101, 102, 99]
+opens_g = [90]*8 + [100, 101, 100]
+s16, _ = entry_conditions([], 99, 10, vols_g, 5, 100, 0.05, False, False, 25, 1.5, -999,
+                           vol_bars=3, green_vol_pct=0.70, opens=opens_g, closes=closes_g)
+check("green_vol_pct=0.70: green vol 60/100 fails", s16 is False)
+# All 3 green: volumes 30,30,30, closes: 101,102,103
+vols_all_g = [10]*8 + [30, 30, 30]
+closes_all_g = [90]*8 + [101, 102, 103]
+opens_all_g = [90]*8 + [100, 101, 102]
+s17, _ = entry_conditions([], 103, 10, vols_all_g, 5, 100, 0.05, False, False, 25, 1.5, -999,
+                           vol_bars=3, green_vol_pct=0.70, opens=opens_all_g, closes=closes_all_g)
+check("green_vol_pct=0.70: all green 100% passes", s17 is True)
+
 # compute_results with days param
 r4 = compute_results([1.0, 1.05], {2025: 1.05}, 10000, days=365)
 check("compute_results with days param", abs(r4['cagr']) < 100)
