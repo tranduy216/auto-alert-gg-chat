@@ -198,20 +198,13 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     double_cd -= 1
                 last_ep = cc; lei = idx
 
-        # ── Pyramid (long only: add entry when roi from last_ep >= pyr) ──
-        if not is_short and last_ep > 0 and (idx - lei >= 0) and mult > 0:
-            roi_pyr = (cc - last_ep) / last_ep * 100 * lev_coin
-            if roi_pyr >= pyr_roi:
-                dep = sum(e.get('mp', 0) for e in entries)
-                total_val = total_asset_value(entries, cc, eq, lev_coin)
-                mp = eq * ENTRY_PCT * mult
-                if dep + mp <= max_margin * total_val:
-                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False,
-                          'hi': cc, 'lo': None}
-                    entries.append(e)
-                    if double_cd > 0:
-                        double_cd -= 1
-                    last_ep = cc; lei = idx
+        # ── Pyramid filter: need price beyond last entry (long: +5%, short: -3%) ──
+        if should_enter and entries:
+            last_ep = entries[-1]['ep']
+            if not is_short and cc <= last_ep * 1.05:
+                should_enter = False
+            if is_short and cc >= last_ep * 0.97:
+                should_enter = False
 
         # ── Unrealized PnL ──
         ureal = 0

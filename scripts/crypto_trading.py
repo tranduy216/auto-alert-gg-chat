@@ -57,11 +57,18 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer)
     if should and is_short:
         mult = 1.0
+    if should and entries:
+        last_ep = entries[-1]['ep']
+        if not is_short and cc <= last_ep * 1.05:
+            should = False
+        if is_short and cc >= last_ep * 0.97:
+            should = False
     if not should and entries and mult > 0 and not is_short:
         last_ep = entries[-1]['ep']
         roi = (cc - last_ep) / last_ep * 100 * lev_coin
-        if roi >= pyr_roi:
+        if roi >= pyr_roi and cc > last_ep * 1.05:
             should = True
+    return should, mult, cc
     return should, mult, cc
 
 
