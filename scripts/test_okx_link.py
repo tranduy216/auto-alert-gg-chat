@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Test OKX: open 1 LINK contract long, set TP ladder + trailing stop.
-Auto mode for CI. Run: python3 scripts/test_okx_link.py
+Test OKX core actions: open entry, get position, close partial, close all.
+No algos. Run: python3 scripts/test_okx_link.py
 """
 import os, sys, json, time, datetime
 from pathlib import Path
@@ -9,13 +9,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order,
-    okx_place_algo, okx_cancel_algo, okx_get_algo_orders,
     okx_close_position, okx_get_instruments,
 )
 
 INST_ID = 'LINK-USDT-SWAP'
-LEV = 2
-TP_SCHED = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
 
 def log(msg): print(f"[{datetime.datetime.now():%H:%M:%S}] {msg}")
 
@@ -25,13 +22,9 @@ def get_pos():
             return p
     return None
 
-def get_total_qty(_inst_id):
-    pos = get_pos()
-    return abs(float(pos['pos'])) if pos else 0
-
 def main():
     print("=" * 60)
-    print("OKX LINK TEST — TP Ladder + Trailing Stop")
+    print("OKX CORE ACTIONS TEST — Market Order Only")
     print("=" * 60)
 
     # 1. Account
@@ -43,110 +36,76 @@ def main():
     # 2. Instrument
     instruments = okx_get_instruments('SWAP')
     inst = next((i for i in instruments if i['instId'] == INST_ID), None)
-    if not inst:
-        log(f"ERROR: {INST_ID} not found"); return
+    if not inst: log(f"ERROR: {INST_ID} not found"); return
     ct_val = float(inst.get('ctVal', '0.01'))
     lot_sz = float(inst.get('lotSz', '1'))
-    log(f"ctVal={ct_val}  lotSz={lot_sz}  maxLev={inst.get('lever','?')}x")
+    max_lev = float(inst.get('lever', '0'))
+    log(f"ctVal={ct_val}  lotSz={lot_sz}  maxLev={max_lev:.0f}x")
 
-    # 3. Cancel existing — ignore errors
-    for ot in ['conditional', 'move_order_stop']:
-        orders = okx_get_algo_orders(INST_ID, ot)
-        if orders:
-            ids = [o['algoId'] for o in orders]
-            try:
-                okx_cancel_algo(INST_ID, ids)
-                log(f"  Cancelled {len(ids)} {ot}")
-            except Exception as e:
-                log(f"  Cancel {ot} failed (non-critical): {e}")
-            time.sleep(0.5)
-
-    # 4. Check existing
+    # 3. Check existing
     pos = get_pos()
     if pos:
-        qty = abs(float(pos['pos']))
-        side = 'LONG' if float(pos['pos']) > 0 else 'SHORT'
-        log(f"Existing: {qty}ct {side} @ ${float(pos.get('avgPx',0)):.2f}")
+        log(f"Existing: {abs(float(pos['pos']))}ct LONG @ ${float(pos.get('avgPx',0)):.2f}")
+        log(f"Closing existing first...")
+        okx_close_position(INST_ID, pos_side='net', mgn_mode='isolated')
+        log("Closed.")
+        time.sleep(1)
 
-    # 5. Place 1ct MARKET long
-    log(f"Placing 1ct MARKET long...")
+    # 4. Open 1ct MARKET long
+    log("\n--- OPEN ENTRY ---")
+    log("Placing 1ct MARKET long (cross)...")
     try:
-        r = okx_place_order(inst_id=INST_ID, td_mode='isolated', side='buy', sz='1')
+        r = okx_place_order(inst_id=INST_ID, td_mode='cross', side='buy', sz='1')
         oid = r.get('data', [{}])[0].get('ordId', '?')
-        log(f"Order: {oid}")
-        time.sleep(2)
+        log(f"Order placed: {oid}")
     except Exception as e:
         log(f"Order FAILED: {e}"); return
 
+    time.sleep(2)
     pos = get_pos()
     if not pos:
-        log("No position after order"); return
+        log("No position found after order"); return
     avg_px = float(pos.get('avgPx', 0))
     pos_qty = abs(float(pos['pos']))
-    log(f"Filled: {pos_qty}ct @ ${avg_px:.2f}")
+    margin = float(pos.get('margin', 0))
+    upl = float(pos.get('upl', 0))
+    log(f"Position: {pos_qty}ct @ ${avg_px:.2f}  Margin=${margin:.2f}  UPL=${upl:.2f}")
 
-    # 6. TP ladder — only non-overlapping sizes
-    total_ct = int(pos_qty / lot_sz) * lot_sz  # round to lotSz
-    placed = 0
-    remaining = total_ct
-    for trg_pct, frac in TP_SCHED:
-        tp_sz = max(lot_sz, int(total_ct * frac / lot_sz) * lot_sz)
-        tp_sz = min(tp_sz, remaining - lot_sz * (1 if len(TP_SCHED) - placed > 1 else 0))
-        tp_sz = round(tp_sz, 6) if isinstance(lot_sz, float) and lot_sz < 1 else int(tp_sz)
-        if tp_sz <= 0: break
-        tp_price = round(avg_px * (1 + trg_pct / (100 * LEV)), 4)
-        try:
-            r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
-                side='sell', sz=str(tp_sz),
-                ord_type='conditional',
-                tp_trigger_px=str(tp_price))
-            aid = r.get('data', [{}])[0].get('algoId', '?')
-            log(f"  TP {trg_pct}% @ ${tp_price:.4f} sz={tp_sz} → {aid}")
-            remaining -= tp_sz
-            placed += 1
-        except Exception as e:
-            log(f"  TP {trg_pct}% FAILED: {e}")
-    log(f"TP placed: {placed}")
+    # 5. Close partial (50%)
+    log("\n--- CLOSE PARTIAL ---")
+    close_sz = max(lot_sz, int(pos_qty * 0.5 / lot_sz) * lot_sz)
+    log(f"Closing {close_sz}ct (reduce_only)...")
+    try:
+        r = okx_place_order(inst_id=INST_ID, td_mode='cross',
+            side='sell', sz=str(close_sz), reduce_only=True)
+        oid = r.get('data', [{}])[0].get('ordId', '?')
+        log(f"Partial close: {oid}")
+    except Exception as e:
+        log(f"Partial close FAILED: {e}")
 
-    # 7. Trailing stop on whatever remains
-    if remaining > 0:
-        try:
-            r = okx_place_algo(inst_id=INST_ID, td_mode='isolated',
-                side='sell', sz=str(remaining),
-                ord_type='move_order_stop', callback_ratio='0.20')
-            aid = r.get('data', [{}])[0].get('algoId', '?')
-            log(f"Trail: {remaining}ct cb=0.20 → {aid}")
-        except Exception as e:
-            log(f"Trail FAILED: {e}")
+    time.sleep(2)
+    pos = get_pos()
+    if pos:
+        remain = abs(float(pos['pos']))
+        log(f"Remaining: {remain}ct @ ${float(pos.get('avgPx',0)):.2f}")
     else:
-        log(f"TP covers 100%, no trailing stop needed")
+        log("Position fully closed by partial order")
 
-    # 8. Show algos
-    log("\n--- Algo orders ---")
-    for ot in ['conditional', 'move_order_stop']:
-        for o in okx_get_algo_orders(INST_ID, ot):
-            log(f"  [{ot}] sz={o.get('sz','?')} TP={o.get('tpTriggerPx','-')} CB={o.get('callbackRatio','-')}%")
-
-    # 9. Cleanup
-    for ot in ['conditional', 'move_order_stop']:
-        orders = okx_get_algo_orders(INST_ID, ot)
-        if orders:
-            ids = [o['algoId'] for o in orders]
-            if ids:
-                try:
-                    okx_cancel_algo(INST_ID, ids)
-                    log(f"Cancelled {len(ids)} {ot}")
-                    time.sleep(0.5)
-                except Exception as e:
-                    log(f"Cancel {ot} failed: {e}")
+    # 6. Close all remaining
+    log("\n--- CLOSE ALL ---")
     pos = get_pos()
     if pos:
         try:
-            okx_close_position(INST_ID, pos_side='net', mgn_mode='isolated')
+            okx_close_position(INST_ID, pos_side='net', mgn_mode='cross')
             log("Position closed.")
         except Exception as e:
             log(f"Close FAILED: {e}")
-    log("Done.")
+
+    time.sleep(1)
+    pos = get_pos()
+    log(f"Final position: {'None' if not pos else abs(float(pos['pos']))}")
+
+    log("\nDone.")
 
 if __name__ == '__main__':
     main()
