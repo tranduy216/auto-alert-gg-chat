@@ -52,13 +52,15 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     if btc_ma200 and btc_closes:
         bi = min(idx, len(btc_closes) - 1)
         if bi >= 200 and btc_ma200[bi]:
-            btc_bull = btc_closes[bi] > btc_ma200[bi]
+            btc_bull = btc_closes[bi] >= btc_ma200[bi] * 1.005
     should, mult = entry_conditions(entries, cc, idx, vols, vv, mm, ma_buf, is_short,
                                     btc_bull, ext_block, lev_coin, -999,
                                     ma=ma, highs=highs, lows=lows,
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
                                     vol_bars=vol_bars)
-    if should and is_short:
+    if not should:
+        return None
+    if is_short:
         mult = 1.0
     mult *= cfg.get('_entry_mult', 1.0)
     return should, mult, cc
