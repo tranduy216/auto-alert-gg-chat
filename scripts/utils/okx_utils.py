@@ -215,7 +215,7 @@ def okx_cancel_algo(inst_id: str, algo_ids: List[str]) -> dict:
     """Cancel algo/stop orders."""
     return _okx_request("POST", "/api/v5/trade/cancel-algos", {
         "instId": inst_id,
-        "algoIds": algo_ids,
+        "algoId": algo_ids,
     })
 
 
