@@ -45,10 +45,13 @@ def main():
     # 3. Check existing
     pos = get_pos()
     if pos:
-        log(f"Existing: {abs(float(pos['pos']))}ct LONG @ ${float(pos.get('avgPx',0)):.2f}")
+        log(f"Existing: {abs(float(pos['pos']))}ct LONG @ ${float(pos.get('avgPx') or 0):.2f}")
         log(f"Closing existing first...")
-        okx_close_position(INST_ID, pos_side='net', mgn_mode='isolated')
-        log("Closed.")
+        try:
+            okx_close_position(INST_ID, pos_side='net', mgn_mode='isolated')
+            log("Closed.")
+        except Exception as e:
+            log(f"Close existing failed (ok): {e}")
         time.sleep(1)
 
     # 4. Open 1ct MARKET long

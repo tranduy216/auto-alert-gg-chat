@@ -225,6 +225,11 @@ def main():
             for e in coin_entries:
                 add_entry(name, e['ep'], e.get('is_short', False))
 
+    # Refresh entries_map from Firestore after exit actions
+    if os.environ.get("OKX_API_KEY"):
+        for coin in SYMBOL_OKX:
+            entries_map[coin] = get_entries(coin)
+
     signals = []
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
