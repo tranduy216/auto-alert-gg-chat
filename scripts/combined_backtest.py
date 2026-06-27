@@ -99,7 +99,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
         if not is_short and long_entries:
             pos_roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin if avg_ep_long else 0
             if pos_roi > 10 and double_cd == 0:
-                double_cd = 2
+                double_cd = 3
 
         # ── Long: TP check (by avg EP) ──
         if not is_short and long_entries and tp_sched and 'tp' in cfg and long_tp_hit < len(tp_sched):
