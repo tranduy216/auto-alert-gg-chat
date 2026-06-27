@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    EXT_BLOCK_PCT, SHORT_MAX_MARGIN, PYRAMID_STRATEGIES,
+    EXT_BLOCK_PCT, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
@@ -140,7 +140,7 @@ def main():
             if not da or not coin_entries: continue
             cc = da[-1]['close']; hi = da[-1]['high']; bl = da[-1]['low']
             lev = cfg.get('lev', 2); trail = cfg.get('trail', 0.80)
-            tp = cfg.get('tp'); close_pct = cfg.get('close_pct', 0.20)
+            tp = cfg.get('tp');             close_pct = cfg.get('close_pct', SHORT_CLOSE_PCT)
             inst_id = SYMBOL_OKX.get(name)
             pos = pos_map.get(inst_id, {})
 
@@ -175,7 +175,7 @@ def main():
             # Long: TP check (1x per day)
             if not is_short and tp:
                 tp_date = get_state(name).get('tp_date', '')
-                if tp_date == today: break
+                if tp_date == today: continue
                 tp_hit = get_state(name).get('tp_hit', 0)
                 for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
@@ -211,7 +211,7 @@ def main():
             # Short: TP check
             if is_short and tp:
                 tp_date = get_state(name).get('tp_date', '')
-                if tp_date == today: break
+                if tp_date == today: continue
                 tp_hit = get_state(name).get('tp_hit', 0)
                 for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
@@ -232,7 +232,7 @@ def main():
             # Update entries in state_manager
             clear_entries(name)
             for e in coin_entries:
-                add_entry(name, e['ep'], e.get('is_short', False))
+                add_entry(name, e['ep'], e.get('is_short', False), e.get('hi'), e.get('lo'))
 
     # Refresh entries_map from Firestore after exit actions
     if os.environ.get("OKX_API_KEY"):

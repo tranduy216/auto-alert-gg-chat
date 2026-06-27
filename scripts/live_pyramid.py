@@ -96,7 +96,7 @@ def main():
             print(f"  {name:<6} {sig['signal']:<5} @ ${sig['price']:<10,.4f}  ({sig['reason']})")
             signals.append(sig)
         else:
-            if da and len(da) >= 0:
+            if da and len(da) > 0:
                 print(f"  {name:<6} HOLD   @ ${da[-1]['close']:<10,.4f}  (no entry condition met)")
             else:
                 print(f"  {name:<6} HOLD   (no data)")
