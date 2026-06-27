@@ -214,7 +214,7 @@ def main():
                 ct_val = float(ct_val_str) if ct_val_str else 0.01
                 sz = max(1, int(usd_val / (price * ct_val)))
                 side = 'buy' if direction == 'BUY' else 'sell'
-                td_mode = 'isolated' if direction == 'SELL' else 'cross'
+                td_mode = 'cross'
                 okx_lev = round(lev)
 
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult:.1f}x, ctVal={ct_val})")
