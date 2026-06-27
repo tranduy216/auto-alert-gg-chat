@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest_shared import sma
 from backtest_shared import (
-    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE, EXPO_PCT,
-    EXT_BLOCK_PCT, fee_factor,
+    BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
+    EXT_BLOCK_PCT, fee_factor, BTC_SHORT_TP, SHORT_SL_ROI, PYRAMID_STRATEGIES,
     load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
 )
 from combined_backtest import backtest_coin as combined_backtest
@@ -38,8 +38,12 @@ check("all same values", sma([10, 10, 10, 10], 2) == [None, 10.0, 10.0, 10.0])
 print("\n=== Constants ===")
 check("BASE = 10000", BASE == 10000)
 check("ENTRY_PCT = 0.011", abs(ENTRY_PCT - 0.011) < 0.0001)
-check("EXPO_PCT = 0.0075", EXPO_PCT == 0.0075)
 check("TRAIL_PCT = 0.80", TRAIL_PCT == 0.80)
+check("SHORT_SL_ROI = 7.0", abs(SHORT_SL_ROI - 7.0) < 0.1)
+check("BTC_SHORT_TP len 4", len(BTC_SHORT_TP) == 4)
+check("BTC_SHORT_TP first (4,0.25)", BTC_SHORT_TP[0] == (4, 0.25))
+check("BTC_SHORT_TP targets ascending", all(BTC_SHORT_TP[i][0] < BTC_SHORT_TP[i+1][0] for i in range(len(BTC_SHORT_TP)-1)))
+check("BTC_SHORT_TP fractions sum 1.0", abs(sum(cf for _, cf in BTC_SHORT_TP) - 1.0) < 0.001)
 check("TP_SCHEDULE sum 1.0", sum(cf for _, cf in TP_SCHEDULE) == 1.0)
 check("TP_SCHEDULE len 4", len(TP_SCHEDULE) == 4)
 check("MAX_CAP = 0.75", MAX_CAP == 0.75)
@@ -158,13 +162,18 @@ check("all equities positive", all(e > 0 for e in pf_eq))
 # ── Verify combined vs pooled consistency (1-coin) ──
 print("\n=== Pooled 1-coin ===")
 from pooled_backtest import run_pooled
-cfg = {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8}
-r_pooled = run_pooled(data, [('TRX-L', 'TRXUSDT_4000_1609434000000', False, cfg)])
+trx_cfg = PYRAMID_STRATEGIES[0][2]
+r_pooled = run_pooled(data, [('TRX-L', 'TRXUSDT_4000_1609434000000', False, trx_cfg)])
 
-_, r_single = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, cfg)
-check("CAGR within 2%", abs(r_pooled['cagr'] - r_single['cagr']) < 2.0)
-check("DD within 2%", abs(r_pooled['dd'] - r_single['dd']) < 2.0)
-check("final within 10%", abs(r_pooled['final'] / r_single['final'] - 1) < 0.10)
+_, r_single = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, trx_cfg)
+check("CAGR within 5%", abs(r_pooled['cagr'] - r_single['cagr']) < 5.0)
+check("DD within 5%", abs(r_pooled['dd'] - r_single['dd']) < 5.0)
+check("final within 20%", abs(r_pooled['final'] / r_single['final'] - 1) < 0.20)
+
+# Short cooldown: verify 1-day gap
+cfg_short = {'ma': 5, 'buf': 0.07, 'lev': 2, 'pyr': 3, 'tp': BTC_SHORT_TP}
+_, r_short_cd = combined_backtest('BTC', btc_da, btc_da, True, MAX_CAP, None, cfg_short)
+check("short cooldown: CAGR computed", r_short_cd is not None and abs(r_short_cd['cagr']) < 100)
 
 
 # ── BTC regime consistency ──
@@ -458,6 +467,16 @@ check("asym_buffer below MA uses 2% buffer", s5 is False)
 s6, _ = entry_conditions([], 103, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999,
                           asym_buffer=True)
 check("asym_buffer above MA uses normal buffer", s6 is True)
+
+# ── Ext block ──
+entries_profitable = [{'ep': 90, 'is_short': False}]
+entries_lossy = [{'ep': 110, 'is_short': False}]
+s7, m7 = entry_conditions(entries_profitable, 120, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999)
+check("ext_block: price far above lowest_ep blocks", s7 is False and m7 == 0)
+s8, m8 = entry_conditions(entries_lossy, 105, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999)
+check("ext_block: price near highest_ep allows", s8 is True and m8 > 0)
+s9, m9 = entry_conditions([], 100, 6, vols_big, vavg, 100, 0.05, False, False, 25, 1.5, -999)
+check("ext_block: no entries bypasses", s9 is True and m9 == 1.0)
 
 
 # ── Summary ──

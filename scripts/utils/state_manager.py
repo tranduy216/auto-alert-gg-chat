@@ -96,15 +96,3 @@ def add_entry(coin: str, ep: float, is_short: bool) -> None:
 def clear_entries(coin: str) -> None:
     """Clear all open entries for a coin (position fully closed)."""
     set_state(coin, {'entries': []})
-
-
-def get_sl_count(coin: str) -> int:
-    """Return consecutive stop-loss count for Fibonacci cooldown."""
-    return get_state(coin).get('sl_count', 0)
-
-
-def record_sl(coin: str) -> None:
-    """Increment stop-loss count and record date."""
-    today = datetime.datetime.now().strftime('%Y-%m-%d')
-    sl_count = get_sl_count(coin) + 1
-    set_state(coin, {'sl_count': sl_count, 'last_sl_date': today})

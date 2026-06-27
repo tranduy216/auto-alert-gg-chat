@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles,
-    BTC_SHORT_TP, EXT_BLOCK_PCT, SHORT_MARGIN_CAP, PYRAMID_STRATEGIES,
+    BTC_SHORT_TP, EXT_BLOCK_PCT, SHORT_MARGIN_CAP, SHORT_SL_ROI, PYRAMID_STRATEGIES,
     entry_conditions,
 )
 from utils.discord_webhook import send_message
@@ -196,8 +196,8 @@ def main():
                     btc_pos = pos_map.get(inst_id, {})
                     existing_margin = float(btc_pos.get('margin', 0))
                     new_margin = usd_val / lev
-                    if existing_margin + new_margin > eq * 0.25:
-                        log(f"  {name}: short cap 25% margin ({SHORT_MARGIN_CAP*400:.0f}% exp), skipped")
+                    if existing_margin + new_margin > eq * SHORT_MARGIN_CAP:
+                        log(f"  {name}: short cap {SHORT_MARGIN_CAP*100:.0f}% margin, skipped")
                         continue
 
                 usd_val = eq * lev * ENTRY_PCT * mult

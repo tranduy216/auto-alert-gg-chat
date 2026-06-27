@@ -20,16 +20,14 @@ def sma(values, period):
 
 BASE = 10000
 ENTRY_PCT = 0.011        # 1.1% margin per entry (~$300 on $14K at 2x)
-EXPO_PCT = 0.0075       # alias — margin % of equity per entry
 TRAIL_PCT = 0.80        # 20% trailing stop from extreme (long only)
 MA_BUF = 0.03           # 3% buffer default
 MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
 BTC_SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
-SHORT_MARGIN_CAP = 0.25    # max 25% margin (50% exposure at 2x)
+SHORT_MARGIN_CAP = 0.35    # max 35% margin (70% exposure at 2x)
 SHORT_SL_ROI = 7.0         # stop loss at 7% ROI for BTC short
-FIB_COOLDOWN = [0, 0, 3, 5, 8, 13, 21]  # cooldown bars after N stop losses
 MAX_CAP = 0.75          # max margin deployed (% of total asset value)
 FEE_RATE = 0.0005       # 0.05% per side
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
@@ -434,15 +432,10 @@ def entry_conditions(entries, cc, idx, vols, vavg, m_ma, ma_buf, is_short,
 
     # Compute mult dù entry có fire hay không (pyramid cần mult)
     mult = winner_mult(entries, cc, is_short, lev_coin)
-    if entries:
-        if is_short:
-            highest_ep = max(e['ep'] for e in entries)
-            if (highest_ep - cc) / highest_ep * 100 > ext_block:
-                mult = 0
-        else:
-            lowest_ep = min(e['ep'] for e in entries)
-            if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
-                mult = 0
+    if entries and not is_short:
+        lowest_ep = min(e['ep'] for e in entries)
+        if (cc - lowest_ep) / lowest_ep * 100 > ext_block:
+            mult = 0
 
     should = (can_enter and near_ma and vol_cond and idx - lei >= 0 and mult > 0)
     return should, mult

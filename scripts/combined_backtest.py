@@ -1,7 +1,7 @@
 """
 Combined Long + Short Pyramid Strategy (standalone per-coin)
-- Long: TRX/XAU — MA pullback entry, trailing stop 20%, pyramid
-- Short: BTC — 1 entry only, TP ladder 4/7/10/13%, SL 7%, Fibonacci cooldown
+- Long: TRX/XAU — MA pullback entry, trailing stop 20%, pyramid, TP 40/70/100/130
+- Short: BTC — 1 entry only, TP ladder 4/8/12/16%, SL 5%, 1-day cooldown
 """
 from pathlib import Path
 import sys, datetime, requests, time

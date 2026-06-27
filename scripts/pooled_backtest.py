@@ -10,7 +10,7 @@ from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, BTC_SHORT_TP,
     MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
-    SHORT_MARGIN_CAP, SHORT_SL_ROI,
+    SHORT_MARGIN_CAP, SHORT_SL_ROI, winner_mult,
     load_data, fetch_paxg, entry_conditions, compute_results,
 )
 
@@ -191,7 +191,7 @@ def run_pooled(data, strategies):
                     last_ep_map[label] = cc
                     lei_map[label] = idx
 
-        # ── Pyramid (long only, per signal) ──
+        # ── Pyramid (long only) ──
         for label, cd in coin_data.items():
             if cd['is_short']: continue
             idx = time_to_idx[label].get(ts)
@@ -211,22 +211,13 @@ def run_pooled(data, strategies):
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
-                m_ma = cd['ma_short'][idx]; vavg = cd['vol_ma20'][idx]
-                if m_ma and vavg:
-                    should_pyr, pyr_mult = entry_conditions(
-                        entries, cc, idx, cd['vols'], vavg, m_ma, cfg.get('buf', 0.03),
-                        False, btc_bull, cfg.get('ext_block', EXT_BLOCK_PCT), lev_coin, lei_map[label],
-                        ma=cd['ma_short'], highs=cd['highs'], lows=cd['lows'],
-                        ma_slope=cfg.get('ma_slope', False),
-                        lower_high=cfg.get('lower_high', False),
-                        asym_buffer=cfg.get('asym_buffer', False),
-                    )
-                    mp = eq * ENTRY_PCT * pyr_mult
-                    if total_dep + mp <= MAX_CAP * total_val:
-                        e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
-                        entries.append(e)
-                        last_ep_map[label] = cc
-                        lei_map[label] = idx
+                pyr_mult = winner_mult(entries, cc, False, lev_coin)
+                mp = eq * ENTRY_PCT * pyr_mult
+                if total_dep + mp <= MAX_CAP * total_val:
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
+                    entries.append(e)
+                    last_ep_map[label] = cc
+                    lei_map[label] = idx
 
         # ── Unrealized PnL ──
         ureal = 0
