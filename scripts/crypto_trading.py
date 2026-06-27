@@ -142,6 +142,7 @@ def main():
 
     # ── Exit check (trailing/TP/SL for existing positions) ──
     if os.environ.get("OKX_API_KEY"):
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
         for name, is_short, cfg in PYRAMID_STRATEGIES:
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
