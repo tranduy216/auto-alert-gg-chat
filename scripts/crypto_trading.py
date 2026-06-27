@@ -175,8 +175,10 @@ def main():
                         log(f"  {name}: close FAILED: {e}")
                     continue
 
-            # Long: TP check
+            # Long: TP check (1x per day)
             if not is_short and tp:
+                tp_date = get_state(name).get('tp_date', '')
+                if tp_date == today: break
                 tp_hit = get_state(name).get('tp_hit', 0)
                 for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
@@ -188,7 +190,7 @@ def main():
                             okx_place_order(inst_id=inst_id, td_mode='cross',
                                 side='sell', sz=str(close_ct), reduce_only=True)
                             log(f"  {name}: TP {trg}% → close {close_ct}ct")
-                            set_state(name, {'tp_hit': stage + 1})
+                            set_state(name, {'tp_hit': stage + 1, 'tp_date': today})
                         except Exception as e:
                             log(f"  {name}: TP {trg}% FAILED: {e}")
                     else:
@@ -211,6 +213,8 @@ def main():
 
             # Short: TP check
             if is_short and tp:
+                tp_date = get_state(name).get('tp_date', '')
+                if tp_date == today: break
                 tp_hit = get_state(name).get('tp_hit', 0)
                 for stage in range(tp_hit, len(tp)):
                     trg, cf = tp[stage]
@@ -222,7 +226,7 @@ def main():
                             okx_place_order(inst_id=inst_id, td_mode='cross',
                                 side='buy', sz=str(close_ct), reduce_only=True)
                             log(f"  {name}: TP {trg}% → close {close_ct}ct")
-                            set_state(name, {'tp_hit': stage + 1})
+                            set_state(name, {'tp_hit': stage + 1, 'tp_date': today})
                         except Exception as e:
                             log(f"  {name}: TP {trg}% FAILED: {e}")
                     else:
