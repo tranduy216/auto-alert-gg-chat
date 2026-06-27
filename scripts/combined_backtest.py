@@ -153,6 +153,8 @@ def backtest_coin(coin, da, btc_da, is_short, max_cap, selected_years, cfg=None)
                     short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
                     if short_mp + eq * ENTRY_PCT * mult > SHORT_MARGIN_CAP:
                         should_enter = False
+            elif not btc_bull and idx - lei < 2:
+                should_enter = False
 
             if should_enter:
                 mp = eq * ENTRY_PCT * mult
