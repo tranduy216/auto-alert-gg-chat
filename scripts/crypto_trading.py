@@ -311,6 +311,7 @@ def main():
 
     # ── Entry check ──
     signals = []
+    traded_signals = []
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
         if name not in TRADING_COIN_LIST: continue
@@ -396,6 +397,7 @@ def main():
                     )
                     log(f"  Order OK: {result.get('data', [{}])[0].get('ordId', '?')}")
                     traded_count += 1
+                    traded_signals.append((name, direction, price))
                     time.sleep(1.5)
                     okx_set_leverage(inst_id, okx_lev)
                     log(f"  Leverage set {okx_lev}x")
@@ -420,8 +422,8 @@ def main():
     else:
         log("OKX not configured — signal only")
 
-    if DISCORD_WEBHOOK and traded_count > 0:
-        summary = "\n".join(f"  {n} {d} @ ${p:,.4f}" for n, d, p, *_ in signals)
+    if DISCORD_WEBHOOK and traded_signals:
+        summary = "\n".join(f"  {n} {d} @ ${p:,.4f}" for n, d, p in traded_signals)
         send_message(DISCORD_WEBHOOK,
             f"*Pyramid Trading — {ts:%Y-%m-%d}*\n{summary}")
 
