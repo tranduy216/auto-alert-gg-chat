@@ -26,19 +26,34 @@ MA_PERIOD = 20          # MA period default
 PYRAMID_ROI_DEFAULT = 5
 TP_SCHEDULE = [(3, 0.25), (6, 0.25), (9, 0.25), (12, 0.25)]
 BTC_SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
-SHORT_MARGIN_CAP = 0.35    # max 35% margin (70% exposure at 2x)
-SHORT_SL_ROI = 7.0         # stop loss at 7% ROI for BTC short
-MAX_CAP = 0.75          # max margin deployed (% of total asset value)
-FEE_RATE = 0.0005       # 0.05% per side
+
+# ── Long config ──
+LONG_TP = [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]  # close 60%, 40% remains
+LONG_CLOSE_PCT = 0.20   # closeAll if price drops 20% from avg entry (PaxG: 0.18)
+LONG_MAX_MARGIN = 0.75  # max 75% margin per coin
+LONG_PYRAMID_DOUBLE = True  # ×2 entry size when position ROI > 10%
+LONG_PYRAMID_DOUBLE_COOLDOWN = 2  # after ×2, next 2 entries are normal
+
+# ── Short config ──
+SHORT_TP = [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]
+SHORT_MAX_MARGIN = 0.40 # max 40% margin per coin (80% exposure at 2x)
+SHORT_CLOSE_PCT = 0.16  # closeAll if price rises 16% from trough
+SHORT_COOLDOWN_ENTRY = 2  # 2 days between short entries
+SL_COOLDOWN = 2          # 2 days after stop loss
 EXT_BLOCK_PCT = 25      # block adds when price >25% from extreme entry
+FEE_RATE = 0.0005       # 0.05% per side
+MAX_CAP = 0.75          # max margin deployed (backtest only)
 
 # ── Pyramid Strategies (single source of truth for all scripts) ──
 # Format: (coin, is_short, cfg)
 PYRAMID_STRATEGIES = [
     ('TRX',  False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'trail': 0.79,
-                     'tp': [(40, 0.25), (70, 0.25), (100, 0.25), (130, 0.25)]}),
-    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.82}),
-    ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80, 'tp': BTC_SHORT_TP}),
+                     'close_pct': 0.20,
+                     'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]}),
+    ('XAU', False, {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 2, 'lower_high': True, 'trail': 0.84,
+                     'close_pct': 0.18}),
+    ('BTC',  True,  {'ma': 5,  'buf': 0.07, 'pyr': 3, 'lev': 2, 'trail': 0.80,
+                     'tp': [(4, 0.25), (8, 0.25), (12, 0.25), (16, 0.25)]}),
 ]
 
 

@@ -116,13 +116,13 @@ if sample:
 
 # ── combined_backtest ──
 print("\n=== combined_backtest: backtest_coin() ===")
-_, r_none = combined_backtest('TEST', [], None, False, 1.0, None, None)
+_, r_none = combined_backtest('TEST', [], None, False, {})
 check("short data -> None", r_none is None)
 
 btc_da = data.get('BTCUSDT_4000_1609434000000', [])
 trx_da = data.get('TRXUSDT_4000_1609434000000', [])
 
-_, r = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, None)
+_, r = combined_backtest('TRX', trx_da, btc_da, False, None)
 check("result not None", r is not None)
 check("has all keys", all(k in r for k in ['cagr','dd','final','yearly','ts_curve']))
 check("yearly has years", len(r['yearly']) >= 3)
@@ -130,22 +130,17 @@ check("ts_curve length", len(r['ts_curve']) > 100)
 
 # Config override
 cfg = {'ma': 20, 'buf': 0.03, 'pyr': 5, 'lev': 1.5}
-_, r_cfg = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, cfg)
+_, r_cfg = combined_backtest('TRX', trx_da, btc_da, False, cfg)
 check("cfg override works", abs(r_cfg['cagr']) < 500)
 
 # Short mode
-_, r_short = combined_backtest('BTC', btc_da, btc_da, True, MAX_CAP, None, cfg)
+_, r_short = combined_backtest('BTC', btc_da, btc_da, True, cfg)
 check("short mode works", r_short is not None)
 check("short has yearly", 'yearly' in r_short)
 
-# Selected years
-_, r_sel = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, {2021, 2022}, None)
-check("selected_years has 2021", 2021 in r_sel['yearly'])
-check("selected_years has 2022", 2022 in r_sel['yearly'])
-
 # Extension block config
 cfg_ext = {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'ext_block': 0}
-_, r_ext = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, cfg_ext)
+_, r_ext = combined_backtest('TRX', trx_da, btc_da, False, cfg_ext)
 check("ext_block override works", r_ext is not None)
 
 # Portfolio merge
@@ -165,21 +160,20 @@ from pooled_backtest import run_pooled
 trx_cfg = PYRAMID_STRATEGIES[0][2]
 r_pooled = run_pooled(data, [('TRX-L', 'TRXUSDT_4000_1609434000000', False, trx_cfg)])
 
-_, r_single = combined_backtest('TRX', trx_da, btc_da, False, MAX_CAP, None, trx_cfg)
+_, r_single = combined_backtest('TRX', trx_da, btc_da, False, trx_cfg)
 check("CAGR within 10%", abs(r_pooled['cagr'] - r_single['cagr']) < 10.0)
 check("DD within 10%", abs(r_pooled['dd'] - r_single['dd']) < 10.0)
 check("final within 40%", abs(r_pooled['final'] / r_single['final'] - 1) < 0.40)
 
 # Short cooldown: verify 1-day gap
 cfg_short = {'ma': 5, 'buf': 0.07, 'lev': 2, 'pyr': 3, 'tp': BTC_SHORT_TP}
-_, r_short_cd = combined_backtest('BTC', btc_da, btc_da, True, MAX_CAP, None, cfg_short)
+_, r_short_cd = combined_backtest('BTC', btc_da, btc_da, True, cfg_short)
 check("short cooldown: CAGR computed", r_short_cd is not None and abs(r_short_cd['cagr']) < 100)
 
 
 # ── BTC regime consistency ──
 print("\n=== BTC regime ===")
-_, r_btc_bear = combined_backtest('BTC', btc_da, btc_da, True, MAX_CAP, {2022}, cfg)
-# 2022 was bear, should be positive CAGR
+_, r_btc_bear = combined_backtest('BTC', btc_da, btc_da, True, cfg)
 check("BTC short in 2022 > 0", abs(r_btc_bear['cagr']) > 0)
 
 
