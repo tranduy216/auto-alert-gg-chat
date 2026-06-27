@@ -211,7 +211,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
         # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry, next += 7%% ──
         if cfg.get('_pyramid', False) and not is_short and long_entries and avg_ep_long and idx - pyr_bar >= 1:
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
-            if roi >= next_pyr_roi and next_pyr_roi <= 50:
+            if roi >= next_pyr_roi:
                 mt = eq * ENTRY_PCT * cfg.get('_entry_mult', 1.0)
                 if dep + mt <= max_margin * total_val:
                     e = {'ep': cc, 'mp': mt, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
