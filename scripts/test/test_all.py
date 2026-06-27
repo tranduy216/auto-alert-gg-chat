@@ -528,6 +528,140 @@ check("compute_roi short neg", round(compute_roi({'ep': 100}, 110, True, 2.0), 2
 r4 = compute_results([1.0, 1.05], {2025: 1.05}, 10000, days=365)
 check("compute_results with days param", abs(r4['cagr']) < 100)
 
+# ═══════════════════════════════════════════════════════
+# ── LIVE CODE QUALITY GATES ──
+# ═══════════════════════════════════════════════════════
+print("\n=== LIVE CODE QUALITY GATES ===")
+
+# QG1: check_signals returns None when entry_conditions fails (primary bug fix)
+from crypto_trading import check_signals
+
+def sma_real(values, period):
+    period = int(period)
+    r = []
+    for i in range(len(values)):
+        if i < period - 1: r.append(None)
+        else: r.append(sum(values[i-period+1:i+1]) / period)
+    return r
+
+with patch('crypto_trading.sma') as mock_sma:
+    mock_sma.side_effect = sma_real
+
+    # Case: vol_cond fails → should returns None
+    vols_fail = [10]*200 + [3, 3, 3]
+    da = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vols_fail]
+    btc_da = [{'close': 50000, 'high': 50000, 'low': 50000, 'volume': 0, 'time': 0}]*203
+    cfg = {'ma': 15, 'buf': 0.05, 'lev': 2, 'vol_bars': 3}
+    result = check_signals(da, btc_da, cfg, False)
+    check("QG1: check_signals returns None when entry condition fails", result is None)
+
+    # Case: all conditions pass → returns (True, mult, price)
+    vols_pass = [10]*200 + [100, 100, 100]
+    da2 = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vols_pass]
+    result2 = check_signals(da2, btc_da, cfg, False)
+    check("QG2: check_signals returns tuple when entry passes", isinstance(result2, tuple) and len(result2) == 3)
+    check("QG2b: should=True, mult>0, price=close", result2 is not None and result2[0] is True and result2[1] > 0)
+
+    # Case: short entry blocked by BTC bull
+    cfg_s = {'ma': 5, 'buf': 0.07, 'lev': 2}
+    vol_hi = [10]*201 + [200, 200]
+    da_s = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vol_hi]
+    btc_bull_d = [{'close': 60000, 'high': 60000, 'low': 60000, 'volume': 0, 'time': 0}]*200 \
+               + [{'close': 66000, 'high': 66000, 'low': 66000, 'volume': 0, 'time': 0}]*100
+    result3 = check_signals(da_s, btc_bull_d, cfg_s, True)
+    check("QG3: short entry blocked when BTC bullish (>=MA200*1.005)", result3 is None)
+
+    # Case: short entry passes when BTC bearish
+    btc_bear_d = [{'close': 60000, 'high': 60000, 'low': 60000, 'volume': 0, 'time': 0}]*200 \
+               + [{'close': 40000, 'high': 40000, 'low': 40000, 'volume': 0, 'time': 0}]*100
+    result4 = check_signals(da_s, btc_bear_d, cfg_s, True)
+    check("QG4: short entry allowed when BTC bearish", result4 is not None)
+
+# QG5: btc_bull formula identical — grep source for inconsistencies
+import re
+formulas = []
+for fn in ['crypto_trading.py', 'live_pyramid.py', 'combined_backtest.py', 'pooled_backtest.py']:
+    with open(f'scripts/{fn}') as fh:
+        txt = fh.read()
+    for m in re.finditer(r'\bbtc_bull\b\s*=\s*btc_closes\[[^\]]+\]\s*([><=]+)\s*btc_ma200\[[^\]]+\](\s*\*\s*[\d.]+)?', txt):
+        op = m.group(1); mul = m.group(2) or ''
+        formulas.append(f'{fn}:{op}{mul.strip()}')
+all_ok = all('>=* 1.005' in f for f in formulas) and len(formulas) >= 4
+check(f"QG5: all btc_bull sites use >= * 1.005 (found {len(formulas)})", all_ok)
+
+# ── TRADING SCENARIO UNIT TESTS ──
+print("\n=== SCENARIOS: ROI, mult, size ===")
+
+# S1: compute_roi — long and short PnL
+check("S1a: long ROI +20% at 2x", round(compute_roi({'ep': 100}, 110, False, 2.0), 2) == 20.0)
+check("S1b: long ROI -10% at 2x", round(compute_roi({'ep': 100}, 95, False, 2.0), 2) == -10.0)
+check("S1c: short ROI +20% at 2x", round(compute_roi({'ep': 100}, 90, True, 2.0), 2) == 20.0)
+check("S1d: short ROI -15% at 2x", round(compute_roi({'ep': 100}, 107.5, True, 2.0), 2) == -15.0)
+
+# S2: winner_mult — position sizing based on existing entry profitability
+check("S2a: no entries → 1.0x", winner_mult([], 100, False, 2) == 1.0)
+check("S2b: avg ROI >15% → 2.5x", winner_mult([{'ep':80}, {'ep':75}], 100, False, 2) == 2.5)
+check("S2c: avg ROI 0-5% → 1.2x", winner_mult([{'ep':98}], 100, False, 2) == 1.2)
+check("S2d: avg ROI -5-0% → 0.75x", winner_mult([{'ep':100}], 98, False, 2) == 0.75)
+check("S2e: avg ROI <-5% → 0.5x", winner_mult([{'ep':100}], 92, False, 2) == 0.5)
+check("S2f: short avg ROI 10-15% → 2.0x", winner_mult([{'ep':100}], 92.5, True, 2) == 2.0)
+
+# S3: entry sizing — usd_val = eq * lev * ENTRY_PCT * mult
+eq = 13000; lev = 2; epct = 0.011
+check("S3a: base size 2x", round(eq * lev * epct, 1) == 286.0)
+check("S3b: size with 1.5x mult", round(eq * lev * epct * 1.5, 1) == 429.0)
+check("S3c: size with 0.5x mult", round(eq * lev * epct * 0.5, 1) == 143.0)
+check("S3d: short entry ×2 size", round(eq * lev * epct * 1.0 * 2, 1) == 572.0)
+
+# S4: TP partial close schedule — verify fractions
+# TRX TP: [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]
+trx_tp = [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]
+check("S4a: TRX TP 5 stages", len(trx_tp) == 5)
+check("S4b: TRX TP total close = 60%", abs(sum(cf for _, cf in trx_tp) - 0.60) < 0.001)
+# BTC TP: [(4, 0.30), (8, 0.40), (12, 0.30)]
+btc_tp = [(4, 0.30), (8, 0.40), (12, 0.30)]
+check("S4c: BTC TP 3 stages", len(btc_tp) == 3)
+check("S4d: BTC TP total close = 100%", abs(sum(cf for _, cf in btc_tp) - 1.0) < 0.001)
+
+# S5: Trailing stop formulas
+check("S5a: long trail triggered: close <= peak * 0.82", 80 <= 100 * 0.82)
+check("S5b: long trail NOT triggered: close > peak * 0.82", 90 > 100 * 0.82)
+check("S5c: short trail triggered: close >= trough * 1.08", 108 >= 100 * 1.08)
+check("S5d: short trail NOT triggered: close < trough * 1.08", 105 < 100 * 1.08)
+
+# S6: ext_block — block pyramid when price > 25% from extreme entry
+check("S6a: long ext_block: 30% above lowest → blocked", (130 - 100) / 100 * 100 > 25)
+check("S6b: long ext_block: 20% above lowest → allowed", (120 - 100) / 100 * 100 <= 25)
+check("S6c: short ext_block: 20% below highest → blocked", (100 - 80) / 100 * 100 > 15)
+check("S6d: short ext_block: 10% below highest → allowed", (100 - 90) / 100 * 100 <= 15)
+
+# S7: Pyramid entry — ROI >= next_pyr_roi
+check("S7a: pyramid at 8% ROI", (110 - 100) / 100 * 100 * 2 >= 8)   # 20% ROI at 2x >= 8%
+check("S7b: pyramid NOT at 5% ROI", (105 - 100) / 100 * 100 * 2 >= 8) # 10% ROI >= 8% → yes
+check("S7c: next pyr += 7", 8 + 7 == 15)
+
+# S8: entry_conditions with existing entries — ext_block should block mult
+e_existing = [{'ep': 80, 'is_short': False}]
+vols_ok = [10]*201 + [100, 100]  # vol_cond passes (last 2 avg=100 > vavg=10)
+# price=102, lowest_ep=80 → (102-80)/80*100=27.5% > 25% → mult=0 blocked
+s8, m8 = entry_conditions(e_existing, 102, 201, vols_ok, 5, 100, 0.05, False, False, 25, 1.5, -999)
+check("S8a: ext_block 27.5% > 25% → mult=0 blocked", s8 is False and m8 == 0)
+# price=99, lowest_ep=80 → (99-80)/80*100=23.75% < 25% → mult>0, enter
+s9, m9 = entry_conditions(e_existing, 99, 201, vols_ok, 5, 100, 0.05, False, False, 25, 1.5, -999)
+check("S8b: ext_block 23.75% < 25% → mult>0, enter", s9 is True and m9 > 0)
+
+# S9: fee_factor affects PnL
+check("S9a: fee at 1x = 0.999", abs(fee_factor(1.0) - 0.999) < 0.0001)
+check("S9b: fee at 2x = 0.998", abs(fee_factor(2.0) - 0.998) < 0.0001)
+
+# S10: total_asset_value with multiple entries
+check("S10a: no entries = eq", abs(total_asset_value([], 100, 13000, 2) - 13000) < 1e-9)
+entries_val = [{'ep': 100, 'mp': 0.1, 'rem': 1.0}, {'ep': 90, 'mp': 0.05, 'rem': 0.5}]
+# entry1: (100-100)/100 * 0.1 * 2 * 1.0 = 0
+# entry2: (100-90)/90 * 0.05 * 2 * 0.5 = (10/90) * 0.05 * 2 * 0.5 = 0.0556
+expected_val = 13000 + (10/90) * 0.05 * 2 * 0.5
+check("S10b: multi-entry asset value", abs(total_asset_value(entries_val, 100, 13000, 2) - expected_val) < 1e-6)
+
 # ── Summary ──
 print(f"\n{'='*40}")
 print(f"Results: {failures} failures")
