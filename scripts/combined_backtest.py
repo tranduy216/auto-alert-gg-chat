@@ -299,7 +299,10 @@ def main():
     print("=" * 70)
     print("COMBINED LONG + SHORT — YEARLY CAGR (per-coin tuned)")
     print("=" * 70)
-    years = list(range(2021, 2027))
+    all_yrs = set()
+    for r in results.values():
+        all_yrs.update(r['yearly'].keys())
+    years = sorted(all_yrs) if all_yrs else list(range(2021, 2027))
     header = f"{'Strategy':<12}" + "".join(f"{y:>8}" for y in years) + f"{'CAGR':>8}  {'Max DD':>8}  {'Lev':>5}"
     print(header)
     print("-" * 70)
