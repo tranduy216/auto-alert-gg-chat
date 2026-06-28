@@ -55,7 +55,8 @@ def run_pooled(data, strategies):
             timestamps.add(t)
 
     tss = sorted(timestamps)
-    btc_da = data.get('BTCUSDT_4000_1609434000000', [])
+    btc_key = next((k for k in data if k.startswith('BTCUSDT_4000_')), None)
+    btc_da = data.get(btc_key, []) if btc_key else []
     btc_closes = [c['close'] for c in btc_da]
     btc_times = [c['time'] for c in btc_da]
     btc_ma200 = sma(btc_closes, 200)
@@ -261,6 +262,8 @@ def run_pooled(data, strategies):
         if fired_signals:
             n = len(fired_signals)
             for label, is_short, mult, cc, cfg in fired_signals:
+                idx_sig = time_to_idx[label].get(ts)
+                if idx_sig is None: continue
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
                 lev_map = {l: coin_data[l]['cfg'].get('entry', {}).get('lev', 1.5) for l in coin_data}
@@ -273,7 +276,7 @@ def run_pooled(data, strategies):
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}
                     entries_map[label].append(e)
                     last_ep_map[label] = cc
-                    lei_map[label] = idx
+                    lei_map[label] = idx_sig
 
         # ── Long Pyramid: ROI-based, 1/day ──
         for label, cd in coin_data.items():
@@ -368,7 +371,7 @@ def main():
     data['XAUUSDT_POOL'] = xau_da
 
     strategies = [(f'{coin}-{"S" if is_short else "L"}',
-                   'XAUUSDT_POOL' if coin == 'XAU' else f'{coin}USDT_4000_1609434000000',
+                   'XAUUSDT_POOL' if coin == 'XAU' else next((k for k in data if k.startswith(f'{coin}USDT_4000_')), ''),
                    is_short, cfg)
                   for coin, is_short, cfg in PYRAMID_STRATEGIES]
 

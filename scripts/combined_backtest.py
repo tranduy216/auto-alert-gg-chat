@@ -261,7 +261,8 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
 
 def main():
     data = load_data()
-    btc_da = data.get('BTCUSDT_4000_1609434000000', [])
+    btc_key = next((k for k in data if k.startswith('BTCUSDT_4000_')), None)
+    btc_da = data.get(btc_key, []) if btc_key else []
     xau_da = fetch_paxg()
 
     strategies = [(f'{coin}-{"S" if is_short else "L"}', coin, is_short, cfg)
@@ -269,7 +270,7 @@ def main():
 
     results = {}
     for label, coin, is_short, cfg in strategies:
-        sym = f'{coin}USDT_4000_1609434000000'
+        sym = next((k for k in data if k.startswith(f'{coin}USDT_4000_')), '')
         da = xau_da if coin == 'XAU' else data.get(sym, [])
         res = backtest_coin(coin, da, btc_da, is_short, cfg)
         if res[1]: results[label] = res[1]
@@ -278,20 +279,20 @@ def main():
     merged = {}
     for curve in curves:
         for ts, eq in curve:
-            merged[ts] = merged.get(ts, []) + [eq]
-    tss = sorted(merged.keys())
+            day = datetime.datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d')
+            merged.setdefault(day, []).append(eq)
     pf_curve = []
     yearly = {}
     peak = 1.0; md = 0
-    for ts in tss:
-        vals = merged[ts]
+    for day in sorted(merged.keys()):
+        vals = merged[day]
         if len(vals) != len(curves): continue
         avg_eq = sum(vals) / len(vals)
         pf_curve.append(avg_eq)
         if avg_eq > peak: peak = avg_eq
         dd = (peak - avg_eq) / peak * 100
         if dd > md: md = dd
-        yr = datetime.datetime.fromtimestamp(ts / 1000).year
+        yr = int(day[:4])
         yearly[yr] = avg_eq
     pf_res = compute_results(pf_curve, yearly, BASE)
 

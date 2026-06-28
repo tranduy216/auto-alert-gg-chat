@@ -147,10 +147,12 @@ def fetch_paxg(from_ts=None):
     """Fetch PAXGUSDT daily bars. Reads raw 12h cache, aggregates to 1d.
     Falls back to Binance API if cache unavailable."""
     cache_path = Path(__file__).parent / "_klines_12h_5y.json"
-    cache_key = "PAXGUSDT_4000_1609434000000"
     try:
         if cache_path.exists():
             raw = json.loads(cache_path.read_text())
+            cache_key = next((k for k in raw if k.startswith('PAXGUSDT_4000_')), None)
+            if not cache_key:
+                cache_key = "PAXGUSDT_4000_1609434000000"
             cached = raw.get(cache_key)
             if cached and isinstance(cached, list):
                 candles = cached

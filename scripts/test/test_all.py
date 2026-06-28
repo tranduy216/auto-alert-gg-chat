@@ -125,8 +125,10 @@ print("\n=== combined_backtest: backtest_coin() ===")
 _, r_none = combined_backtest('TEST', [], None, False, {})
 check("short data -> None", r_none is None)
 
-btc_da = data.get('BTCUSDT_4000_1609434000000', [])
-trx_da = data.get('TRXUSDT_4000_1609434000000', [])
+btc_key = next((k for k in data if k.startswith('BTCUSDT_4000_')), None)
+trx_key = next((k for k in data if k.startswith('TRXUSDT_4000_')), None)
+btc_da = data.get(btc_key, []) if btc_key else []
+trx_da = data.get(trx_key, []) if trx_key else []
 
 _, r = combined_backtest('TRX', trx_da, btc_da, False, None)
 check("result not None", r is not None)
@@ -149,14 +151,14 @@ cfg_ext = {'ma': 15, 'buf': 0.05, 'pyr': 3, 'lev': 1.8, 'ext_block': 0}
 _, r_ext = combined_backtest('TRX', trx_da, btc_da, False, cfg_ext)
 check("ext_block override works", r_ext is not None)
 
-# Portfolio merge
+# Portfolio merge (group by day, not exact ms timestamp)
 curves = [r['ts_curve'], r_short['ts_curve']]
 merged = {}
 for curve in curves:
     for ts, eq in curve:
-        merged[ts] = merged.get(ts, []) + [eq]
-tss = sorted(merged.keys())
-pf_eq = [sum(merged[ts])/len(merged[ts]) for ts in tss if len(merged[ts]) == 2]
+        day = datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc).strftime('%Y-%m-%d')
+        merged.setdefault(day, []).append(eq)
+pf_eq = [sum(v)/len(v) for v in merged.values() if len(v) == 2]
 check("merged portfolio", len(pf_eq) > 0)
 check("all equities positive", all(e > 0 for e in pf_eq))
 
@@ -164,7 +166,8 @@ check("all equities positive", all(e > 0 for e in pf_eq))
 print("\n=== Pooled 1-coin ===")
 from pooled_backtest import run_pooled
 trx_cfg = PYRAMID_STRATEGIES[0][2]
-r_pooled = run_pooled(data, [('TRX-L', 'TRXUSDT_4000_1609434000000', False, trx_cfg)])
+trx_pool_key = next((k for k in data if k.startswith('TRXUSDT_4000_')), '')
+r_pooled = run_pooled(data, [('TRX-L', trx_pool_key, False, trx_cfg)])
 
 _, r_single = combined_backtest('TRX', trx_da, btc_da, False, trx_cfg)
 check("CAGR within 10%", abs(r_pooled['cagr'] - r_single['cagr']) < 10.0)
