@@ -162,7 +162,7 @@ def main():
             lev = e_cfg.get('lev', 2); trail = exit_cfg.get('trail', 0.80)
             tp = exit_cfg.get('tp');     close_pct = exit_cfg.get('close_pct', SHORT_CLOSE_PCT)
             inst_id = SYMBOL_OKX.get(name)
-            pos = pos_map.get(inst_id, {})
+            pos = pos_map.get(name, {})
 
             # Update peak/trough for each entry
             for e in coin_entries:
@@ -325,6 +325,36 @@ def main():
                 except Exception as e:
                     log(f"  {name}: PYRAMID FAILED: {e}")
 
+    # ── Short Pyramid: ROI >= next_pyr_roi → add short entry ──
+    if os.environ.get("OKX_API_KEY") and eq > 0:
+        for name, is_short, cfg in PYRAMID_STRATEGIES:
+            if name not in TRADING_COIN_LIST: continue
+            if not is_short or not cfg.get('pyramid', {}).get('enabled', False): continue
+            coin_entries = entries_map.get(name, [])
+            da = data_map.get(name, [])
+            if not da or not coin_entries: continue
+            cc = da[-1]['close']
+            lev = cfg['entry'].get('lev', 2)
+            avg_ep, _ = avg_entry(coin_entries)
+            roi = (avg_ep - cc) / avg_ep * 100 * lev
+            pyr_roi = get_state(name).get('next_pyr_roi', 8)
+            pyr_date = get_state(name).get('pyr_date', '')
+            if roi >= pyr_roi and pyr_date != today:
+                usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
+                usd_val *= cfg['entry'].get('short_mult', 2.0)
+                inst_id = SYMBOL_OKX.get(name)
+                ct_val = float(next((i.get('ctVal', '0.01') for i in instruments if i['instId'] == inst_id), '0.01'))
+                sz = max(1, int(usd_val / (cc * ct_val)))
+                try:
+                    r = okx_place_order(inst_id=inst_id, td_mode='cross',
+                        side='sell', sz=str(sz))
+                    log(f"  {name}: PYRAMID SHORT @ ${cc:.4f} ({roi:.1f}% ROI)")
+                    add_entry(name, cc, True)
+                    pyr_step = cfg.get('pyramid', {}).get('pyr_step', 8)
+                    set_state(name, {'next_pyr_roi': pyr_roi + pyr_step, 'pyr_date': today})
+                except Exception as e:
+                    log(f"  {name}: PYRAMID SHORT FAILED: {e}")
+
     # ── Entry check ──
     signals = []
     traded_signals = []
@@ -336,7 +366,7 @@ def main():
         if sig:
             should, mult, price = sig
             dir = 'BUY' if not is_short else 'SELL'
-            signals.append((name, dir, price, cfg['entry'].get('lev', 1.8), cfg.get('exit', {}).get('trail', 0.80), mult))
+            signals.append((name, dir, price, cfg['entry'].get('lev', 1.8), cfg.get('exit', {}).get('trail', 0.80), mult, cfg['entry'].get('short_mult', 2.0)))
             log(f"  {name}: {dir} @ {price:.4f}  mult={mult:.1f}x")
 
     if os.environ.get("OKX_API_KEY") and eq > 0:
@@ -348,7 +378,7 @@ def main():
                 if btc_ma200[-1]:
                     btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
 
-            for name, direction, price, lev, trail, mult in signals:
+            for name, direction, price, lev, trail, mult, short_mult in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
                     log(f"  {name}: no instrument mapping, skipped")
@@ -378,11 +408,11 @@ def main():
 
                 usd_val = eq * lev * ENTRY_PCT * mult
                 if direction == 'SELL':
-                    usd_val *= 2
+                    usd_val *= short_mult
 
                 if direction == 'SELL':
-                    btc_pos = pos_map.get(inst_id, {})
-                    existing_margin = float(btc_pos.get('margin', 0))
+                    existing_pos = pos_map.get(name, {})
+                    existing_margin = float(existing_pos.get('margin', 0))
                     new_margin = usd_val / lev
                     if existing_margin + new_margin > eq * SHORT_MAX_MARGIN:
                         log(f"  {name}: short cap {SHORT_MAX_MARGIN*100:.0f}% margin, skipped")

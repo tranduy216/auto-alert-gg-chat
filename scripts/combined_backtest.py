@@ -194,17 +194,13 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
 
         if should_enter and not is_short:
             mult = winner_mult(entries, cc, False, lev_coin)
-
-        if should_enter:
-            if is_short:
-                short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
-                if short_mp + eq * ENTRY_PCT * mult > SHORT_MAX_MARGIN:
-                    should_enter = False
+        elif should_enter and is_short:
+            mult = 1.0
 
         if should_enter:
             mp = eq * ENTRY_PCT * mult * cfg.get('pyramid', {}).get('entry_mult', 1.0)
             if is_short:
-                mp *= 2
+                mp *= e_cfg.get('short_mult', 2.0)
 
             if dep + mp <= max_margin * total_val:
                 e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
@@ -212,7 +208,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 entries.append(e)
                 last_ep = cc; lei = idx
 
-        # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry, next += 7%% ──
+        # ── Pyramid: 1/day, ROI >= next_pyr_roi → entry ──
         if cfg.get('pyramid', {}).get('enabled', False) and not is_short and long_entries and avg_ep_long and idx - pyr_bar >= 1:
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
             if roi >= next_pyr_roi:
@@ -224,6 +220,22 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                     pyr_bar = idx
                     last_ep = cc; lei = idx
         if not is_short and not long_entries:
+            next_pyr_roi = 8
+
+        # ── Short Pyramid ──
+        if cfg.get('pyramid', {}).get('enabled', False) and is_short and short_entries and avg_ep_short and idx - pyr_bar >= 1:
+            roi = (avg_ep_short - cc) / avg_ep_short * 100 * lev_coin
+            if roi >= next_pyr_roi:
+                mt = eq * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
+                mt *= e_cfg.get('short_mult', 2.0)
+                if dep + mt <= max_margin * total_val:
+                    e = {'ep': cc, 'mp': mt, 'rem': 1.0, 'tp': 0, 'is_short': True, 'lo': cc}
+                    entries.append(e)
+                    pyr_step = cfg.get('pyramid', {}).get('pyr_step', 7)
+                    next_pyr_roi += pyr_step
+                    pyr_bar = idx
+                    last_ep = cc; lei = idx
+        if is_short and not short_entries:
             next_pyr_roi = 8
 
         ureal = 0

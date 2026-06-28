@@ -66,8 +66,9 @@ PYRAMID_STRATEGIES = [
         'pyramid': {'enabled': True, 'entry_mult': 1.5},
     }),
     ('BTC', True, {
-        'entry': {'ma': 5, 'buffer': 0.07, 'lev': 2},
+        'entry': {'ma': 10, 'buffer': 0.05, 'lev': 2.5, 'short_mult': 3.0},
         'exit':  {'trail': 0.80, 'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]},
+        'pyramid': {'enabled': True, 'entry_mult': 0.7, 'pyr_step': 8, 'pyr_cap': 3},
     }),
 ]
 

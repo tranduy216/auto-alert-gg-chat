@@ -27,16 +27,17 @@ def check_signal(coin_da, btc_da, is_short, cfg, coin_name):
     if not coin_da or len(coin_da) < 60:
         return None
 
-    lev_coin = cfg.get('lev', 1.8)
-    ma_buf = cfg.get('buf', MA_BUF)
-    ext_block = cfg.get('ext_block', EXT_BLOCK_PCT)
-    ma_period = cfg.get('ma', MA_PERIOD)
-    ma_slope = cfg.get('ma_slope', False)
-    lower_high = cfg.get('lower_high', False)
-    asym_buffer = cfg.get('asym_buffer', False)
-    vol_bars = cfg.get('vol_bars', 2)
-    green_min_count = cfg.get('green_min_count', 0)
-    green_window = cfg.get('green_window', 0)
+    e_cfg = cfg.get('entry', {})
+    lev_coin = e_cfg.get('lev', 1.8)
+    ma_buf = e_cfg.get('buffer', MA_BUF)
+    ext_block = e_cfg.get('ext_block', EXT_BLOCK_PCT)
+    ma_period = e_cfg.get('ma', MA_PERIOD)
+    ma_slope = e_cfg.get('ma_slope', False)
+    lower_high = e_cfg.get('lower_high', False)
+    asym_buffer = e_cfg.get('asym_buffer', False)
+    vol_bars = e_cfg.get('vol_bars', 2)
+    green_min_count = e_cfg.get('green_min_count', 0)
+    green_window = e_cfg.get('green_window', 0)
 
     closes = [c['close'] for c in coin_da]
     vols = [c['volume'] for c in coin_da]

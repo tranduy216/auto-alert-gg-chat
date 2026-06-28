@@ -267,7 +267,7 @@ def run_pooled(data, strategies):
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                 mp = eq * ENTRY_PCT * mult / n * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 if is_short:
-                    mp *= 2
+                    mp *= cfg['entry'].get('short_mult', 2.0)
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': is_short,
                           'hi': None if is_short else cc, 'lo': cc if is_short else None}
@@ -275,7 +275,7 @@ def run_pooled(data, strategies):
                     last_ep_map[label] = cc
                     lei_map[label] = idx
 
-        # ── Pyramid: ROI-based, 1/day ──
+        # ── Long Pyramid: ROI-based, 1/day ──
         for label, cd in coin_data.items():
             if cd['is_short'] or not cd['cfg'].get('pyramid', {}).get('enabled', False): continue
             entries = entries_map[label]
@@ -294,7 +294,7 @@ def run_pooled(data, strategies):
                 mp = eq * ENTRY_PCT * cd['cfg'].get('pyramid', {}).get('entry_mult', 1.0)
                 total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
                 closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
-                lev_map = {l: coin_data[l]['cfg'].get('lev', 1.5) for l in coin_data}
+                lev_map = {l: coin_data[l]['cfg'].get('entry', {}).get('lev', 1.5) for l in coin_data}
                 total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
                 if total_dep + mp <= MAX_CAP * total_val:
                     e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': False, 'hi': cc}
@@ -304,10 +304,41 @@ def run_pooled(data, strategies):
                     last_ep_map[label] = cc
                     lei_map[label] = idx
 
+        # ── Short Pyramid ──
+        for label, cd in coin_data.items():
+            if not cd['is_short'] or not cd['cfg'].get('pyramid', {}).get('enabled', False): continue
+            entries = entries_map[label]
+            short_entries = [e for e in entries if e.get('is_short')]
+            if not short_entries:
+                next_pyr_roi_map[label] = 8
+                continue
+            idx = time_to_idx[label].get(ts)
+            if idx is None or idx < 200: continue
+            if idx - pyr_bar_map[label] < 1: continue
+            cc = cd['closes'][idx]
+            avg_ep, _ = avg_entry(short_entries)
+            lev_coin = cd['cfg'].get('entry', {}).get('lev', 1.5)
+            roi = (avg_ep - cc) / avg_ep * 100 * lev_coin
+            if roi >= next_pyr_roi_map[label]:
+                mp = eq * ENTRY_PCT * cd['cfg'].get('pyramid', {}).get('entry_mult', 1.0)
+                mp *= cd['cfg']['entry'].get('short_mult', 2.0)
+                total_dep = sum(sum(e.get('mp', 0) for e in es) for es in entries_map.values())
+                closes_map = {l: coin_data[l]['closes'][time_to_idx[l].get(ts)] if time_to_idx[l].get(ts) is not None else None for l in coin_data}
+                lev_map = {l: coin_data[l]['cfg'].get('entry', {}).get('lev', 1.5) for l in coin_data}
+                total_val = total_asset_value_multi(entries_map, closes_map, eq, lev_map)
+                if total_dep + mp <= MAX_CAP * total_val:
+                    e = {'ep': cc, 'mp': mp, 'rem': 1.0, 'tp': 0, 'is_short': True, 'lo': cc}
+                    entries.append(e)
+                    pyr_step = cd['cfg'].get('pyramid', {}).get('pyr_step', 7)
+                    next_pyr_roi_map[label] += pyr_step
+                    pyr_bar_map[label] = idx
+                    last_ep_map[label] = cc
+                    lei_map[label] = idx
+
         # ── Unrealized PnL ──
         ureal = 0
         for label, entries in entries_map.items():
-            lev_coin = coin_data[label]['cfg'].get('lev', 1.5)
+            lev_coin = coin_data[label]['cfg'].get('entry', {}).get('lev', 1.5)
             idx = time_to_idx[label].get(ts)
             if idx is None: continue
             cc = coin_data[label]['closes'][idx]
