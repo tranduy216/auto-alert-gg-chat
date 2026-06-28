@@ -2,7 +2,7 @@
 Unit tests for backtest_shared, combined_backtest, pooled_backtest, crypto_trading.
 Run: python3 -B scripts/test/test_all.py
 """
-import sys, json, os, datetime
+import sys, os, datetime
 from unittest.mock import patch, Mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -12,7 +12,7 @@ from backtest_shared import (
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE, MAX_CAP, FEE_RATE,
     EXT_BLOCK_PCT, fee_factor, BTC_SHORT_TP, PYRAMID_STRATEGIES,
     LONG_TP, SHORT_TP, SHORT_CLOSE_PCT,
-    load_data, fetch_paxg, winner_mult, total_asset_value, compute_results,
+    load_data, winner_mult, total_asset_value, compute_results,
 )
 from combined_backtest import backtest_coin as combined_backtest
 
@@ -293,7 +293,8 @@ def make_okx_resp(code='0', data=None):
 with patch('backtest_shared.requests.get') as mock_get:
     # XAU: spot probe fails (empty), SWAP probe succeeds (has data)
     calls = []
-    def side_effect(url, params=None, timeout=10):
+    def side_effect(*args, **kwargs):
+        params = kwargs.get('params')
         calls.append(params)
         resp = Mock()
         inst_id = (params or {}).get('instId', '')
@@ -410,7 +411,7 @@ print("\n=== _try_fetch() retry ===")
 from backtest_shared import _try_fetch
 
 call_counts = [0]
-def flaky_fetcher(symbol, days):
+def flaky_fetcher(*args, **kwargs):
     call_counts[0] += 1
     if call_counts[0] < 3:
         return None
@@ -421,7 +422,7 @@ check("retries until success", result is not None and len(result) >= 200)
 check("called 3 times", call_counts[0] == 3)
 
 call_counts[0] = 0
-def always_fail(symbol, days):
+def always_fail(*args, **kwargs):
     call_counts[0] += 1
     return None
 

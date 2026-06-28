@@ -15,8 +15,9 @@ class TestOKXUtils(unittest.TestCase):
 
     def test_fetch_candles_import(self):
         """Should import fetch functions"""
-        from scripts.crypto_trading import _fetch_okx, _parse_okx_klines
-        self.assertTrue(callable(_fetch_okx))
+        from scripts.utils.okx_utils import _okx_request
+        from scripts.crypto_trading_legacy import _parse_okx_klines
+        self.assertTrue(callable(_okx_request))
         self.assertTrue(callable(_parse_okx_klines))
 
     @patch('scripts.utils.okx_utils._okx_request')

@@ -2,32 +2,40 @@
 
 ## Overview
 
-Multi-coin pyramid strategy với shared capital pool. Long TRX/PAXG khi gần MA, short BTC khi bear. Tất cả logic entry tập trung ở `backtest_shared.entry_conditions()` — backtest + live trading dùng chung.
+Multi-coin pyramid strategy với shared capital pool. Long TRX/XAU khi gần MA, short BTC khi bear. Tất cả logic entry tập trung ở `backtest_shared.entry_conditions()` — backtest + live trading dùng chung.
 
 ## Portfolio
 
-| Coin | Direction | Leverage | MA | Buffer | Pyramid ROI | Filters |
-|------|-----------|----------|----|--------|-------------|---------|
-| TRX | Long | 1.8x | 15 | 5% | 3% | — |
-| XAU | Long | 1.8x | 15 | 5% | 3% | Lower High |
-| BTC | Short | 1.6x | 5 | 5% | 3% | — |
+| Coin | Direction | Leverage | MA | Buffer | Exit | Filters |
+|------|-----------|----------|----|--------|------|---------|
+| TRX | Long | 2x | 15 | 5% | TP 5-stage (10/20/30/40/50% → 5/10/15/20/10%), trail 18% | vol_bars=3 |
+| XAU | Long | 2x | 20 | 5% | MA cross (40/90) + buffer 3% | Lower High, pyramid entry_mult=1.5 |
+| BTC | Short | 2.5x | 10 | 5% | TP 3-stage (4/8/12% → 30/40/30%), trail 20% | short_mult=3.0, pyramid entry_mult=0.7, pyr_step=8, pyr_cap=3 |
 
 ## Entry Logic (`entry_conditions`)
 
-Shared function ở `scripts/backtest_shared.py:180`:
+Shared function ở `scripts/backtest_shared.py:457`:
 
 ```
-near_ma  = abs(close - ma) / ma <= buffer
-vol_cond = (vol[i] + vol[i-1]) / 2 > vol_ma20
-can_enter_long  = not is_short
-can_enter_short = is_short and not btc_bull
-should_enter = can_enter AND near_ma AND vol_cond AND cooldown AND mult > 0
+near_ma     = abs(close - ma) / ma <= buffer
+vol_cond    = avg(last N volumes) > vma (N = vol_bars, default 2)
+can_long    = not is_short
+can_short   = is_short and not btc_bull
+should_enter = can_X AND near_ma AND vol_cond AND mult > 0
 ```
+
+### Additional Filters
+
+- **MA Slope** (`ma_slope`): long chỉ entry khi MA đang tăng (`
+ma[idx] > ma[idx-1]`)
+- **Lower High** (`lower_high`): long chỉ entry khi không có lower high pattern (3 đỉnh giảm dần)
+- **Asym Buffer** (`asym_buffer`): dùng buffer=2% khi close dưới MA, buffer gốc khi trên MA
+- **Green Candle** (`green_min_count`/`green_window`): yêu cầu N green candles trong window bars gần nhất
 
 ### Extension Block
 
-- **Long:** block thêm entry nếu `(cc - lowest_ep) / lowest_ep * 100 > 25%`
-- **Short:** block thêm entry nếu `(highest_ep - cc) / highest_ep * 100 > 25%`
+- **Long:** block thêm entry nếu `(cc - lowest_ep) / lowest_ep * 100 > EXT_BLOCK_PCT` (default 25%)
+- **Short:** block thêm entry nếu `(highest_ep - cc) / highest_ep * 100 > EXT_BLOCK_PCT`
 
 ### Winner Multiplier
 
@@ -42,69 +50,54 @@ else         → 0.5x
 
 ## Exit Logic
 
-### Long: Trailing Stop
+### Long: TP Ladder + Trailing
 
-Trail 20% từ high (`cc <= e['hi'] * 0.80`). Không take profit ladder.
-
-### Short: TP Ladder
+TRX dùng TP 5-stage + trailing:
 
 | Stage | ROI | % Position |
 |-------|-----|-----------|
-| 1 | 4% | 20% |
-| 2 | 8% | 20% |
-| 3 | 12% | 20% |
-| 4 | 16% | 20% |
-| 5 | 20% | 20% |
+| 1 | 10% | 5% |
+| 2 | 20% | 10% |
+| 3 | 30% | 15% |
+| 4 | 40% | 20% |
+| 5 | 50% | 10% |
+| **Total** | | **60%** |
+
+Sau TP, trailing 18% từ peak (`close <= peak * 0.82`).
+
+XAU dùng MA cross exit: đóng khi MA40 cross xuống dưới MA90 + buffer 3%.
+
+### Short: TP Ladder + Trailing
+
+| Stage | ROI | % Position |
+|-------|-----|-----------|
+| 1 | 4% | 30% |
+| 2 | 8% | 40% |
+| 3 | 12% | 30% |
 | **Total** | | **100%** |
 
-Short cũng exit forced khi BTC > MA200 (regime turn bull).
+Trailing 20% từ trough (`close >= trough * 1.08`). Short cũng exit forced khi BTC > MA200 (regime turn bull).
 
 ### Pyramid
 
-Thêm entry mới khi ROI của entry trước đó >= `pyr_roi` (default 3%).
-Entry size = `eq * ENTRY_PCT / lev * mult`. Cap: tổng margin ≤ 75% total asset value.
+Thêm entry mới khi ROI >= pyr_step (config per coin, default 8%). Entry size = `eq * ENTRY_PCT / lev * mult * pyramid.entry_mult`. Cap pyramid theo `pyramid.pyr_cap`.
 
 ## Fee Model
 
 `fee_factor = 1 - 2 * FEE_RATE * lev` (FEE_RATE = 0.0005 = 0.05% mỗi side).
 
-## Backtest Results
-
-### Per-coin (standalone $10k mỗi coin)
-
-| Strategy | CAGR | Max DD | Config |
-|----------|------|--------|--------|
-| TRX-L | +36.2% | −29.1% | ma=15, buf=5%, pyr=3, lev=1.8 |
-| PAXG-L | +37.1% | −25.9% | ma=15, buf=5%, pyr=3, lev=1.8 |
-| BTC-S | +6.3% | −16.4% | ma=5, buf=5%, pyr=3, lev=1.6 |
-| **Portfolio (equal-weight)** | **+33.9%** | **−16.4%** | |
-
-### Pooled ($10k shared, FCFS signals)
-
-| Year | Return |
-|------|--------|
-| 2021 | -0.3% |
-| 2022 | **+19.1%** |
-| 2023 | +12.3% |
-| 2024 | **+236.7%** |
-| 2025 | **+95.3%** |
-| 2026 | +9.7% |
-| **CAGR** | **+58.2%** |
-| Max DD | −24.7% |
-| Final | **$96,254** |
-
 ## File Map
 
 | File | Role | Lines |
 |------|------|-------|
-| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions`, `fetch_candles` (OKX→Binance) | 361 |
-| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 227 |
-| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 232 |
-| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 101 |
-| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 112 |
+| `scripts/backtest_shared.py` | Constants, helpers, `entry_conditions`, `fetch_candles` (OKX→CMC→CoinGecko) | 545 |
+| `scripts/combined_backtest.py` | Per-coin backtest (calls `entry_conditions`) | 323 |
+| `scripts/pooled_backtest.py` | Pooled shared-capital backtest | 392 |
+| `scripts/crypto_trading.py` | Live trading (calls `entry_conditions`) | 472 |
+| `scripts/live_pyramid.py` | Live signal generator (calls `entry_conditions`) | 124 |
 | `scripts/crypto_trading_legacy.py` | Preserved old system for legacy scripts | 2254 |
 | `scripts/trading_config.py` | Coin profiles, SHORT_ALLOWED | 155 |
-| `scripts/test/test_all.py` | Unit tests (75 tests, 0 failures) | 188 |
+| `scripts/test/test_all.py` | Unit tests (139+ tests, 0 failures) | 670 |
 
 ## Key Principle
 

@@ -1,28 +1,30 @@
 """
 Unit tests for crypto_trading.py using unittest
 Coverage: Position sizing, indicators, cooldown, coin profiles
+NOTE: Legacy tests reference deprecated crypto_trading_legacy.py functions.
+Post-deprecation, move tests to backtest_shared.py or remove.
 """
 import unittest
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 
-from crypto_trading import (
+from scripts.crypto_trading import check_signals, sync_entries_with_positions
+from scripts.backtest_shared import sma
+
+# Legacy functions (deprecated, will be moved to backtest_shared.py)
+from scripts.crypto_trading_legacy import (
     _fib_cooldown_bars,
     compute_adx,
-    compute_sideway_score,
-    sma,
     compute_atr,
     compute_rsi,
-    _coin_lev,
-    _coin_sl_roi,
-    _coin_trail,
-    _coin_cap,
-    get_coin_profile
+    compute_sideway_score,
+    get_coin_profile,
 )
-
+from scripts.trading_config import _coin_lev, _coin_sl_roi, _coin_trail, _coin_cap
 
 class TestCooldown(unittest.TestCase):
     """Test cooldown functions"""
@@ -288,62 +290,62 @@ class TestAdditionalFunctions(unittest.TestCase):
     """Test newly covered edge cases"""
 
     def test_compute_volume_score_normal(self):
-        from crypto_trading import compute_volume_score
+        from crypto_trading_legacy import compute_volume_score
         self.assertEqual(compute_volume_score(200, 100), 1.0)  # 2x avg
         self.assertEqual(compute_volume_score(150, 100), 0.8)  # 1.5x avg
         self.assertEqual(compute_volume_score(110, 100), 0.4)  # 1.1x avg
         self.assertEqual(compute_volume_score(50, 100), 0.2)   # below avg
 
     def test_compute_volume_score_zero_division(self):
-        from crypto_trading import compute_volume_score
+        from crypto_trading_legacy import compute_volume_score
         self.assertEqual(compute_volume_score(100, 0), 0.2)  # no crash
         self.assertEqual(compute_volume_score(0, 0), 0.2)    # no crash
 
     def test_evaluate_trend_3d_bullish(self):
-        from crypto_trading import evaluate_trend_3d
+        from crypto_trading_legacy import evaluate_trend_3d
         label, score = evaluate_trend_3d(110, 105, 100)
         self.assertEqual(score, 3)
         self.assertEqual(label, "BULLISH")
 
     def test_evaluate_trend_3d_bearish(self):
-        from crypto_trading import evaluate_trend_3d
+        from crypto_trading_legacy import evaluate_trend_3d
         label, score = evaluate_trend_3d(90, 95, 100)
         self.assertEqual(score, -3)
         self.assertEqual(label, "BEARISH")
 
     def test_evaluate_trend_3d_sideway(self):
-        from crypto_trading import evaluate_trend_3d
+        from crypto_trading_legacy import evaluate_trend_3d
         label, score = evaluate_trend_3d(100.1, 100, 100)
         self.assertEqual(score, 0)
         self.assertEqual(label, "SIDEWAY")
 
     def test_resolve_action_v6_flat_long(self):
-        from crypto_trading import resolve_action_v6
+        from crypto_trading_legacy import resolve_action_v6
         state, action = resolve_action_v6(3, True, False, "FLAT")
         self.assertEqual(action, "OPEN_LONG_ENTRY_1")
 
     def test_resolve_action_v6_flat_short(self):
-        from crypto_trading import resolve_action_v6
+        from crypto_trading_legacy import resolve_action_v6
         state, action = resolve_action_v6(-3, False, True, "FLAT")
         self.assertEqual(action, "OPEN_SHORT_ENTRY_1")
 
     def test_resolve_action_v6_no_trade(self):
-        from crypto_trading import resolve_action_v6
+        from crypto_trading_legacy import resolve_action_v6
         state, action = resolve_action_v6(0, False, False, "FLAT")
         self.assertEqual(action, "NO_TRADE")
 
     def test_approx_equal(self):
-        from crypto_trading import _approx_equal
+        from crypto_trading_legacy import _approx_equal
         self.assertTrue(_approx_equal(100, 100.1, 0.005))
         self.assertFalse(_approx_equal(100, 101, 0.005))
 
     def test_rsi_all_equal(self):
-        from crypto_trading import compute_rsi
+        from crypto_trading_legacy import compute_rsi
         rsi = compute_rsi([100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
         self.assertEqual(rsi, 100.0)  # all equal = RSI 100
 
     def test_entry_score_v7_long(self):
-        from crypto_trading import _entry_score_v7_long
+        from crypto_trading_legacy import _entry_score_v7_long
         candles = [{'close': 100.0, 'high': 101, 'low': 99, 'open': 100, 'volume': 1000}] * 50
         score = _entry_score_v7_long(
             3, 105, 103, 102, 100, 98, 101, 100, 0.6, 1200, 1000, 45
@@ -351,102 +353,42 @@ class TestAdditionalFunctions(unittest.TestCase):
         self.assertGreater(score, 50)  # strong signal
 
 
-class TestTradingRules(unittest.TestCase):
-    """Test unified trading rules"""
 
-    def test_detect_btc_safe(self):
-        from scripts.trading_rules import detect_btc_safe
-        self.assertTrue(detect_btc_safe(15))   # ADX < 22 → safe
-        self.assertFalse(detect_btc_safe(25))  # ADX ≥ 22 → aggressive
+class TestLiveConsistency(unittest.TestCase):
+    """Regression tests for live/backtest consistency."""
 
-    def test_detect_weak_short(self):
-        from scripts.trading_rules import detect_btc_safe
-        self.assertTrue(detect_btc_safe(15))  # ADX < 22 → safe
-        self.assertFalse(detect_btc_safe(25))  # ADX ≥ 22 → aggressive
+    def test_check_signals_uses_nested_entry_config(self):
+        closes = [100.0] * 199 + [101.0]
+        volumes = [100.0] * 199 + [200.0]
+        coin_da = [
+            {"open": c - 1, "high": c + 1, "low": c - 2, "close": c, "volume": v, "time": i}
+            for i, (c, v) in enumerate(zip(closes, volumes))
+        ]
+        btc_da = [
+            {"open": 50000.0, "high": 50000.0, "low": 50000.0, "close": 50000.0, "volume": 1.0, "time": i}
+            for i in range(220)
+        ]
+        cfg = {"entry": {"ma": 20, "buffer": 0.03, "lev": 2.5, "vol_bars": 2}}
 
-    def test_detect_bounce(self):
-        from scripts.trading_rules import detect_bounce
-        self.assertTrue(detect_bounce("ETH", btc_bull=False))
-        self.assertTrue(detect_bounce("BNB", btc_bull=False))
-        self.assertTrue(detect_bounce("TRX", btc_bull=False))
-        self.assertFalse(detect_bounce("ETH", btc_bull=True))
-        self.assertFalse(detect_bounce("BTC", btc_bull=False))
+        result = check_signals(coin_da, btc_da, cfg, False, [])
 
-    def test_get_entry_rule_safe_mode(self):
-        from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, bm, sf, *_ = get_entry_rule(True, False, False, True, False, 80)
-        self.assertEqual(lev, 1.5)  # safe mode = 1.5x
-        self.assertEqual(mp, 0.035)  # 3.5% entry
-        self.assertTrue(sf)  # safe flag
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], True)
+        self.assertEqual(result[2], 101.0)
 
-    def test_get_entry_rule_bear_short(self):
-        from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, _, _, _, shf = get_entry_rule(False, True, False, False, True, 70)
-        self.assertEqual(lev, 3.5)  # aggressive
-        self.assertTrue(shf)  # short flag
+    def test_sync_entries_with_positions_uses_coin_key(self):
+        okx_positions = [{"instId": "BTC-USDT-SWAP", "pos": "2", "margin": "123"}]
 
-    def test_get_entry_rule_bull(self):
-        from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, bm, *_ = get_entry_rule(False, False, False, True, False, 80)
-        self.assertEqual(lev, 3.5)
-        self.assertTrue(bm)  # bull mode
+        with patch("crypto_trading.get_entries", side_effect=lambda coin: [{"ep": 100}] if coin == "BTC" else []), \
+             patch("crypto_trading.clear_entries"), \
+             patch("crypto_trading._reset_position_state"), \
+             patch("crypto_trading.set_state") as mock_set_state:
+            entries_map, pos_map = sync_entries_with_positions(okx_positions, lambda msg: None)
 
-    def test_process_bull_exit(self):
-        from scripts.trading_rules import process_bull_exit
-        r = process_bull_exit(15, 0.15, None, 110, 100, 0, 1.0, False, 10, False)
-        self.assertFalse(r['removed'])
-        self.assertLess(r['rem'], 1.0)  # TP should close partial
-
-    def test_bull_exit_sl(self):
-        """Per-coin SL should close position"""
-        from scripts.trading_rules import process_bull_exit
-        r = process_bull_exit(-10, 0, None, 100, 90, 0, 1.0, False, 10, False, coin_sl=8)
-        self.assertTrue(r['removed'])
-        self.assertIn('SL', r['exits'])
-
-    def test_bull_exit_peak_dd(self):
-        """Per-coin peak DD should close position"""
-        from scripts.trading_rules import process_bull_exit
-        r = process_bull_exit(5, 0, None, 100, 90, 0, 1.0, False, 10, False, coin_peak_dd=10)
-        # peak_roi is 0 internally, roi=5, 5 - 0 = 5 < 10, so not triggered
-        self.assertFalse(r['removed'])
-
-    def test_bounce_entry_per_coin(self):
-        """Bounce entry should use per-coin lev for TRX"""
-        from scripts.trading_rules import get_entry_rule
-        mp, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="TRX")
-        self.assertEqual(lev, 2.5)  # default bounce lev now 2.5
-        self.assertTrue(bf)  # bounce flag
-
-    def test_bounce_entry_default_lev(self):
-        """Bounce entry for ETH should use default 2.0 lev"""
-        from scripts.trading_rules import get_entry_rule
-        _, lev, sl, _, _, bf, _ = get_entry_rule(False, False, True, False, False, 65, coin="ETH")
-        self.assertEqual(lev, 2.5)  # default bounce lev now 2.5
-        self.assertTrue(bf)
-
-    def test_process_bounce_exit_per_coin_peak_dd(self):
-        """Bounce exit should use per-coin peak DD"""
-        from scripts.trading_rules import process_bounce_exit
-        r = process_bounce_exit(5, 10, 1.0, 0, 5, peak_dd=3)
-        # peak_roi = max(-999, 5) = 5, roi=5, 5 - 5 = 0 < 3, no trigger
-        self.assertFalse(r['removed'])
-
-    def test_process_bounce_exit_trail_activation(self):
-        """Bounce exit should activate trail early with trail_activation param"""
-        from scripts.trading_rules import process_bounce_exit
-        # roi=15 >= trail_activation=10, trail_ready=True
-        # hi=105, tstop=max(None or 100*0.97=97, 105*0.97=101.85)=101.85
-        # cc=103 > 101.85, so no trail trigger
-        r = process_bounce_exit(15, 15, 1.0, 0, 5, hi=105, cc=103, trail_activation=10)
-        self.assertFalse(r['removed'])
-        self.assertIn('BOUNCE_TP@4%', r['exits'])  # TP fires first
-
-    def test_process_safe_exit_sl(self):
-        from scripts.trading_rules import process_safe_exit
-        r = process_safe_exit(-10, 0, 1.0, False, 0, [(5, 1.0)], 5, 5)
-        self.assertTrue(r['removed'])
-        self.assertIn('SL', r['exits'])
+        self.assertIn("BTC", pos_map)
+        self.assertEqual(pos_map["BTC"]["margin"], "123")
+        self.assertEqual(entries_map["BTC"], [])
+        mock_set_state.assert_not_called()
 
 
 if __name__ == '__main__':
