@@ -297,6 +297,40 @@ def main():
     if eq > 0:
         log(f"Equity: ${eq:,.0f}")
 
+    # ── Position info (current TP/SL levels, trailing) ──
+    for name, is_short, cfg in PYRAMID_STRATEGIES:
+        if name not in TRADING_COIN_LIST: continue
+        coin_entries = entries_map.get(name, [])
+        da = data_map.get(name, [])
+        if not da or not coin_entries: continue
+        cc = da[-1]['close']; hi = da[-1]['high']; bl = da[-1]['low']
+        e_cfg = cfg.get('entry', {}); exit_cfg = cfg.get('exit', {})
+        lev = e_cfg.get('lev', 2)
+        avg_ep, _ = avg_entry(coin_entries)
+        roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
+        trail = exit_cfg.get('trail', 0.80)
+        tp = exit_cfg.get('tp')
+        if not is_short and exit_cfg.get('mode') != 'ma_cross':
+            peak = max(e.get('hi', cc) for e in coin_entries)
+            trail_px = peak * trail
+            log(f"  {name} LONG {len(coin_entries)}x  EP ${avg_ep:.4f}  ROI {roi:+.1f}%  trail ${trail_px:.4f} ({peak:.4f})")
+            if tp:
+                for trg, cf in tp:
+                    if roi < trg:
+                        log(f"    next TP {trg}% → close {cf*100:.0f}%")
+                        break
+        elif not is_short:
+            log(f"  {name} LONG {len(coin_entries)}x  EP ${avg_ep:.4f}  ROI {roi:+.1f}%  exit=MA_cross")
+        elif is_short:
+            trough = min(e.get('lo', cc) for e in coin_entries)
+            trail_px = trough * (1 + exit_cfg.get('close_pct', SHORT_CLOSE_PCT))
+            log(f"  {name} SHORT {len(coin_entries)}x  EP ${avg_ep:.4f}  ROI {roi:+.1f}%  trail ${trail_px:.4f} ({trough:.4f})")
+            if tp:
+                for trg, cf in tp:
+                    if roi < trg:
+                        log(f"    next TP {trg}% → close {cf*100:.0f}%")
+                        break
+
     # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
     if os.environ.get("OKX_API_KEY") and eq > 0:
         for name, is_short, cfg in PYRAMID_STRATEGIES:

@@ -5,7 +5,8 @@ Daily Trading — BNB (pyramiding)
 - Multiple entries allowed (pyramiding)
 - TP/SL calculated on avg entry price of all open entries
 - 3% origin cap (10k) per entry, 3x leverage → $900/entry
-- TP/SL set on entry via OKX algo orders
+- TP/SL refreshed every execution via OCO algo orders (ATR-based)
+- Max 2 entries/day, 6h cooldown between entries
 """
 import os, sys, time, datetime
 from pathlib import Path
@@ -224,6 +225,11 @@ def main():
                     okx_close_position(inst)
                     clear_entries(coin)
                     set_state(coin, {'ep': 0, 'side': ''})
+                    try:
+                        algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
+                        algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
+                        if algo_ids: okx_cancel_algo(inst, algo_ids)
+                    except Exception: pass
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                                      f"SL: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / SL {sl_roi:.1f}%)")
@@ -235,11 +241,52 @@ def main():
                     okx_close_position(inst)
                     clear_entries(coin)
                     set_state(coin, {'ep': 0, 'side': ''})
+                    try:
+                        algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
+                        algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
+                        if algo_ids: okx_cancel_algo(inst, algo_ids)
+                    except Exception: pass
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                                      f"TP: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / TP {tp_roi:.1f}%)")
                 except Exception as e:
                     log(f"  close FAILED: {e}")
+
+    # ── Refresh OCO orders for existing positions with current TP/SL ──
+    if has_okx:
+        for coin in COINS:
+            h12 = h12_map.get(coin)
+            if not h12: continue
+            inst = OKX_SYMBOLS[coin]
+            stored = get_entries(coin)
+            if not stored:
+                continue
+            aep = avg_ep(stored)
+            if aep is None:
+                continue
+            batch_is_short = entry_is_short(stored[0])
+            total_ct = abs(float(pos_map.get(inst, {}).get('pos', 0))) if inst in pos_map else 0
+            if total_ct <= 0:
+                continue
+            tp_pct, sl_pct = calc_dynamic_tp_sl(h12)
+            tp_px = f"{aep * (1 - tp_pct):.2f}" if batch_is_short else f"{aep * (1 + tp_pct):.2f}"
+            sl_px = f"{aep * (1 + sl_pct):.2f}" if batch_is_short else f"{aep * (1 - sl_pct):.2f}"
+            exit_side = 'buy' if batch_is_short else 'sell'
+            try:
+                algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
+                algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
+                if algo_ids:
+                    okx_cancel_algo(inst, algo_ids)
+            except Exception as e:
+                log(f"  {coin}: algo cancel failed: {e}")
+            try:
+                okx_place_algo(inst_id=inst, td_mode='cross',
+                               side=exit_side, sz=str(int(total_ct)),
+                               ord_type='oco',
+                               tp_trigger_px=tp_px, sl_trigger_px=sl_px)
+                log(f"  {coin}: OCO refreshed @ avg ${aep:.2f} → TP {tp_px} SL {sl_px}")
+            except Exception as e:
+                log(f"  {coin}: OCO refresh failed: {e}")
 
     # ── Entry ──
     signals = []
