@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import sma, compute_results, atr
 
-COINS = ['BNB']
+COINS = ['BNB', 'TRX']
 CAPITAL_BASE = 10000
 ENTRY_MARGIN_PCT = 0.02
 LEV = 2.0
