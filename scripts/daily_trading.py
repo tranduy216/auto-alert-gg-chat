@@ -11,7 +11,7 @@ import os, sys, time, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from backtest_shared import sma
+from backtest_shared import sma, atr
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_place_algo,
@@ -24,10 +24,11 @@ CAPITAL_BASE = 10000
 ENTRY_MARGIN_PCT = 0.02
 LEV = 2.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
-TP_PCT = 0.06
-SL_PCT = 0.03
-TP_ROI = TP_PCT * 100 * LEV
-SL_ROI = SL_PCT * 100 * LEV
+ATR_PERIOD = 14
+SL_ATR_MULT = 1.5
+TP_ATR_MULT = 3.0
+FALLBACK_TP_PCT = 0.06
+FALLBACK_SL_PCT = 0.03
 MA_NEAR_BUF = 0.01
 PRICE_NEAR_BUF = 0.01
 
@@ -57,6 +58,20 @@ def entry_is_short(entry):
 
 def direction_name(is_short):
     return 'SHORT' if is_short else 'LONG'
+
+
+def calc_dynamic_tp_sl(h12_data):
+    highs = [c['high'] for c in h12_data]
+    lows = [c['low'] for c in h12_data]
+    closes = [c['close'] for c in h12_data]
+    atr_vals = atr(highs, lows, closes, ATR_PERIOD)
+    atr_val = atr_vals[-1] if atr_vals else None
+    if atr_val is None:
+        return FALLBACK_TP_PCT, FALLBACK_SL_PCT
+    price = closes[-1]
+    sl_pct = round(min(max((atr_val / price) * SL_ATR_MULT, 0.01), 0.10), 4)
+    tp_pct = round(min(max((atr_val / price) * TP_ATR_MULT, 0.02), 0.20), 4)
+    return tp_pct, sl_pct
 
 
 def check_signal(h12_da, daily_da):
@@ -148,7 +163,8 @@ def main():
     if has_okx:
         for coin in COINS:
             da = daily_map.get(coin)
-            if not da: continue
+            h12 = h12_map.get(coin)
+            if not da or not h12: continue
             inst = OKX_SYMBOLS[coin]
             stored = get_entries(coin)
             if not stored:
@@ -156,8 +172,11 @@ def main():
             cc = da[-1]['close']
             roi = avg_roi(stored, cc, LEV)
             is_sh = entry_is_short(stored[0])
+            tp_pct, sl_pct = calc_dynamic_tp_sl(h12)
+            tp_roi = tp_pct * 100 * LEV
+            sl_roi = sl_pct * 100 * LEV
 
-            if roi <= -SL_ROI:
+            if roi <= -sl_roi:
                 log(f"{coin}: SL hit (ROI {roi:.1f}%), closing all")
                 try:
                     okx_close_position(inst)
@@ -165,10 +184,10 @@ def main():
                     set_state(coin, {'ep': 0, 'side': ''})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                                     f"SL: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}%)")
+                                     f"SL: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / SL {sl_roi:.1f}%)")
                 except Exception as e:
                     log(f"  close FAILED: {e}")
-            elif roi >= TP_ROI:
+            elif roi >= tp_roi:
                 log(f"{coin}: TP hit (ROI {roi:.1f}%), closing all")
                 try:
                     okx_close_position(inst)
@@ -176,7 +195,7 @@ def main():
                     set_state(coin, {'ep': 0, 'side': ''})
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
-                                     f"TP: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}%)")
+                                     f"TP: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / TP {tp_roi:.1f}%)")
                 except Exception as e:
                     log(f"  close FAILED: {e}")
 
@@ -255,8 +274,10 @@ def main():
                 batch_is_short = entry_is_short(all_entries[0])
                 existing_ct = abs(float(pos_map.get(inst, {}).get('pos', 0))) if inst in pos_map else 0
                 total_ct = max(1, int(existing_ct + sz))
-                tp_px = f"{aep * (1 - TP_PCT):.2f}" if batch_is_short else f"{aep * (1 + TP_PCT):.2f}"
-                sl_px = f"{aep * (1 + SL_PCT):.2f}" if batch_is_short else f"{aep * (1 - SL_PCT):.2f}"
+                h12_coin = h12_map.get(coin)
+                tp_pct, sl_pct = calc_dynamic_tp_sl(h12_coin) if h12_coin else (FALLBACK_TP_PCT, FALLBACK_SL_PCT)
+                tp_px = f"{aep * (1 - tp_pct):.2f}" if batch_is_short else f"{aep * (1 + tp_pct):.2f}"
+                sl_px = f"{aep * (1 + sl_pct):.2f}" if batch_is_short else f"{aep * (1 - sl_pct):.2f}"
                 exit_side = 'buy' if batch_is_short else 'sell'
 
                 try:

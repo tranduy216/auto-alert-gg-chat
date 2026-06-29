@@ -9,8 +9,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backtest_shared import sma
 from daily_trading import (
     check_signal, avg_ep, avg_roi, entry_is_short, direction_name,
-    TP_PCT, SL_PCT, TP_ROI, SL_ROI, LEV,
-    CAPITAL_BASE, ENTRY_MARGIN_PCT, NOTIONAL,
+    calc_dynamic_tp_sl,
+    ATR_PERIOD, SL_ATR_MULT, TP_ATR_MULT,
+    FALLBACK_TP_PCT, FALLBACK_SL_PCT,
+    LEV, CAPITAL_BASE, ENTRY_MARGIN_PCT, NOTIONAL,
 )
 
 failures = 0
@@ -85,22 +87,29 @@ check("LEV = 2.0", abs(LEV - 2.0) < 0.01)
 check("NOTIONAL = 400", abs(NOTIONAL - 400) < 0.01)
 
 
-# ── TP/SL thresholds (price-based) ──
-print("\n=== TP/SL thresholds ===")
-check("short SL = EP * 1.03", abs(100 * (1 + SL_PCT) - 103) < 0.01)
-check("short TP = EP * 0.94", abs(100 * (1 - TP_PCT) - 94) < 0.01)
-check("long  SL = EP * 0.97", abs(100 * (1 - SL_PCT) - 97) < 0.01)
-check("long  TP = EP * 1.06", abs(100 * (1 + TP_PCT) - 106) < 0.01)
+# ── Dynamic TP/SL (ATR-based) ──
+print("\n=== Dynamic TP/SL (ATR-based) ===")
+check("FALLBACK_TP_PCT = 6%", abs(FALLBACK_TP_PCT - 0.06) < 0.001)
+check("FALLBACK_SL_PCT = 3%", abs(FALLBACK_SL_PCT - 0.03) < 0.001)
+check("ATR_PERIOD = 14", ATR_PERIOD == 14)
+check("SL_ATR_MULT = 1.5", abs(SL_ATR_MULT - 1.5) < 0.001)
+check("TP_ATR_MULT = 3.0", abs(TP_ATR_MULT - 3.0) < 0.001)
 
-# ROI-based thresholds at 2x
-check("SL ROI = -6%", abs(SL_PCT * 100 * LEV - 6.0) < 0.01)
-check("TP ROI = +12%", abs(TP_PCT * 100 * LEV - 12.0) < 0.01)
-check("live SL_ROI uses leverage", abs(SL_ROI - 6.0) < 0.01)
-check("live TP_ROI uses leverage", abs(TP_ROI - 12.0) < 0.01)
-check("long -3% move hits SL, -1.5% move does not",
-      avg_roi(e_long, 97, LEV) <= -SL_ROI and avg_roi(e_long, 98.5, LEV) > -SL_ROI)
-check("long +6% move hits TP, +3% move does not",
-      avg_roi(e_long, 106, LEV) >= TP_ROI and avg_roi(e_long, 103, LEV) < TP_ROI)
+insufficient = [mk_bar(100) for _ in range(5)]
+tp, sl = calc_dynamic_tp_sl(insufficient)
+check("insufficient data → fallback TP", abs(tp - FALLBACK_TP_PCT) < 0.001)
+check("insufficient data → fallback SL", abs(sl - FALLBACK_SL_PCT) < 0.001)
+
+normal = [mk_bar(100 + i * 0.5) for i in range(30)]
+for c in normal: c['high'] = c['close'] * 1.03; c['low'] = c['close'] * 0.97
+tp, sl = calc_dynamic_tp_sl(normal)
+check("dynamic TP in range [0.02, 0.20]", 0.02 <= tp <= 0.20)
+check("dynamic SL in range [0.01, 0.10]", 0.01 <= sl <= 0.10)
+check("dynamic TP > dynamic SL", tp > sl)
+
+# ROI-based thresholds at 2x — using fallback
+check("fallback SL ROI = -6%", abs(FALLBACK_SL_PCT * 100 * LEV - 6.0) < 0.01)
+check("fallback TP ROI = +12%", abs(FALLBACK_TP_PCT * 100 * LEV - 12.0) < 0.01)
 
 
 # ── Pyramiding: avg_ep shifts correctly ──
@@ -138,7 +147,10 @@ if raw_cache_path.exists():
                  for i in range(nd)]
         dc = [b['close'] for b in daily]
         dma3, dma5, dma7 = sma(dc,3), sma(dc,5), sma(dc,7)
-        h12c = [c['close'] for c in r12]; h12m3 = sma(h12c,3); h12m7 = sma(h12c,7)
+        from backtest_shared import atr as atr_fn
+        h12c = [c['close'] for c in r12]; h12h = [c['high'] for c in r12]; h12l = [c['low'] for c in r12]
+        h12m3 = sma(h12c,3); h12m7 = sma(h12c,7)
+        atr_vals = atr_fn(h12h, h12l, h12c, 14)
         eq = 1.0; entries = []; has_mixed = False
         for ri in range(10, len(r12)):
             di = ri//2
@@ -149,13 +161,19 @@ if raw_cache_path.exists():
             cc=r12[ri]['close']; hi=r12[ri]['high']; lo=r12[ri]['low']
             m3,m7 = h12m3[ri],h12m7[ri]
             if m3 is None or m7 is None: continue
+            atr_v = atr_vals[ri]
+            if atr_v is None:
+                slp, tpp = 0.03, 0.06
+            else:
+                slp = max(min((atr_v / cc) * 1.5, 0.10), 0.01)
+                tpp = max(min((atr_v / cc) * 3.0, 0.20), 0.02)
             if entries:
                 aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
                 is_sh = entries[0].get('short', False)
                 if is_sh:
-                    if hi >= aep*1.03 or lo <= aep*0.94: entries=[]
+                    if hi >= aep*(1+slp) or lo <= aep*(1-tpp): entries=[]
                 else:
-                    if lo <= aep*0.97 or hi >= aep*1.06: entries=[]
+                    if lo <= aep*(1-slp) or hi >= aep*(1+tpp): entries=[]
             if uptrend or downtrend:
                 if abs(m3-m7)/m7 <= 0.01 and abs(cc-m3)/m3 <= 0.01:
                     if not any(e['ri']==ri for e in entries):

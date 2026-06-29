@@ -7,15 +7,18 @@ Backtest — Daily Trading (BNB & ETH) with pyramiding
 import json, sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from backtest_shared import sma, compute_results
+from backtest_shared import sma, compute_results, atr
 
 COINS = ['BNB']
 CAPITAL_BASE = 10000
 ENTRY_MARGIN_PCT = 0.02
 LEV = 2.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
-TP_PCT = 0.06
-SL_PCT = 0.03
+ATR_PERIOD = 14
+SL_ATR_MULT = 1.5
+TP_ATR_MULT = 3.0
+FALLBACK_TP_PCT = 0.06
+FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
 MA_NEAR_BUF = 0.01
 PRICE_NEAR_BUF = 0.01
@@ -53,7 +56,10 @@ def backtest(coin, raw_12h):
     dma3, dma5, dma7 = sma(dc, 3), sma(dc, 5), sma(dc, 7)
 
     h12c = [c['close'] for c in raw_12h]
+    h12h = [c['high'] for c in raw_12h]
+    h12l = [c['low'] for c in raw_12h]
     h12m3, h12m7 = sma(h12c, 3), sma(h12c, 7)
+    atr_vals = atr(h12h, h12l, h12c, ATR_PERIOD)
 
     eq = 1.0
     entries = []
@@ -85,36 +91,43 @@ def backtest(coin, raw_12h):
         if m3 is None or m7 is None:
             continue
 
+        atr_val = atr_vals[ri]
+        if atr_val is None:
+            tp_pct, sl_pct = FALLBACK_TP_PCT, FALLBACK_SL_PCT
+        else:
+            sl_pct = max(min((atr_val / cc) * SL_ATR_MULT, 0.10), 0.01)
+            tp_pct = max(min((atr_val / cc) * TP_ATR_MULT, 0.20), 0.02)
+
         is_short = entries and entries[0].get('short', False)
 
         # ── Exit: check TP/SL on avg entry price ──
         if entries:
             aep = avg_ep(entries)
             if is_short:
-                if hi >= aep * (1 + SL_PCT):
+                if hi >= aep * (1 + sl_pct):
                     # SL hit — close all
                     for e in entries:
-                        ret = -SL_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
                         eq += ret
                     losses += 1
                     entries = []
-                elif lo <= aep * (1 - TP_PCT):
+                elif lo <= aep * (1 - tp_pct):
                     # TP hit — close all
                     for e in entries:
-                        ret = TP_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
                         eq += ret
                     wins += 1
                     entries = []
             else:
-                if lo <= aep * (1 - SL_PCT):
+                if lo <= aep * (1 - sl_pct):
                     for e in entries:
-                        ret = -SL_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
                         eq += ret
                     losses += 1
                     entries = []
-                elif hi >= aep * (1 + TP_PCT):
+                elif hi >= aep * (1 + tp_pct):
                     for e in entries:
-                        ret = TP_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
                         eq += ret
                     wins += 1
                     entries = []
@@ -176,7 +189,7 @@ def main():
     print("  Daily Trading Backtest (pyramiding)")
     print(f"  Strategy: 12h/1D hybrid, multiple entries allowed")
     print(f"  Size: {ENTRY_MARGIN_PCT*100:.0f}% margin @ {LEV}x = ${NOTIONAL:,.0f}/entry")
-    print(f"  TP={TP_PCT*100:.0f}%  SL={SL_PCT*100:.0f}%  (on avg entry price)")
+    print(f"  TP={FALLBACK_TP_PCT*100:.0f}%/{FALLBACK_SL_PCT*100:.0f}% (fallback) — dynamic ATR-based")
     print("=" * 60)
 
     tw, tl, te = 0, 0, 0

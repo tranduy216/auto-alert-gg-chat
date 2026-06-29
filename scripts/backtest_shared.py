@@ -20,6 +20,22 @@ def sma(values, period):
             result.append(rolling_sum / period)
     return result
 
+
+def atr(highs, lows, closes, period):
+    """Average True Range — SMA of True Range."""
+    period = int(period)
+    tr_vals = []
+    for i in range(len(closes)):
+        if i == 0:
+            tr_vals.append(highs[i] - lows[i])
+        else:
+            tr_vals.append(max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            ))
+    return sma(tr_vals, period)
+
 # ── Constants ──
 
 BASE = 10000
