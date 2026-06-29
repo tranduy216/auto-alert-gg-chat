@@ -10,6 +10,7 @@ from backtest_shared import sma
 from daily_trading import (
     check_signal, avg_ep, avg_roi, entry_is_short, direction_name,
     calc_dynamic_tp_sl,
+    _calc_oco_params, _oco_prices_match,
     get_daily_entry_count, increment_daily_entry_count,
     get_last_entry_time, cooldown_remaining, is_in_cooldown,
     ATR_PERIOD, SL_ATR_MULT, TP_ATR_MULT,
@@ -133,11 +134,19 @@ check("ENTRY_COOLDOWN_HOURS = 6", ENTRY_COOLDOWN_HOURS == 6)
 
 test_coin = '_test_entry_limit'
 
-set_state(f"{test_coin}_daily", {})
+set_state(f"{test_coin}_daily", {'date': '1970-01-01', 'count': 0, 'last_entry_ts': 1})
 check("fresh state → 0 entries", get_daily_entry_count(test_coin) == 0)
-check("fresh state → last_entry_time None", get_last_entry_time(test_coin) is None)
+last = get_last_entry_time(test_coin)
+check("fresh state → last_entry_time is very old", last is not None and last.year < 2000)
 check("fresh state → not in cooldown", not is_in_cooldown(test_coin))
-check("fresh state → cooldown remaining None", cooldown_remaining(test_coin) is None)
+rem = cooldown_remaining(test_coin)
+check("fresh state → cooldown remaining = 0", rem is not None and rem == 0)
+
+# Truly fresh coin (never stored)
+fresh_coin = '_fresh_never_used_'
+check("never stored → 0 entries", get_daily_entry_count(fresh_coin) == 0)
+check("never stored → last_entry_time None", get_last_entry_time(fresh_coin) is None)
+check("never stored → cooldown remaining None", cooldown_remaining(fresh_coin) is None)
 
 increment_daily_entry_count(test_coin)
 check("1 entry → count 1", get_daily_entry_count(test_coin) == 1)
@@ -164,7 +173,60 @@ check("yesterday's data → count resets to 0", get_daily_entry_count(test_coin)
 check("yesterday's data → not in cooldown", not is_in_cooldown(test_coin))
 
 # Cleanup
-set_state(f"{test_coin}_daily", {})
+set_state(f"{test_coin}_daily", {'date': '1970-01-01', 'count': 0})
+get_state(f"{test_coin}_daily").pop('last_entry_ts', None)
+set_state(f"{test_coin}_daily", get_state(f"{test_coin}_daily"))
+
+# ── OCO helper functions ──
+print("\n=== OCO helpers ===")
+from unittest.mock import patch, MagicMock
+from daily_trading import _calc_oco_params, _oco_prices_match, OKX_SYMBOLS
+
+normal = [mk_bar(100 + i * 0.5) for i in range(30)]
+for c in normal: c['high'] = c['close'] * 1.03; c['low'] = c['close'] * 0.97
+
+# Test _calc_oco_params — long
+tp_px, sl_px, exit_side = _calc_oco_params(100, False, normal)
+check("long oco has tp_px > aep", float(tp_px) > 100)
+check("long oco has sl_px < aep", float(sl_px) < 100)
+check("long oco exit_side = sell", exit_side == 'sell')
+
+# Test _calc_oco_params — short
+tp_px, sl_px, exit_side = _calc_oco_params(100, True, normal)
+check("short oco has tp_px < aep", float(tp_px) < 100)
+check("short oco has sl_px > aep", float(sl_px) > 100)
+check("short oco exit_side = buy", exit_side == 'buy')
+
+# Test _calc_oco_params — fallback when no h12 data
+tp_px, sl_px, exit_side = _calc_oco_params(100, False, None)
+check("fallback oco tp > aep", float(tp_px) > 100)
+check("fallback oco sl < aep", float(sl_px) < 100)
+
+# Test _calc_oco_params — insufficient h12 bars fall back
+few_bars = [mk_bar(100) for _ in range(5)]
+tp_px, sl_px, exit_side = _calc_oco_params(100, False, few_bars)
+check("few bars oco uses fallback TP", abs(float(tp_px) - 100 * (1 + FALLBACK_TP_PCT)) < 0.01)
+check("few bars oco uses fallback SL", abs(float(sl_px) - 100 * (1 - FALLBACK_SL_PCT)) < 0.01)
+
+# Test _oco_prices_match — mock OKX API
+mock_orders = [
+    {'algoId': '1', 'ordType': 'oco', 'tpTriggerPx': '106.00', 'slTriggerPx': '94.00'},
+    {'algoId': '2', 'ordType': 'conditional', 'tpTriggerPx': '105.00', 'slTriggerPx': '95.00'},
+]
+with patch('daily_trading.okx_get_algo_orders', return_value=mock_orders):
+    check("oco match same prices", _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
+    check("oco mismatch different tp", not _oco_prices_match('BNB-USDT-SWAP', '107.00', '94.00'))
+    check("oco mismatch different sl", not _oco_prices_match('BNB-USDT-SWAP', '106.00', '93.00'))
+    check("oco mismatch both wrong", not _oco_prices_match('BNB-USDT-SWAP', '100.00', '90.00'))
+
+# Test _oco_prices_match — empty orders
+with patch('daily_trading.okx_get_algo_orders', return_value=[]):
+    check("oco match empty orders", not _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
+
+# Test _oco_prices_match — API error returns False
+with patch('daily_trading.okx_get_algo_orders', side_effect=Exception("API error")):
+    check("oco match api error", not _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
+
 raw_cache_path = Path(__file__).parent.parent / "_klines_12h_5y.json"
 if raw_cache_path.exists():
     from backtest_daily_trading import backtest

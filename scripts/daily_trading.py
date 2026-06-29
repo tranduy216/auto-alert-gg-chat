@@ -103,6 +103,49 @@ def direction_name(is_short):
     return 'SHORT' if is_short else 'LONG'
 
 
+def _calc_oco_params(aep, is_short, h12_data):
+    """Compute TP/SL prices + exit side from avg EP and 12H data."""
+    if not h12_data:
+        tp_pct, sl_pct = FALLBACK_TP_PCT, FALLBACK_SL_PCT
+    else:
+        tp_pct, sl_pct = calc_dynamic_tp_sl(h12_data)
+    tp_px = f"{aep * (1 - tp_pct):.2f}" if is_short else f"{aep * (1 + tp_pct):.2f}"
+    sl_px = f"{aep * (1 + sl_pct):.2f}" if is_short else f"{aep * (1 - sl_pct):.2f}"
+    exit_side = 'buy' if is_short else 'sell'
+    return tp_px, sl_px, exit_side
+
+
+def _oco_prices_match(inst, tp_px, sl_px):
+    """Check if any existing OCO has the exact same TP/SL trigger prices."""
+    try:
+        orders = okx_get_algo_orders(inst, ord_type='oco')
+        return any(
+            a.get('tpTriggerPx') == tp_px and a.get('slTriggerPx') == sl_px
+            for a in orders
+        )
+    except Exception:
+        return False
+
+
+def _cancel_oco(inst):
+    """Cancel all conditional/oco orders for an instrument."""
+    try:
+        algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
+        algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
+        if algo_ids:
+            okx_cancel_algo(inst, algo_ids)
+    except Exception:
+        pass
+
+
+def _place_oco(inst, exit_side, sz, tp_px, sl_px):
+    """Place an OCO take-profit / stop-loss order."""
+    okx_place_algo(inst_id=inst, td_mode='cross',
+                   side=exit_side, sz=str(int(sz)),
+                   ord_type='oco',
+                   tp_trigger_px=tp_px, sl_trigger_px=sl_px)
+
+
 def calc_dynamic_tp_sl(h12_data):
     highs = [c['high'] for c in h12_data]
     lows = [c['low'] for c in h12_data]
@@ -225,11 +268,7 @@ def main():
                     okx_close_position(inst)
                     clear_entries(coin)
                     set_state(coin, {'ep': 0, 'side': ''})
-                    try:
-                        algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
-                        algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
-                        if algo_ids: okx_cancel_algo(inst, algo_ids)
-                    except Exception: pass
+                    _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                                      f"SL: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / SL {sl_roi:.1f}%)")
@@ -241,11 +280,7 @@ def main():
                     okx_close_position(inst)
                     clear_entries(coin)
                     set_state(coin, {'ep': 0, 'side': ''})
-                    try:
-                        algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
-                        algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
-                        if algo_ids: okx_cancel_algo(inst, algo_ids)
-                    except Exception: pass
+                    _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
                                      f"TP: {coin} {direction_name(is_sh)} @ ${cc:.2f} (ROI {roi:.1f}% / TP {tp_roi:.1f}%)")
@@ -268,37 +303,12 @@ def main():
             total_ct = abs(float(pos_map.get(inst, {}).get('pos', 0))) if inst in pos_map else 0
             if total_ct <= 0:
                 continue
-            tp_pct, sl_pct = calc_dynamic_tp_sl(h12)
-            tp_px = f"{aep * (1 - tp_pct):.2f}" if batch_is_short else f"{aep * (1 + tp_pct):.2f}"
-            sl_px = f"{aep * (1 + sl_pct):.2f}" if batch_is_short else f"{aep * (1 - sl_pct):.2f}"
-            exit_side = 'buy' if batch_is_short else 'sell'
-
-            # Fetch existing OCO to compare
-            need_update = True
-            try:
-                existing = okx_get_algo_orders(inst, ord_type='oco')
-                for a in existing:
-                    if a.get('tpTriggerPx') == tp_px and a.get('slTriggerPx') == sl_px:
-                        need_update = False
-                        break
-            except Exception:
-                pass
-
-            if not need_update:
+            tp_px, sl_px, exit_side = _calc_oco_params(aep, batch_is_short, h12)
+            if _oco_prices_match(inst, tp_px, sl_px):
                 continue
-
+            _cancel_oco(inst)
             try:
-                algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
-                algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
-                if algo_ids:
-                    okx_cancel_algo(inst, algo_ids)
-            except Exception as e:
-                log(f"  {coin}: algo cancel failed: {e}")
-            try:
-                okx_place_algo(inst_id=inst, td_mode='cross',
-                               side=exit_side, sz=str(int(total_ct)),
-                               ord_type='oco',
-                               tp_trigger_px=tp_px, sl_trigger_px=sl_px)
+                _place_oco(inst, exit_side, total_ct, tp_px, sl_px)
                 log(f"  {coin}: OCO refreshed @ avg ${aep:.2f} → TP {tp_px} SL {sl_px}")
             except Exception as e:
                 log(f"  {coin}: OCO refresh failed: {e}")
@@ -390,28 +400,10 @@ def main():
                 existing_ct = abs(float(pos_map.get(inst, {}).get('pos', 0))) if inst in pos_map else 0
                 total_ct = max(1, int(existing_ct + sz))
                 h12_coin = h12_map.get(coin)
-                tp_pct, sl_pct = calc_dynamic_tp_sl(h12_coin) if h12_coin else (FALLBACK_TP_PCT, FALLBACK_SL_PCT)
-                tp_px = f"{aep * (1 - tp_pct):.2f}" if batch_is_short else f"{aep * (1 + tp_pct):.2f}"
-                sl_px = f"{aep * (1 + sl_pct):.2f}" if batch_is_short else f"{aep * (1 - sl_pct):.2f}"
-                exit_side = 'buy' if batch_is_short else 'sell'
-
+                tp_px, sl_px, exit_side = _calc_oco_params(aep, batch_is_short, h12_coin)
+                _cancel_oco(inst)
                 try:
-                    algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
-                    algo_ids = [
-                        a['algoId'] for a in algos
-                        if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')
-                    ]
-                    if algo_ids:
-                        okx_cancel_algo(inst, algo_ids)
-                        log(f"  Cancelled {len(algo_ids)} old algo order(s)")
-                except Exception as e:
-                    log(f"  Algo cancel failed: {e}")
-
-                try:
-                    okx_place_algo(inst_id=inst, td_mode='cross',
-                                   side=exit_side, sz=str(total_ct),
-                                   ord_type='oco',
-                                   tp_trigger_px=tp_px, sl_trigger_px=sl_px)
+                    _place_oco(inst, exit_side, total_ct, tp_px, sl_px)
                     log(f"  TP/SL @ avg ${aep:.2f} → TP {tp_px} SL {sl_px}")
                 except Exception as e:
                     log(f"  Algo order failed: {e}")
