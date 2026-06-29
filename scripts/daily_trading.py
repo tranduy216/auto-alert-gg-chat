@@ -1,10 +1,10 @@
 """
-Daily Trading — BNB & ETH (pyramiding)
+Daily Trading — BNB (pyramiding)
 - Trend: 1D MA3>MA5>MA7 (long) | MA3<MA5<MA7 (short)
 - Entry: 12h — price near MA3 (1%), MA3 near MA7 (1%)
 - Multiple entries allowed (pyramiding)
 - TP/SL calculated on avg entry price of all open entries
-- 2% origin cap (10k) per entry, 2x leverage → $400/entry
+- 3% origin cap (10k) per entry, 3x leverage → $900/entry
 - TP/SL set on entry via OKX algo orders
 """
 import os, sys, time, datetime
@@ -35,11 +35,30 @@ PRICE_NEAR_BUF = 0.01
 COINS = ['BNB']
 OKX_SYMBOLS = {'BNB': 'BNB-USDT-SWAP'}
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
+MAX_ENTRIES_PER_DAY = 2
 
 
 def log(msg):
     t = datetime.datetime.now()
     print(f"[{t:%Y-%m-%d %H:%M:%S}] {msg}")
+
+
+def get_daily_entry_count(coin):
+    data = get_state(f"{coin}_daily")
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    if not data or data.get('date') != today:
+        return 0
+    return data.get('count', 0)
+
+
+def increment_daily_entry_count(coin):
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    data = get_state(f"{coin}_daily")
+    if not data or data.get('date') != today:
+        set_state(f"{coin}_daily", {'date': today, 'count': 1})
+    else:
+        data['count'] += 1
+        set_state(f"{coin}_daily", data)
 
 
 def avg_ep(entries):
@@ -147,7 +166,7 @@ def main():
         except Exception as e:
             log(f"Account fetch failed: {e}")
 
-    log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry (2% × $10k @ 2x)")
+    log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry (3% × $10k @ 3x)")
 
     # ── Positions ──
     pos_map = {}
@@ -251,6 +270,11 @@ def main():
             inst_info = insts.get(inst, {})
             ct_val = float(inst_info.get('ctVal', '0.01'))
 
+            daily_count = get_daily_entry_count(coin)
+            if daily_count >= MAX_ENTRIES_PER_DAY:
+                log(f"{coin}: daily limit reached ({daily_count}/{MAX_ENTRIES_PER_DAY}), skipping entry")
+                continue
+
             sz = max(1, int(NOTIONAL / (price * ct_val)))
             is_buy = direction == 'LONG'
 
@@ -264,6 +288,7 @@ def main():
 
                 add_entry(coin, price, not is_buy)
                 set_state(coin, {'ep': price, 'side': direction})
+                increment_daily_entry_count(coin)
 
                 # Cancel old algo orders, place combo TP/SL at avg-EP
                 all_entries = get_entries(coin)
