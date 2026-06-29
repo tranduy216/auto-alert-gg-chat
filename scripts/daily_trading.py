@@ -36,6 +36,7 @@ COINS = ['BNB']
 OKX_SYMBOLS = {'BNB': 'BNB-USDT-SWAP'}
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 MAX_ENTRIES_PER_DAY = 2
+ENTRY_COOLDOWN_HOURS = 6
 
 
 def log(msg):
@@ -51,13 +52,35 @@ def get_daily_entry_count(coin):
     return data.get('count', 0)
 
 
+def get_last_entry_time(coin):
+    data = get_state(f"{coin}_daily")
+    if not data or not data.get('last_entry_ts'):
+        return None
+    return datetime.datetime.fromtimestamp(data['last_entry_ts'])
+
+
+def cooldown_remaining(coin):
+    last = get_last_entry_time(coin)
+    if last is None:
+        return None
+    elapsed = (datetime.datetime.now() - last).total_seconds() / 3600
+    return max(0, ENTRY_COOLDOWN_HOURS - elapsed)
+
+
+def is_in_cooldown(coin):
+    rem = cooldown_remaining(coin)
+    return rem is not None and rem > 0
+
+
 def increment_daily_entry_count(coin):
     today = datetime.datetime.now().strftime('%Y-%m-%d')
+    now_ts = datetime.datetime.now().timestamp()
     data = get_state(f"{coin}_daily")
     if not data or data.get('date') != today:
-        set_state(f"{coin}_daily", {'date': today, 'count': 1})
+        set_state(f"{coin}_daily", {'date': today, 'count': 1, 'last_entry_ts': now_ts})
     else:
-        data['count'] += 1
+        data['count'] = data.get('count', 0) + 1
+        data['last_entry_ts'] = now_ts
         set_state(f"{coin}_daily", data)
 
 
@@ -273,6 +296,11 @@ def main():
             daily_count = get_daily_entry_count(coin)
             if daily_count >= MAX_ENTRIES_PER_DAY:
                 log(f"{coin}: daily limit reached ({daily_count}/{MAX_ENTRIES_PER_DAY}), skipping entry")
+                continue
+
+            if is_in_cooldown(coin):
+                rem = cooldown_remaining(coin)
+                log(f"{coin}: cooldown remaining {rem:.1f}h, skipping entry")
                 continue
 
             sz = max(1, int(NOTIONAL / (price * ct_val)))

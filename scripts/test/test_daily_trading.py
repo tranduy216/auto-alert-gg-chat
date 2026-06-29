@@ -10,8 +10,11 @@ from backtest_shared import sma
 from daily_trading import (
     check_signal, avg_ep, avg_roi, entry_is_short, direction_name,
     calc_dynamic_tp_sl,
+    get_daily_entry_count, increment_daily_entry_count,
+    get_last_entry_time, cooldown_remaining, is_in_cooldown,
     ATR_PERIOD, SL_ATR_MULT, TP_ATR_MULT,
     FALLBACK_TP_PCT, FALLBACK_SL_PCT,
+    MAX_ENTRIES_PER_DAY, ENTRY_COOLDOWN_HOURS,
     LEV, CAPITAL_BASE, ENTRY_MARGIN_PCT, NOTIONAL,
 )
 
@@ -120,8 +123,48 @@ check("ROI after 2 entries @ 91", abs(avg_roi(entries, 91, 2.0) - 13.33) < 0.5)
 check("ROI after 2 entries @ 100", abs(avg_roi(entries, 100, 2.0) - (-5.13)) < 0.5)
 
 
-# ── Backtest integration ──
-print("\n=== Backtest integration ===")
+# ── Entry limit & cooldown ──
+print("\n=== Entry limit & cooldown ===")
+import time, datetime
+from utils.state_manager import set_state, get_state
+
+check("MAX_ENTRIES_PER_DAY = 2", MAX_ENTRIES_PER_DAY == 2)
+check("ENTRY_COOLDOWN_HOURS = 6", ENTRY_COOLDOWN_HOURS == 6)
+
+test_coin = '_test_entry_limit'
+
+set_state(f"{test_coin}_daily", {})
+check("fresh state → 0 entries", get_daily_entry_count(test_coin) == 0)
+check("fresh state → last_entry_time None", get_last_entry_time(test_coin) is None)
+check("fresh state → not in cooldown", not is_in_cooldown(test_coin))
+check("fresh state → cooldown remaining None", cooldown_remaining(test_coin) is None)
+
+increment_daily_entry_count(test_coin)
+check("1 entry → count 1", get_daily_entry_count(test_coin) == 1)
+check("1 entry → last_entry_time not None", get_last_entry_time(test_coin) is not None)
+check("1 entry → in cooldown", is_in_cooldown(test_coin))
+rem = cooldown_remaining(test_coin)
+check("1 entry → cooldown remaining > 0", rem is not None and rem > 0)
+
+increment_daily_entry_count(test_coin)
+check("2 entries → count 2", get_daily_entry_count(test_coin) == 2)
+check("2 entries → still in cooldown", is_in_cooldown(test_coin))
+
+# Simulate old entry (> 6h ago) to test cooldown expiry
+old_ts = (datetime.datetime.now() - datetime.timedelta(hours=7)).timestamp()
+today = datetime.datetime.now().strftime('%Y-%m-%d')
+set_state(f"{test_coin}_daily", {'date': today, 'count': 1, 'last_entry_ts': old_ts})
+check("7h old entry → not in cooldown", not is_in_cooldown(test_coin))
+check("7h old entry → cooldown remaining = 0", cooldown_remaining(test_coin) == 0)
+
+# Simulate yesterday's entry → count resets
+yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+set_state(f"{test_coin}_daily", {'date': yesterday, 'count': 5, 'last_entry_ts': old_ts})
+check("yesterday's data → count resets to 0", get_daily_entry_count(test_coin) == 0)
+check("yesterday's data → not in cooldown", not is_in_cooldown(test_coin))
+
+# Cleanup
+set_state(f"{test_coin}_daily", {})
 raw_cache_path = Path(__file__).parent.parent / "_klines_12h_5y.json"
 if raw_cache_path.exists():
     from backtest_daily_trading import backtest
