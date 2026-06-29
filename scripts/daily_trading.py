@@ -272,6 +272,21 @@ def main():
             tp_px = f"{aep * (1 - tp_pct):.2f}" if batch_is_short else f"{aep * (1 + tp_pct):.2f}"
             sl_px = f"{aep * (1 + sl_pct):.2f}" if batch_is_short else f"{aep * (1 - sl_pct):.2f}"
             exit_side = 'buy' if batch_is_short else 'sell'
+
+            # Fetch existing OCO to compare
+            need_update = True
+            try:
+                existing = okx_get_algo_orders(inst, ord_type='oco')
+                for a in existing:
+                    if a.get('tpTriggerPx') == tp_px and a.get('slTriggerPx') == sl_px:
+                        need_update = False
+                        break
+            except Exception:
+                pass
+
+            if not need_update:
+                continue
+
             try:
                 algos = okx_get_algo_orders(inst) + okx_get_algo_orders(inst, ord_type='oco')
                 algo_ids = [a['algoId'] for a in algos if a.get('algoId') and a.get('ordType') in ('conditional', 'oco')]
