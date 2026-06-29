@@ -21,11 +21,11 @@ from utils.okx_utils import (
 from utils.state_manager import get_entries, add_entry, clear_entries, set_state, get_state
 
 CAPITAL_BASE = 10000
-ENTRY_MARGIN_PCT = 0.02
-LEV = 2.0
+ENTRY_MARGIN_PCT = 0.03
+LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
-SL_ATR_MULT = 1.5
+SL_ATR_MULT = 3.0
 TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
@@ -69,7 +69,7 @@ def calc_dynamic_tp_sl(h12_data):
     if atr_val is None:
         return FALLBACK_TP_PCT, FALLBACK_SL_PCT
     price = closes[-1]
-    sl_pct = round(min(max((atr_val / price) * SL_ATR_MULT, 0.01), 0.10), 4)
+    sl_pct = round(min(max((atr_val / price) * SL_ATR_MULT, 0.01), 0.15), 4)
     tp_pct = round(min(max((atr_val / price) * TP_ATR_MULT, 0.02), 0.20), 4)
     return tp_pct, sl_pct
 

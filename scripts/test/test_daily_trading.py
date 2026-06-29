@@ -82,9 +82,9 @@ check("empty → 0", avg_roi([], 100, 2.0) == 0)
 # ── Entry sizing ──
 print("\n=== Entry sizing ===")
 check("CAPITAL_BASE = 10000", CAPITAL_BASE == 10000)
-check("ENTRY_MARGIN_PCT = 2%", abs(ENTRY_MARGIN_PCT - 0.02) < 0.001)
-check("LEV = 2.0", abs(LEV - 2.0) < 0.01)
-check("NOTIONAL = 400", abs(NOTIONAL - 400) < 0.01)
+check("ENTRY_MARGIN_PCT = 3%", abs(ENTRY_MARGIN_PCT - 0.03) < 0.001)
+check("LEV = 3.0", abs(LEV - 3.0) < 0.01)
+check("NOTIONAL = 900", abs(NOTIONAL - 900) < 0.01)
 
 
 # ── Dynamic TP/SL (ATR-based) ──
@@ -92,7 +92,7 @@ print("\n=== Dynamic TP/SL (ATR-based) ===")
 check("FALLBACK_TP_PCT = 6%", abs(FALLBACK_TP_PCT - 0.06) < 0.001)
 check("FALLBACK_SL_PCT = 3%", abs(FALLBACK_SL_PCT - 0.03) < 0.001)
 check("ATR_PERIOD = 14", ATR_PERIOD == 14)
-check("SL_ATR_MULT = 1.5", abs(SL_ATR_MULT - 1.5) < 0.001)
+check("SL_ATR_MULT = 3.0", abs(SL_ATR_MULT - 3.0) < 0.001)
 check("TP_ATR_MULT = 3.0", abs(TP_ATR_MULT - 3.0) < 0.001)
 
 insufficient = [mk_bar(100) for _ in range(5)]
@@ -104,12 +104,12 @@ normal = [mk_bar(100 + i * 0.5) for i in range(30)]
 for c in normal: c['high'] = c['close'] * 1.03; c['low'] = c['close'] * 0.97
 tp, sl = calc_dynamic_tp_sl(normal)
 check("dynamic TP in range [0.02, 0.20]", 0.02 <= tp <= 0.20)
-check("dynamic SL in range [0.01, 0.10]", 0.01 <= sl <= 0.10)
+check("dynamic SL in range [0.01, 0.15]", 0.01 <= sl <= 0.15)
 check("dynamic TP > dynamic SL", tp > sl)
 
 # ROI-based thresholds at 2x — using fallback
-check("fallback SL ROI = -6%", abs(FALLBACK_SL_PCT * 100 * LEV - 6.0) < 0.01)
-check("fallback TP ROI = +12%", abs(FALLBACK_TP_PCT * 100 * LEV - 12.0) < 0.01)
+check("fallback SL ROI = -9%", abs(FALLBACK_SL_PCT * 100 * LEV - 9.0) < 0.01)
+check("fallback TP ROI = +18%", abs(FALLBACK_TP_PCT * 100 * LEV - 18.0) < 0.01)
 
 
 # ── Pyramiding: avg_ep shifts correctly ──
@@ -165,7 +165,7 @@ if raw_cache_path.exists():
             if atr_v is None:
                 slp, tpp = 0.03, 0.06
             else:
-                slp = max(min((atr_v / cc) * 1.5, 0.10), 0.01)
+                slp = max(min((atr_v / cc) * 3.0, 0.15), 0.01)
                 tpp = max(min((atr_v / cc) * 3.0, 0.20), 0.02)
             if entries:
                 aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
@@ -182,11 +182,11 @@ if raw_cache_path.exists():
                         if entries and entries[0].get('short') != dir_short:
                             for e in entries:
                                 if entries[0].get('short'):
-                                    eq += (e['ep']-cc)/e['ep']*2.0*e['mp']*0.998
+                                    eq += (e['ep']-cc)/e['ep']*3.0*e['mp']*0.997
                                 else:
-                                    eq += (cc-e['ep'])/e['ep']*2.0*e['mp']*0.998
+                                    eq += (cc-e['ep'])/e['ep']*3.0*e['mp']*0.997
                             entries=[]
-                        entries.append({'ep': cc, 'mp': 0.02, 'ri': ri, 'short': dir_short})
+                        entries.append({'ep': cc, 'mp': 0.03, 'ri': ri, 'short': dir_short})
             ureal = 0
             if entries:
                 aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)

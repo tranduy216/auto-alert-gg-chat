@@ -11,11 +11,11 @@ from backtest_shared import sma, compute_results, atr
 
 COINS = ['BNB']
 CAPITAL_BASE = 10000
-ENTRY_MARGIN_PCT = 0.02
-LEV = 2.0
+ENTRY_MARGIN_PCT = 0.03
+LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
-SL_ATR_MULT = 1.5
+SL_ATR_MULT = 3.0
 TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
@@ -95,7 +95,7 @@ def backtest(coin, raw_12h):
         if atr_val is None:
             tp_pct, sl_pct = FALLBACK_TP_PCT, FALLBACK_SL_PCT
         else:
-            sl_pct = max(min((atr_val / cc) * SL_ATR_MULT, 0.10), 0.01)
+            sl_pct = max(min((atr_val / cc) * SL_ATR_MULT, 0.15), 0.01)
             tp_pct = max(min((atr_val / cc) * TP_ATR_MULT, 0.20), 0.02)
 
         is_short = entries and entries[0].get('short', False)
