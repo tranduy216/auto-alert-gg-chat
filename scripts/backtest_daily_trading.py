@@ -1,7 +1,7 @@
 """
-Backtest — Daily Trading (BNB & ETH) with pyramiding
+Backtest — Daily Trading (BNB) with pyramiding
 - 12h/1D hybrid trend + pullback, multiple entries allowed
-- 2% origin cap (10k) per entry, 2x leverage
+- 3% origin cap (10k) per entry, 3x leverage
 - TP/SL calculated on avg entry price of all open entries
 """
 import json, sys, datetime
