@@ -128,10 +128,16 @@ def backtest(coin, raw_12h):
                 already = any(e['ri'] == ri for e in entries)
                 if not already:
                     direction_short = downtrend
-                    # Verify direction consistency
-                    if entries:
-                        if entries[0].get('short') != direction_short:
-                            pass  # signal flipped — let it enter opposite
+                    # If direction flips, close existing batch at current price
+                    if entries and entries[0].get('short') != direction_short:
+                        # Close existing at current price
+                        for e in entries:
+                            if entries[0].get('short'):
+                                ret = (e['ep'] - cc) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
+                            else:
+                                ret = (cc - e['ep']) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
+                            eq += ret
+                        entries = []
                     entries.append({
                         'ep': cc,
                         'mp': ENTRY_MARGIN_PCT,
@@ -205,85 +211,7 @@ def main():
     print(f"  Total entries: {te}")
     print(f"{'='*60}")
 
-    # Portfolio
-    print(f"\n  PORTFOLIO (equal weight)")
-    print(f"  {'='*50}")
-    combined = {}
-    for coin in COINS:
-        key = next((k for k in raw if k.startswith(f'{coin}USDT_4000_')), None)
-        if not key: continue
-        r12 = raw[key]
-        nd = len(r12) // 2
-        daily = [{'close': r12[i*2+1]['close'] if i*2+1<len(r12) else r12[i*2]['close'],
-                  'high': max(x['high'] for x in (r12[i*2], r12[i*2+1])),
-                  'low': min(x['low'] for x in (r12[i*2], r12[i*2+1]))} for i in range(nd)]
-        dc = [b['close'] for b in daily]
-        dh = [b['high'] for b in daily]
-        dl = [b['low'] for b in daily]
-        dma3, dma5, dma7 = sma(dc,3), sma(dc,5), sma(dc,7)
-        h12c = [c['close'] for c in r12]; h12m3 = sma(h12c,3); h12m7 = sma(h12c,7)
-        eq = 1.0; entries = []; pts = []
-        for ri in range(10, len(r12)):
-            di = ri//2
-            if di<7 or di>=len(daily): continue
-            d3,d5,d7 = dma3[di],dma5[di],dma7[di]
-            if d3 is None or d5 is None or d7 is None: continue
-            uptrend=d3>d5>d7; downtrend=d3<d5<d7
-            cc=r12[ri]['close']; hi=r12[ri]['high']; lo=r12[ri]['low']; ts=r12[ri]['open_time']
-            m3,m7 = h12m3[ri],h12m7[ri]
-            if m3 is None or m7 is None: continue
-            if entries:
-                is_sh = entries[0].get('short', False)
-                aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
-                if is_sh:
-                    if hi >= aep*(1+SL_PCT):
-                        for e in entries: eq += -SL_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV)
-                        entries = []
-                    elif lo <= aep*(1-TP_PCT):
-                        for e in entries: eq += TP_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV)
-                        entries = []
-                else:
-                    if lo <= aep*(1-SL_PCT):
-                        for e in entries: eq += -SL_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV)
-                        entries = []
-                    elif hi >= aep*(1+TP_PCT):
-                        for e in entries: eq += TP_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV)
-                        entries = []
-            if uptrend or downtrend:
-                if abs(m3-m7)/m7 <= MA_NEAR_BUF and abs(cc-m3)/m3 <= PRICE_NEAR_BUF:
-                    if not any(e['ri']==ri for e in entries):
-                        entries.append({'ep': cc, 'mp': ENTRY_MARGIN_PCT, 'ri': ri, 'short': downtrend})
-            if entries:
-                is_sh = entries[0].get('short', False)
-                aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
-                total_mp = sum(e['mp'] for e in entries)
-                if is_sh: ureal = (aep-cc)/aep*LEV*total_mp
-                else: ureal = (cc-aep)/aep*LEV*total_mp
-            else: ureal = 0
-            pts.append((ts, eq+ureal))
-        combined[coin] = pts
-
-    if len(combined) >= 2:
-        merged = {}
-        for pts in combined.values():
-            for ts, v in pts:
-                d = datetime.datetime.fromtimestamp(ts/1000).strftime('%Y-%m-%d')
-                merged.setdefault(d, []).append(v)
-        pf = []; py = {}; peak = 1.0; mdd = 0
-        for d in sorted(merged):
-            vals = merged[d]; av = sum(vals)/len(vals)
-            pf.append(av)
-            if av > peak: peak = av
-            dd = (peak-av)/peak*100
-            if dd > mdd: mdd = dd
-            yr = int(d[:4]); py[yr] = av
-        pr = compute_results(pf, py, CAPITAL_BASE)
-        print(f"    CAGR:     {pr['cagr']:>+7.1f}%")
-        print(f"    Max DD:   {pr['dd']:>7.1f}%")
-        print(f"    Final:    ${pr['final']:>9,.0f}")
-        for y in sorted(pr['yearly']):
-            print(f"    {y}: {pr['yearly'][y]:>+7.1f}%")
-
+    print(f"{'='*60}")
     print()
 
 

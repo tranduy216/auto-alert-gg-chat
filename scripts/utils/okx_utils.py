@@ -165,7 +165,7 @@ def okx_place_algo(
     }
     if pos_side:
         body["posSide"] = pos_side
-    if ord_type == "conditional":
+    if ord_type in ("conditional", "oco"):
         if tp_trigger_px:
             body["tpTriggerPx"] = tp_trigger_px
             body["tpOrdPx"] = "-1"
@@ -213,10 +213,8 @@ def okx_get_algo_orders(inst_id: str, ord_type: str = "conditional") -> List[dic
 
 def okx_cancel_algo(inst_id: str, algo_ids: List[str]) -> dict:
     """Cancel algo/stop orders."""
-    return _okx_request("POST", "/api/v5/trade/cancel-algos", {
-        "instId": inst_id,
-        "algoId": algo_ids,
-    })
+    body = [{"instId": inst_id, "algoId": algo_id} for algo_id in algo_ids]
+    return _okx_request("POST", "/api/v5/trade/cancel-algos", body)
 
 
 def okx_amend_algo(inst_id: str, algo_id: str, new_sl_trigger_px: str) -> dict:

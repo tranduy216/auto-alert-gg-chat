@@ -27,6 +27,55 @@ class TestOKXUtils(unittest.TestCase):
         from scripts.utils.okx_utils import okx_set_leverage
         self.assertTrue(callable(okx_set_leverage))
 
+    @patch('scripts.utils.okx_utils._okx_request')
+    def test_okx_cancel_algo_batch_body(self, mock_request):
+        """Should send one cancel object per algo id."""
+        mock_request.return_value = {'code': '0', 'data': []}
+        from scripts.utils.okx_utils import okx_cancel_algo
+
+        okx_cancel_algo('BNB-USDT-SWAP', ['11', '22'])
+
+        mock_request.assert_called_once_with(
+            "POST",
+            "/api/v5/trade/cancel-algos",
+            [
+                {"instId": "BNB-USDT-SWAP", "algoId": "11"},
+                {"instId": "BNB-USDT-SWAP", "algoId": "22"},
+            ],
+        )
+
+    @patch('scripts.utils.okx_utils._okx_request')
+    def test_okx_place_algo_oco_body(self, mock_request):
+        """Should include both TP and SL fields for OCO algos."""
+        mock_request.return_value = {'code': '0', 'data': []}
+        from scripts.utils.okx_utils import okx_place_algo
+
+        okx_place_algo(
+            inst_id='BNB-USDT-SWAP',
+            td_mode='cross',
+            side='sell',
+            sz='3',
+            ord_type='oco',
+            tp_trigger_px='106.00',
+            sl_trigger_px='97.00',
+        )
+
+        mock_request.assert_called_once_with(
+            "POST",
+            "/api/v5/trade/order-algo",
+            {
+                "instId": "BNB-USDT-SWAP",
+                "tdMode": "cross",
+                "side": "sell",
+                "sz": "3",
+                "ordType": "oco",
+                "tpTriggerPx": "106.00",
+                "tpOrdPx": "-1",
+                "slTriggerPx": "97.00",
+                "slOrdPx": "-1",
+            },
+        )
+
 
 class TestFirebaseUtils(unittest.TestCase):
     """Test Firebase utilities"""
