@@ -81,11 +81,6 @@ PYRAMID_STRATEGIES = [
         'exit':  {'mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'buffer': 0.03},
         'pyramid': {'enabled': True, 'entry_mult': 1.5},
     }),
-    ('BTC', True, {
-        'entry': {'ma': 10, 'buffer': 0.05, 'lev': 2.5, 'short_mult': 3.0},
-        'exit':  {'trail': 0.80, 'tp': [(4, 0.30), (8, 0.40), (12, 0.30)]},
-        'pyramid': {'enabled': True, 'entry_mult': 0.7, 'pyr_step': 8, 'pyr_cap': 3},
-    }),
 ]
 
 

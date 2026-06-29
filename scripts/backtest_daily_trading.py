@@ -1,7 +1,7 @@
 """
 Backtest — Daily Trading (BNB) with pyramiding
 - 12h/1D hybrid trend + pullback, multiple entries allowed
-- 3% origin cap (10k) per entry, 3x leverage
+- 5% origin cap (10k) per entry, 3x leverage
 - TP/SL calculated on avg entry price of all open entries
 """
 import json, sys, datetime
@@ -11,7 +11,7 @@ from backtest_shared import sma, compute_results, atr
 
 COINS = ['BNB']
 CAPITAL_BASE = 10000
-ENTRY_MARGIN_PCT = 0.03
+ENTRY_MARGIN_PCT = 0.05
 LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
@@ -32,6 +32,8 @@ def avg_ep(entries):
     if not entries:
         return None
     total_w = sum(e.get('mp', 1) for e in entries)
+    if total_w == 0:
+        return None
     weighted = sum(e['ep'] * e.get('mp', 1) for e in entries)
     return weighted / total_w
 
@@ -51,8 +53,6 @@ def backtest(coin, raw_12h):
         })
 
     dc = [b['close'] for b in daily]
-    dh = [b['high'] for b in daily]
-    dl = [b['low'] for b in daily]
     dma3, dma5, dma7 = sma(dc, 3), sma(dc, 5), sma(dc, 7)
 
     h12c = [c['close'] for c in raw_12h]

@@ -667,6 +667,165 @@ entries_val = [{'ep': 100, 'mp': 0.1, 'rem': 1.0}, {'ep': 90, 'mp': 0.05, 'rem':
 expected_val = 13000 + (10/90) * 0.05 * 2 * 0.5
 check("S10b: multi-entry asset value", abs(total_asset_value(entries_val, 100, 13000, 2) - expected_val) < 1e-6)
 
+# ── daily_trading: avg_ep ──
+print("\n=== daily_trading: avg_ep ===")
+from daily_trading import avg_ep, entry_is_short, direction_name, avg_roi, calc_dynamic_tp_sl, check_signal
+
+check("avg_ep empty returns None", avg_ep([]) is None)
+check("avg_ep single entry", abs(avg_ep([{'ep': 100, 'mp': 1}]) - 100) < 1e-9)
+check("avg_ep two entries equal weight", abs(avg_ep([{'ep': 100, 'mp': 1}, {'ep': 110, 'mp': 1}]) - 105) < 1e-9)
+check("avg_ep weighted", abs(avg_ep([{'ep': 100, 'mp': 2}, {'ep': 120, 'mp': 1}]) - 106.6667) < 0.001)
+check("avg_ep no mp defaults to 1", abs(avg_ep([{'ep': 90}, {'ep': 110}]) - 100) < 1e-9)
+check("avg_ep zero entries edge", avg_ep([]) is None)
+check("avg_ep single with zero mp returns None", avg_ep([{'ep': 100, 'mp': 0}]) is None)
+
+# ── daily_trading: entry_is_short ──
+print("\n=== daily_trading: entry_is_short ===")
+check("is_short True", entry_is_short({'is_short': True}) is True)
+check("is_short False", entry_is_short({'is_short': False}) is False)
+check("old field short=True", entry_is_short({'short': True}) is True)
+check("old field short=False", entry_is_short({'short': False}) is False)
+check("is_short=1 interpreted as True", entry_is_short({'is_short': 1}) is True)
+check("old short=0 interpreted as False", entry_is_short({'short': 0}) is False)
+check("no direction fields defaults False", entry_is_short({}) is False)
+
+# ── daily_trading: direction_name ──
+print("\n=== daily_trading: direction_name ===")
+check("True -> SHORT", direction_name(True) == 'SHORT')
+check("False -> LONG", direction_name(False) == 'LONG')
+
+# ── daily_trading: avg_roi ──
+print("\n=== daily_trading: avg_roi ===")
+check("avg_roi long profit", abs(avg_roi([{'ep': 100}], 110, 3) - 30.0) < 1e-9)     # (10/100)*100*3
+check("avg_roi long loss", abs(avg_roi([{'ep': 100}], 95, 3) - (-15.0)) < 1e-9)    # (-5/100)*100*3
+check("avg_roi short profit", abs(avg_roi([{'ep': 100, 'is_short': True}], 90, 3) - 30.0) < 1e-9)
+check("avg_roi short loss", abs(avg_roi([{'ep': 100, 'is_short': True}], 105, 3) - (-15.0)) < 1e-9)
+# avg_roi weighted avg: aep=(90*2+110*1)/3=96.67, ROI=(100-96.67)/96.67*100*3=10.34
+roi = avg_roi([{'ep': 90, 'mp': 2}, {'ep': 110, 'mp': 1}], 100, 3)
+check("avg_roi weighted avg", abs(roi - 10.344) < 0.01)
+check("avg_roi no entries returns 0", avg_roi([], 100, 3) == 0)
+check("avg_roi short via old 'short' field", abs(avg_roi([{'ep': 100, 'short': True}], 85, 2) - 30.0) < 1e-9)
+
+# ── daily_trading: calc_dynamic_tp_sl ──
+print("\n=== daily_trading: calc_dynamic_tp_sl ===")
+# ATR rising: prices with wide range → larger TP/SL
+range_wide = [{'high': 110, 'low': 90, 'close': 100}] * 20
+tp, sl = calc_dynamic_tp_sl(range_wide)
+check("wide range: tp > 0.02", tp >= 0.02)
+check("wide range: sl > 0.01", sl >= 0.01)
+check("wide range: tp >= sl", tp >= sl)
+
+# ATR tight: stable prices → smaller TP/SL
+range_narrow = [{'high': 101, 'low': 99, 'close': 100}] * 20
+tp2, sl2 = calc_dynamic_tp_sl(range_narrow)
+check("narrow range: tp < wide tp", tp2 < tp)
+check("narrow range: sl < wide sl", sl2 < sl)
+check("tp capped at 20%", tp <= 0.201)
+check("sl capped at 15%", sl <= 0.151)
+
+# ATR on 14-period minimum → data < 14 bars → fallback
+short_data = [{'high': 110, 'low': 90, 'close': 100}] * 5
+tp_fb, sl_fb = calc_dynamic_tp_sl(short_data)
+check("short data: uses fallback TP", abs(tp_fb - 0.06) < 0.001)
+check("short data: uses fallback SL", abs(sl_fb - 0.03) < 0.001)
+
+# Empty data → fallback
+tp_e, sl_e = calc_dynamic_tp_sl([])
+check("empty data: fallback TP", abs(tp_e - 0.06) < 0.001)
+check("empty data: fallback SL", abs(sl_e - 0.03) < 0.001)
+
+# ── daily_trading: check_signal ──
+print("\n=== daily_trading: entry_is_short ===")
+# Build clean uptrend: daily MA3 > MA5 > MA7
+# 15 daily bars rising from 100 to 115 → MA3=114 > MA5=113 > MA7=112
+daily_up = [{'close': 100 + i} for i in range(15)]
+# 30 12h bars with last 7 flat at ~108 so MA3≈MA7 and close≈MA3
+h12_up = [{'close': 100 + i//2} for i in range(23)]  # 23 price-rising 12h bars
+h12_up += [{'close': 108}] * 7                      # last 7 flat → MA3=MA7=close=108
+dir_up, pr_up = check_signal(h12_up, daily_up)
+check("uptrend returns direction", dir_up is not None)
+if dir_up:
+    check("uptrend is LONG", dir_up == 'LONG')
+    check("returns price", pr_up is not None and pr_up > 0)
+
+# Downtrend: daily MA3 < MA5 < MA7
+daily_dn = [{'close': 115 - i} for i in range(15)]
+# 12h bars with last 7 flat at ~107
+h12_dn = [{'close': 115 - i//2} for i in range(23)]
+h12_dn += [{'close': 107}] * 7
+dir_dn, pr_dn = check_signal(h12_dn, daily_dn)
+check("downtrend returns direction", dir_dn is not None)
+if dir_dn:
+    check("downtrend is SHORT", dir_dn == 'SHORT')
+
+# No trend (all equal → MAs equal → no trend direction)
+daily_nt = [{'close': 100} for _ in range(15)]
+h12_nt = [{'close': 100} for _ in range(30)]
+dir_nt, pr_nt = check_signal(h12_nt, daily_nt)
+check("no trend returns None", dir_nt is None)
+
+# Too short data
+dir4, pr4 = check_signal([], [])
+check("empty data returns None", dir4 is None)
+
+# ── Edge cases: compute_results ──
+print("\n=== Edge cases: compute_results ===")
+r5 = compute_results([1.0, 1.0, 1.0], {2024: 1.0}, 10000)
+check("flat curve CAGR=0", abs(r5['cagr']) < 0.01)
+check("flat curve DD=0", r5['dd'] == 0)
+
+r6 = compute_results([1.0, 1.5, 1.0], {2025: 1.0}, 10000)
+check("peak-then-drop DD > 0", r6['dd'] > 0)  # peak=1.5, valley=1.0 → 33% DD
+check("final = teq * base", abs(r6['final'] - 10000) < 0.1)
+
+# Single-point curve with explicit days to avoid CAGR explosion
+r7 = compute_results([1.1], {2024: 1.1}, 10000, days=365)
+check("single point CAGR ~10%", abs(r7['cagr'] - 10.0) < 0.5)
+check("single point DD=0", r7['dd'] == 0)
+
+# ── Edge cases: atr ──
+print("\n=== Edge cases: atr ===")
+from backtest_shared import atr as bt_atr
+check("atr empty", bt_atr([], [], [], 14) == [])
+check("atr single value", len(bt_atr([100], [90], [95], 14)) == 1)
+check("atr all None with zero data", all(v is None for v in bt_atr([100]*5, [90]*5, [95]*5, 14)[:13]))
+
+# ── Edge cases: avg_entry ──
+print("\n=== Edge cases: avg_entry ===")
+from backtest_shared import avg_entry
+check("avg_entry empty", avg_entry([])[0] is None and avg_entry([])[1] == 0)
+check("avg_entry single", abs(avg_entry([{'ep': 100}])[0] - 100) < 1e-9)
+check("avg_entry no mp uses w=1", abs(avg_entry([{'ep': 100}, {'ep': 110}])[0] - 105) < 1e-9)
+check("avg_entry with mp and rem", abs(avg_entry([{'ep': 100, 'mp': 0.1, 'rem': 1.0}])[0] - 100) < 1e-9)
+
+# ── 🔧 LEVERAGE FIX VERIFICATION ──
+print("\n=== Leverage fix verification ===")
+# Verify crypto_trading sets leverage BEFORE order (not after)
+src = open('scripts/crypto_trading.py').read()
+lines = src.split('\n')
+set_idx = None
+place_idx = None
+for i, line in enumerate(lines):
+    if 'okx_set_leverage' in line and 'okx_lev' in line and 'def' not in line and 'import' not in line:
+        set_idx = i
+    if 'okx_place_order(' in line and set_idx is not None and place_idx is None and 'def' not in line:
+        place_idx = i
+        break
+check("crypto_trading: set_leverage before order", place_idx is not None and set_idx < place_idx)
+
+# Same check for daily_trading.py
+src_daily = open('scripts/daily_trading.py').read()
+lines_daily = src_daily.split('\n')
+set_idx_d = None
+place_idx_d = None
+for i, line in enumerate(lines_daily):
+    if 'okx_set_leverage' in line and set_idx_d is None:
+        set_idx_d = i
+    if 'okx_place_order(' in line and set_idx_d is not None and place_idx_d is None:
+        place_idx_d = i
+        break
+check("daily_trading: set_leverage before order", set_idx_d is not None and place_idx_d is not None and set_idx_d < place_idx_d)
+
 # ── Summary ──
 print(f"\n{'='*40}")
 print(f"Results: {failures} failures")

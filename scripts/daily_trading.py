@@ -4,7 +4,7 @@ Daily Trading — BNB (pyramiding)
 - Entry: 12h — price near MA3 (1%), MA3 near MA7 (1%)
 - Multiple entries allowed (pyramiding)
 - TP/SL calculated on avg entry price of all open entries
-- 3% origin cap (10k) per entry, 3x leverage → $900/entry
+- 5% origin cap (10k) per entry, 3x leverage → $1,500/entry
 - TP/SL refreshed every execution via OCO algo orders (ATR-based)
 - Max 2 entries/day, 6h cooldown between entries
 """
@@ -17,12 +17,12 @@ from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_place_algo,
     okx_close_position, okx_get_candles, okx_get_instruments,
-    okx_get_algo_orders, okx_cancel_algo,
+    okx_get_algo_orders, okx_cancel_algo, okx_set_leverage,
 )
 from utils.state_manager import get_entries, add_entry, clear_entries, set_state, get_state
 
 CAPITAL_BASE = 10000
-ENTRY_MARGIN_PCT = 0.03
+ENTRY_MARGIN_PCT = 0.05
 LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
@@ -89,6 +89,8 @@ def avg_ep(entries):
     if not entries:
         return None
     total_w = sum(e.get('mp', 1) for e in entries)
+    if total_w == 0:
+        return None
     weighted = sum(e['ep'] * e.get('mp', 1) for e in entries)
     return weighted / total_w
 
@@ -233,7 +235,7 @@ def main():
         except Exception as e:
             log(f"Account fetch failed: {e}")
 
-    log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry (3% × $10k @ 3x)")
+            log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry ({ENTRY_MARGIN_PCT*100:.0f}% × $10k @ {LEV}x)")
 
     # ── Positions ──
     pos_map = {}
@@ -255,7 +257,7 @@ def main():
             stored = get_entries(coin)
             if not stored:
                 continue
-            cc = da[-1]['close']
+            cc = h12[-1]['close']
             roi = avg_roi(stored, cc, LEV)
             is_sh = entry_is_short(stored[0])
             tp_pct, sl_pct = calc_dynamic_tp_sl(h12)
@@ -380,6 +382,8 @@ def main():
 
             log(f"ENTRY {coin} {direction} {sz}ct @ ${price:.2f}")
             try:
+                okx_set_leverage(inst, LEV)
+                time.sleep(0.5)
                 r = okx_place_order(inst_id=inst, td_mode='cross',
                                    side='buy' if is_buy else 'sell', sz=str(sz))
                 oid = r.get('data', [{}])[0].get('ordId', '?')

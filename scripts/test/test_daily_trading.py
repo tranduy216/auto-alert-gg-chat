@@ -86,9 +86,9 @@ check("empty → 0", avg_roi([], 100, 2.0) == 0)
 # ── Entry sizing ──
 print("\n=== Entry sizing ===")
 check("CAPITAL_BASE = 10000", CAPITAL_BASE == 10000)
-check("ENTRY_MARGIN_PCT = 3%", abs(ENTRY_MARGIN_PCT - 0.03) < 0.001)
+check("ENTRY_MARGIN_PCT = 5%", abs(ENTRY_MARGIN_PCT - 0.05) < 0.001)
 check("LEV = 3.0", abs(LEV - 3.0) < 0.01)
-check("NOTIONAL = 900", abs(NOTIONAL - 900) < 0.01)
+check("NOTIONAL = 1500", abs(NOTIONAL - 1500) < 0.01)
 
 
 # ── Dynamic TP/SL (ATR-based) ──

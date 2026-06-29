@@ -13,9 +13,6 @@ from backtest_shared import (
     EXT_BLOCK_PCT, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
     entry_conditions, avg_entry,
 )
-
-_raw = os.environ.get('TRADING_COIN_LIST', '')
-TRADING_COIN_LIST = [c.strip() for c in _raw.splitlines() if c.strip()]
 from utils.discord_webhook import send_message
 from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
@@ -25,7 +22,7 @@ from utils.state_manager import has_entered_today, record_entry, get_entries, ad
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
-SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP', 'BTC': 'BTC-USDT-SWAP'}
+SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP'}
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
 
 
@@ -91,9 +88,6 @@ def sync_entries_with_positions(okx_positions, log):
         elif stored and not has_position:
             clear_entries(coin)
             _reset_position_state(coin)
-            if coin == 'BTC':
-                today = datetime.datetime.now().strftime('%Y-%m-%d')
-                set_state(coin, {'last_sl_date': today})
             log(f"  {coin}: cleared stale entries (position closed)")
             entries_map[coin] = []
         else:
@@ -127,7 +121,7 @@ def main():
         send_message(DISCORD_WEBHOOK,
             f"*Fetch Errors — {ts:%Y-%m-%d %H:%M}*\n" + "\n".join(f"  {e}" for e in errors))
 
-    data_map = {'BTC': btc_da, 'TRX': trx_da, 'XAU': paxg_da}
+    data_map = {'TRX': trx_da, 'XAU': paxg_da}
 
     entries_map = {}
     pos_map = {}
@@ -153,7 +147,6 @@ def main():
     if os.environ.get("OKX_API_KEY"):
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         for name, is_short, cfg in PYRAMID_STRATEGIES:
-            if name not in TRADING_COIN_LIST: continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
             if not da or not coin_entries: continue
@@ -175,6 +168,8 @@ def main():
 
             # Compute avg weighted EP
             avg_ep, _ = avg_entry(coin_entries)
+            if avg_ep is None:
+                continue
 
             roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
 
@@ -299,7 +294,6 @@ def main():
 
     # ── Position info (current TP/SL levels, trailing) ──
     for name, is_short, cfg in PYRAMID_STRATEGIES:
-        if name not in TRADING_COIN_LIST: continue
         coin_entries = entries_map.get(name, [])
         da = data_map.get(name, [])
         if not da or not coin_entries: continue
@@ -307,6 +301,7 @@ def main():
         e_cfg = cfg.get('entry', {}); exit_cfg = cfg.get('exit', {})
         lev = e_cfg.get('lev', 2)
         avg_ep, _ = avg_entry(coin_entries)
+        if avg_ep is None: continue
         roi = (cc - avg_ep) / avg_ep * 100 * lev if not is_short else (avg_ep - cc) / avg_ep * 100 * lev
         trail = exit_cfg.get('trail', 0.80)
         tp = exit_cfg.get('tp')
@@ -334,7 +329,6 @@ def main():
     # ── Pyramid (XAU): ROI >= next_pyr_roi → add entry, next += 7% ──
     if os.environ.get("OKX_API_KEY") and eq > 0:
         for name, is_short, cfg in PYRAMID_STRATEGIES:
-            if name not in TRADING_COIN_LIST: continue
             if is_short or not cfg.get('pyramid', {}).get('enabled', False): continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
@@ -342,13 +336,14 @@ def main():
             cc = da[-1]['close']
             lev = cfg['entry'].get('lev', 2)
             avg_ep, _ = avg_entry(coin_entries)
+            if avg_ep is None: continue
             roi = (cc - avg_ep) / avg_ep * 100 * lev
             pyr_roi = get_state(name).get('next_pyr_roi', 8)
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 inst_id = SYMBOL_OKX.get(name)
-                ct_val = float(next((i.get('ctVal', '0.01') for i in instruments if i['instId'] == inst_id), '0.01'))
+                ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
                 try:
                     r = okx_place_order(inst_id=inst_id, td_mode='cross',
@@ -362,7 +357,6 @@ def main():
     # ── Short Pyramid: ROI >= next_pyr_roi → add short entry ──
     if os.environ.get("OKX_API_KEY") and eq > 0:
         for name, is_short, cfg in PYRAMID_STRATEGIES:
-            if name not in TRADING_COIN_LIST: continue
             if not is_short or not cfg.get('pyramid', {}).get('enabled', False): continue
             coin_entries = entries_map.get(name, [])
             da = data_map.get(name, [])
@@ -370,6 +364,7 @@ def main():
             cc = da[-1]['close']
             lev = cfg['entry'].get('lev', 2)
             avg_ep, _ = avg_entry(coin_entries)
+            if avg_ep is None: continue
             roi = (avg_ep - cc) / avg_ep * 100 * lev
             pyr_roi = get_state(name).get('next_pyr_roi', 8)
             pyr_date = get_state(name).get('pyr_date', '')
@@ -377,7 +372,7 @@ def main():
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 usd_val *= cfg['entry'].get('short_mult', 2.0)
                 inst_id = SYMBOL_OKX.get(name)
-                ct_val = float(next((i.get('ctVal', '0.01') for i in instruments if i['instId'] == inst_id), '0.01'))
+                ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
                 try:
                     r = okx_place_order(inst_id=inst_id, td_mode='cross',
@@ -394,7 +389,6 @@ def main():
     traded_signals = []
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
-        if name not in TRADING_COIN_LIST: continue
         da = data_map.get(name, [])
         sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []))
         if sig:
@@ -405,13 +399,6 @@ def main():
 
     if os.environ.get("OKX_API_KEY") and eq > 0:
         try:
-            btc_bull = False
-            if btc_da and len(btc_da) >= 200:
-                btc_closes = [c['close'] for c in btc_da]
-                btc_ma200 = sma(btc_closes, 200)
-                if btc_ma200[-1]:
-                    btc_bull = btc_closes[-1] >= btc_ma200[-1] * 1.005
-
             for name, direction, price, lev, trail, mult, short_mult in signals:
                 inst_id = SYMBOL_OKX.get(name)
                 if not inst_id:
@@ -461,6 +448,8 @@ def main():
 
                 log(f"  TRADE {name} {direction} {sz}ct @ ${price:,.4f} (${usd_val:,.0f}, mult={mult:.1f}x, ctVal={ct_val})")
                 try:
+                    okx_set_leverage(inst_id, okx_lev)
+                    log(f"  Leverage set {okx_lev}x")
                     result = okx_place_order(
                         inst_id=inst_id, td_mode=td_mode,
                         side=side, sz=str(sz),
@@ -469,8 +458,6 @@ def main():
                     traded_count += 1
                     traded_signals.append((name, direction, price))
                     time.sleep(1.5)
-                    okx_set_leverage(inst_id, okx_lev)
-                    log(f"  Leverage set {okx_lev}x")
                     record_entry(name, price)
                     add_entry(name, price, direction == 'SELL')
                     if DISCORD_WEBHOOK:
