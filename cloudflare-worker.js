@@ -1,4 +1,4 @@
-// Cloudflare Worker — trigger crypto-trading mỗi 30 phút + báo Discord
+// Cloudflare Worker — trigger trading workflows mỗi 6h
 const REPO = 'tranduy216/auto-alert-gg-chat'
 
 async function sendDiscord(webhook, msg) {
@@ -10,7 +10,7 @@ async function sendDiscord(webhook, msg) {
   })
 }
 
-async function trigger(pat, webhook) {
+async function triggerWorkflow(pat, webhook, eventType) {
   const resp = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
     method: 'POST',
     headers: {
@@ -18,25 +18,26 @@ async function trigger(pat, webhook) {
       'Content-Type': 'application/json',
       'User-Agent': 'cloudflare-worker',
     },
-    body: JSON.stringify({ event_type: 'trigger-trading' }),
+    body: JSON.stringify({ event_type: eventType }),
   })
   if (resp.status === 204) {
-    console.log('✅ Trading workflow triggered')
+    console.log(`✅ ${eventType} triggered`)
   } else {
     const text = await resp.text()
-    await sendDiscord(webhook, `⚠️ Trigger fail: HTTP ${resp.status}\n\`\`\`${text.slice(0, 200)}\`\`\``)
+    await sendDiscord(webhook, `⚠️ ${eventType} fail: HTTP ${resp.status}\n\`\`\`${text.slice(0, 200)}\`\`\``)
     throw new Error(`HTTP ${resp.status}: ${text}`)
   }
 }
 
 export default {
-  // Cron: mỗi 30 phút
+  // Cron: mỗi 6h
   async scheduled(event, env, ctx) {
     if (!env.GH_PAT) {
       await sendDiscord(env.DISCORD_WEBHOOK, '❌ Worker: thiếu GH_PAT')
       return
     }
-    await trigger(env.GH_PAT, env.DISCORD_WEBHOOK)
+    await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-trading')
+    await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-daily-trading')
   },
 
   // HTTP request (để test hoặc trigger thủ công)
@@ -45,7 +46,8 @@ export default {
       return new Response('Missing GH_PAT', { status: 500 })
     }
     try {
-      await trigger(env.GH_PAT, env.DISCORD_WEBHOOK)
+      await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-trading')
+      await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-daily-trading')
       return new Response('OK', { status: 200 })
     } catch (e) {
       return new Response(e.message, { status: 500 })

@@ -1,0 +1,36 @@
+name: Daily Trading (BNB)
+
+on:
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [trigger-daily-trading]
+
+jobs:
+  daily-trading:
+    name: BNB 12h/1D hybrid strategy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily trading
+        working-directory: scripts
+        env:
+          DISCORD_TRADING_WEBHOOK_URL: ${{ secrets.DISCORD_TRADING_WEBHOOK_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+        run: python daily_trading.py
