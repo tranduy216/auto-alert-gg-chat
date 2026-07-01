@@ -26,6 +26,7 @@ backtest_shared.py    ← shared: sma, atr, entry_conditions, constants
 | MA Buffer | 5% | 5% |
 | Vol Bars | 3 | 3 |
 | Leverage | 2x | 2x |
+| Max Margin (per coin) | 75% (150% exposure @ 2x) | 75% (150% exposure @ 2x) |
 | Exit Mode | Trailing (82% of peak → 18% price DD, ~36% ROI DD @ 2x) | MA Cross (MA40/MA90) |
 | TP Schedule | 10/20/30/40/50% | - |
 | Pyramid | Disabled | Enabled (+7% ROI step) |
@@ -131,7 +132,7 @@ gh workflow run "Daily Trading (BNB)"
    - `COINGECKO_API_KEY` (optional) — data fallback
 
 4. **Pyramid Risk Controls**:
-   - Long: max margin 75%, short: max margin 40%
+   - Long: max margin 75% (150% exposure @ 2x), short: max margin 40% (80% exposure @ 2x)
    - Short: 2-day cooldown between entries
    - TRX: trailing stop at 82% of peak (18% price drawdown, ~36% ROI drawdown @ 2x), XAU: MA40/MA90 crossover exit
    - XAU pyramid auto-adds entry at +8%, +15%, +22% ROI...

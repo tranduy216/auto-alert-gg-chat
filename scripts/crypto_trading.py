@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest_shared import (
     sma, fetch_candles, ENTRY_PCT,
-    EXT_BLOCK_PCT, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
+    EXT_BLOCK_PCT, SHORT_MAX_MARGIN, LONG_MAX_MARGIN, SHORT_CLOSE_PCT, PYRAMID_STRATEGIES,
     entry_conditions, avg_entry,
 )
 from utils.discord_webhook import send_message
@@ -341,7 +341,13 @@ def main():
             pyr_roi = get_state(name).get('next_pyr_roi', 8)
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
+                existing_pos = pos_map.get(name, {})
+                existing_margin = float(existing_pos.get('margin', 0))
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
+                new_margin = usd_val / lev
+                if existing_margin + new_margin > eq * LONG_MAX_MARGIN:
+                    log(f"  {name}: pyramid cap {LONG_MAX_MARGIN*100:.0f}% margin, skipped")
+                    continue
                 inst_id = SYMBOL_OKX.get(name)
                 ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
@@ -369,8 +375,14 @@ def main():
             pyr_roi = get_state(name).get('next_pyr_roi', 8)
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
+                existing_pos = pos_map.get(name, {})
+                existing_margin = float(existing_pos.get('margin', 0))
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 usd_val *= cfg['entry'].get('short_mult', 2.0)
+                new_margin = usd_val / lev
+                if existing_margin + new_margin > eq * SHORT_MAX_MARGIN:
+                    log(f"  {name}: pyramid short cap {SHORT_MAX_MARGIN*100:.0f}% margin, skipped")
+                    continue
                 inst_id = SYMBOL_OKX.get(name)
                 ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
@@ -437,6 +449,13 @@ def main():
                     new_margin = usd_val / lev
                     if existing_margin + new_margin > eq * SHORT_MAX_MARGIN:
                         log(f"  {name}: short cap {SHORT_MAX_MARGIN*100:.0f}% margin, skipped")
+                        continue
+                else:
+                    existing_pos = pos_map.get(name, {})
+                    existing_margin = float(existing_pos.get('margin', 0))
+                    new_margin = usd_val / lev
+                    if existing_margin + new_margin > eq * LONG_MAX_MARGIN:
+                        log(f"  {name}: long cap {LONG_MAX_MARGIN*100:.0f}% margin, skipped")
                         continue
                 inst_info = inst_map[inst_id]
                 ct_val_str = inst_info.get('ctVal', '')
