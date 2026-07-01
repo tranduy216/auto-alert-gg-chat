@@ -20,9 +20,11 @@ TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
-MA_NEAR_BUF = 0.01
-PRICE_NEAR_BUF = 0.01
+MA_NEAR_BUF = 0.0075
+PRICE_NEAR_BUF = 0.0075
 MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
+MAX_ENTRIES_PER_DAY = 2
+ENTRY_COOLDOWN_HOURS = 6   # toggle: 6 or 8
 
 
 def load_12h():
@@ -39,7 +41,7 @@ def avg_ep(entries):
     return weighted / total_w
 
 
-def backtest(coin, raw_12h):
+def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7):
     if len(raw_12h) < 20:
         return None, 0, 0, 0
 
@@ -59,7 +61,7 @@ def backtest(coin, raw_12h):
     h12c = [c['close'] for c in raw_12h]
     h12h = [c['high'] for c in raw_12h]
     h12l = [c['low'] for c in raw_12h]
-    h12m3, h12m7 = sma(h12c, 3), sma(h12c, 7)
+    h12m3, h12m5, h12m7 = sma(h12c, 3), sma(h12c, 5), sma(h12c, 7)
     atr_vals = atr(h12h, h12l, h12c, ATR_PERIOD)
 
     eq = 1.0
@@ -69,6 +71,10 @@ def backtest(coin, raw_12h):
     total_entries = 0
     curve = []
     yearly = {}
+
+    daily_entry_count = 0
+    last_entry_di = -1
+    last_entry_ri = -9999
 
     for ri in range(10, len(raw_12h)):
         di = ri // 2
@@ -89,7 +95,9 @@ def backtest(coin, raw_12h):
         dt = datetime.datetime.fromtimestamp(ts / 1000)
 
         m3, m7 = h12m3[ri], h12m7[ri]
-        if m3 is None or m7 is None:
+        m_near = h12m3[ri] if near_ma == 3 else h12m5[ri]
+        m_cons = h12m5[ri] if cons_ma == 5 else h12m7[ri]
+        if m3 is None or m7 is None or m_near is None or m_cons is None:
             continue
 
         atr_val = atr_vals[ri]
@@ -135,12 +143,21 @@ def backtest(coin, raw_12h):
 
         # ── Entry — allow pyramiding ──
         if uptrend or downtrend:
-            ma_near = abs(m3 - m7) / m7 <= MA_NEAR_BUF
-            price_near = abs(cc - m3) / m3 <= PRICE_NEAR_BUF
+            ma_near = abs(m_near - m_cons) / m_cons <= near_buf
+            price_near = abs(cc - m_near) / m_near <= near_buf
 
             if ma_near and price_near:
                 already = any(e['ri'] == ri for e in entries)
+                if di != last_entry_di:
+                    daily_entry_count = 0
                 if not already:
+                    bars_since_last = ri - last_entry_ri
+                    hours_since_last = bars_since_last * 12
+                    if hours_since_last < cooldown_hours:
+                        continue
+                    if daily_entry_count >= MAX_ENTRIES_PER_DAY:
+                        continue
+
                     direction_short = downtrend
                     # If direction flips, close existing batch at current price
                     if entries and entries[0].get('short') != direction_short:
@@ -160,6 +177,9 @@ def backtest(coin, raw_12h):
                         'ri': ri,
                         'short': direction_short,
                     })
+                    daily_entry_count += 1
+                    last_entry_di = di
+                    last_entry_ri = ri
                     total_entries += 1
 
         # ── Unrealized PnL ──
@@ -193,41 +213,44 @@ def main():
     print(f"  Strategy: 12h/1D hybrid, multiple entries allowed")
     print(f"  Size: {ENTRY_MARGIN_PCT*100:.0f}% margin @ {LEV}x = ${NOTIONAL:,.0f}/entry")
     print(f"  TP={FALLBACK_TP_PCT*100:.0f}%/{FALLBACK_SL_PCT*100:.0f}% (fallback) — dynamic ATR-based")
+    print(f"  MA3/MA5 near MA5/MA7, buffer 1.0% vs 0.75%")
     print("=" * 60)
 
-    tw, tl, te = 0, 0, 0
     for coin in COINS:
         key = next((k for k in raw if k.startswith(f'{coin}USDT_4000_')), None)
         if not key:
             print(f"  {coin}: no data")
             continue
-        r = backtest(coin, raw[key])
-        if not r or not r[0]:
-            print(f"  {coin}: failed")
-            continue
-        res, wins, losses, tentries = r
-        tt = wins + losses
-        wr = wins / tt * 100 if tt > 0 else 0
-        tw += wins; tl += losses; te += tentries
-        pf = res['final'] / CAPITAL_BASE
-        print(f"\n  {coin}")
-        print(f"  {'='*50}")
-        print(f"    CAGR:          {res['cagr']:>+7.1f}%")
-        print(f"    Max DD:        {res['dd']:>7.1f}%")
-        print(f"    Final:         ${res['final']:>9,.0f}")
-        print(f"    Profit factor: {pf:.2f}x")
-        print(f"    Batches:       {tt} (W:{wins} L:{losses}) WR: {wr:.1f}%")
-        print(f"    Total entries: {tentries} ({tentries/tt:.1f}/batch avg)")
-        for y in sorted(res['yearly']):
-            print(f"    {y}: {res['yearly'][y]:>+7.1f}%")
 
-    total_t = tw + tl
+        combos = {
+            "MA3-MA7 1.0%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.01,  near_ma=3, cons_ma=7),
+            "MA3-MA7 0.75%": backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.0075, near_ma=3, cons_ma=7),
+            "MA3-MA5 1.0%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.01,  near_ma=3, cons_ma=5),
+            "MA3-MA5 0.75%": backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.0075, near_ma=3, cons_ma=5),
+            "MA5-MA7 1.0%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.01,  near_ma=5, cons_ma=7),
+            "MA5-MA7 0.75%": backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.0075, near_ma=5, cons_ma=7),
+        }
+
+        best_cagr = float('-inf')
+        best_label = ""
+        for label, r in combos.items():
+            if not r or not r[0]:
+                continue
+            res, wins, losses, tentries = r
+            tt = wins + losses
+            wr = wins / tt * 100 if tt > 0 else 0
+            pf = res['final'] / CAPITAL_BASE
+            print(f"\n  {coin} ({label})")
+            print(f"    CAGR: {res['cagr']:+7.1f}%  MaxDD: {res['dd']:7.1f}%  Final: ${res['final']:>9,.0f}  Batches: {tt}  WR: {wr:.1f}%  PF: {pf:.2f}x")
+            for y in sorted(res['yearly']):
+                print(f"    {y}: {res['yearly'][y]:>+7.1f}%")
+            if res['cagr'] > best_cagr:
+                best_cagr = res['cagr']
+                best_label = label
+
+        print(f"\n  BEST: {best_label} (CAGR {best_cagr:+.1f}%)")
+
     print(f"\n{'='*60}")
-    print(f"  TOTAL: {total_t} trade batches | WR: {tw/total_t*100:.1f}% ({tw}/{tl})")
-    print(f"  Total entries: {te}")
-    print(f"{'='*60}")
-
-    print(f"{'='*60}")
     print()
 
 

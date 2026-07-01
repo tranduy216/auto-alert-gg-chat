@@ -6,7 +6,7 @@ Daily Trading — BNB (pyramiding)
 - TP/SL calculated on avg entry price of all open entries
 - 5% origin cap (10k) per entry, 3x leverage → $1,500/entry
 - TP/SL refreshed every execution via OCO algo orders (ATR-based)
-- Max 2 entries/day, 6h cooldown between entries
+- Max 2 entries/day, 8h cooldown between entries
 """
 import os, sys, time, datetime
 from pathlib import Path
@@ -37,7 +37,7 @@ COINS = ['BNB']
 OKX_SYMBOLS = {'BNB': 'BNB-USDT-SWAP'}
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 MAX_ENTRIES_PER_DAY = 2
-ENTRY_COOLDOWN_HOURS = 6
+ENTRY_COOLDOWN_HOURS = 8
 MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 
 
