@@ -40,6 +40,7 @@ backtest_shared.py    ← shared: sma, atr, entry_conditions, constants
 | Trend | 1D MA3 > MA5 > MA7 (long) / MA3 < MA5 < MA7 (short) |
 | Entry signal | 12h: MA3 near MA7 (<1%) AND price near MA3 (<1%) |
 | Max entries/day | 2, 6h cooldown |
+| Max total exposure | 150% of $10k (50% margin @ 3x) |
 | TP/SL | Dynamic ATR-based (SLx3, TPx3 ATR) |
 
 ## Backtest Results
@@ -69,19 +70,19 @@ backtest_shared.py    ← shared: sma, atr, entry_conditions, constants
 
 | Metric | Value |
 |---|---|
-| **CAGR** | **+10.3%** |
+| **CAGR** | **+10.4%** |
 | **Max DD** | **19.3%** |
-| Final | $29,227 (2.92x) |
-| WR | 68.8% (75W/34L) |
+| Final | $29,226 (2.92x) |
+| WR | 69.1% (76W/34L) |
 
 | Year | Return |
 |---|---|
 | 2021 | +7.4% |
 | 2022 | +32.3% |
-| 2023 | +32.6% |
-| 2024 | -1.5% |
-| 2025 | +48.5% |
-| 2026 | +6.0% |
+| 2023 | +29.4% |
+| 2024 | +2.3% |
+| 2025 | +46.2% |
+| 2026 | +6.2% |
 
 ## State
 
@@ -136,7 +137,7 @@ gh workflow run "Daily Trading (BNB)"
    - XAU pyramid auto-adds entry at +8%, +15%, +22% ROI...
 
 5. **BNB Daily Risk Controls**:
-   - Max 2 entries/day, 6h cooldown between entries
+   - Max 2 entries/day, 6h cooldown, total exposure cap 150% of $10k
    - Dynamic TP/SL based on 12h ATR (TP = 3x ATR, SL = 3x ATR)
    - Fallback TP 6%, SL 3% when ATR unavailable
    - On direction flip (LONG→SHORT or vice versa), close all existing positions
@@ -144,6 +145,10 @@ gh workflow run "Daily Trading (BNB)"
 6. **Do not trade manually on OKX**: The system auto-checks signals and executes via GitHub Actions. Only trigger manually for emergency testing.
 
 ## Changelog
+
+### v0.3 (2026-07-01)
+- Added max total exposure cap to BNB daily trading: 150% of $10k (50% margin @ 3x)
+- Cap applied in both live and backtest
 
 ### v0.2 (2026-06-30)
 - BNB daily trading: 5% margin, 3x leverage, OCO algo orders

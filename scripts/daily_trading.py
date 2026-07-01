@@ -38,6 +38,7 @@ OKX_SYMBOLS = {'BNB': 'BNB-USDT-SWAP'}
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 MAX_ENTRIES_PER_DAY = 2
 ENTRY_COOLDOWN_HOURS = 6
+MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 
 
 def log(msg):
@@ -375,6 +376,12 @@ def main():
             if is_in_cooldown(coin):
                 rem = cooldown_remaining(coin)
                 log(f"{coin}: cooldown remaining {rem:.1f}h, skipping entry")
+                continue
+
+            existing_entries = get_entries(coin)
+            total_exposure = (len(existing_entries) + 1) * NOTIONAL
+            if total_exposure > MAX_TOTAL_EXPOSURE * CAPITAL_BASE:
+                log(f"{coin}: exposure cap reached ({total_exposure/CAPITAL_BASE*100:.0f}% > {MAX_TOTAL_EXPOSURE*100:.0f}%), skipping entry")
                 continue
 
             sz = max(1, int(NOTIONAL / (price * ct_val)))

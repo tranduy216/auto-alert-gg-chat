@@ -22,6 +22,7 @@ FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
 MA_NEAR_BUF = 0.01
 PRICE_NEAR_BUF = 0.01
+MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 
 
 def load_12h():
@@ -151,6 +152,8 @@ def backtest(coin, raw_12h):
                                 ret = (cc - e['ep']) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
                             eq += ret
                         entries = []
+                    if (sum(e['mp'] for e in entries) + ENTRY_MARGIN_PCT) * LEV > MAX_TOTAL_EXPOSURE:
+                        continue
                     entries.append({
                         'ep': cc,
                         'mp': ENTRY_MARGIN_PCT,
