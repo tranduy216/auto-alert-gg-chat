@@ -26,7 +26,7 @@ backtest_shared.py    ← shared: sma, atr, entry_conditions, constants
 | MA Buffer | 5% | 5% |
 | Vol Bars | 3 | 3 |
 | Leverage | 2x | 2x |
-| Exit Mode | Trailing (82%) | MA Cross (MA40/MA90) |
+| Exit Mode | Trailing (82% of peak → 18% price DD, ~36% ROI DD @ 2x) | MA Cross (MA40/MA90) |
 | TP Schedule | 10/20/30/40/50% | - |
 | Pyramid | Disabled | Enabled (+7% ROI step) |
 
@@ -120,38 +120,38 @@ gh workflow run "Crypto Trading System"
 gh workflow run "Daily Trading (BNB)"
 ```
 
-## Lưu ý sử dụng
+## Usage Notes
 
-1. **Backtest trước khi deploy**: Mọi thay đổi entry_conditions trong `backtest_shared.py` đều ảnh hưởng đồng thời backtest và live. Luôn chạy `combined_backtest.py` và `backtest_daily_trading.py` trước khi push.
+1. **Backtest before deploy**: Any changes to `entry_conditions` in `backtest_shared.py` affect both backtest and live. Always run `combined_backtest.py` and `backtest_daily_trading.py` before pushing.
 
-2. **Kiểm tra test suite**: Chạy `python3 scripts/test/test_all.py` và `python3 scripts/test/test_daily_trading.py`, đảm bảo 0 failures trước mỗi lần deploy.
+2. **Run test suite**: Run `python3 scripts/test/test_all.py` and `python3 scripts/test/test_daily_trading.py`, ensure 0 failures before each deploy.
 
-3. **Secrets bắt buộc** (GitHub Secrets):
-   - `OKX_API_KEY`, `OKX_API_SECRET`, `OKX_API_PASSPHRASE` — giao dịch OKX
-   - `FIREBASE_SERVICE_ACCOUNT` — lưu trạng thái trade
-   - `DISCORD_TRADING_WEBHOOK_URL` — thông báo Discord
+3. **Required Secrets** (GitHub Secrets):
+   - `OKX_API_KEY`, `OKX_API_SECRET`, `OKX_API_PASSPHRASE` — OKX trading
+   - `FIREBASE_SERVICE_ACCOUNT` — trade state persistence
+   - `DISCORD_TRADING_WEBHOOK_URL` — Discord notifications
    - `COINGECKO_API_KEY` (optional) — data fallback
 
-4. **Pyramid kiểm soát rủi ro**:
+4. **Pyramid Risk Controls**:
    - Long: max margin 75%, short: max margin 40%
-   - Short có cooldown 2 ngày giữa các lần entry
-   - TRX: trailing stop 82%, XAU: MA40/MA90 crossover exit
-   - XAU pyramid tự động thêm entry khi ROI đạt +8%, +15%, +22%...
+   - Short: 2-day cooldown between entries
+   - TRX: trailing stop at 82% of peak (18% price drawdown, ~36% ROI drawdown @ 2x), XAU: MA40/MA90 crossover exit
+   - XAU pyramid auto-adds entry at +8%, +15%, +22% ROI...
 
-5. **BNB Daily kiểm soát rủi ro**:
-   - Max 2 entries/ngày, cooldown 6h giữa entries
-   - TP/SL động dựa trên ATR 12h (TP = 3x ATR, SL = 3x ATR)
-   - Fallback TP 6%, SL 3% khi không có ATR
-   - Khi direction flip (LONG→SHORT hoặc ngược lại), đóng toàn bộ position cũ
+5. **BNB Daily Risk Controls**:
+   - Max 2 entries/day, 6h cooldown between entries
+   - Dynamic TP/SL based on 12h ATR (TP = 3x ATR, SL = 3x ATR)
+   - Fallback TP 6%, SL 3% when ATR unavailable
+   - On direction flip (LONG→SHORT or vice versa), close all existing positions
 
-6. **Không chạy thủ công trên OKX**: System tự động check signal và execute qua GitHub Actions. Chỉ trigger thủ công khi cần test khẩn cấp.
+6. **Do not trade manually on OKX**: The system auto-checks signals and executes via GitHub Actions. Only trigger manually for emergency testing.
 
 ## Changelog
 
 ### v0.2 (2026-06-30)
 - BNB daily trading: 5% margin, 3x leverage, OCO algo orders
 - Crypto trading: TRX + XAU long only (MA pullback + pyramid)
-- XAU pyramid: tự động thêm entry mỗi +7% ROI
+- XAU pyramid: auto-add entry every +7% ROI
 - Fixed: leverage set before order, avg_ep None crash, backtest exit price consistency
 - Dynamic ATR-based TP/SL for BNB
 - 0 test failures across both suites
