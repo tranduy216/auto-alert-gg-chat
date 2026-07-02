@@ -2,9 +2,9 @@ name: Breaking News Monitor
 
 on:
   schedule:
-    # Every 2 hours (UTC): checks for breaking news and queues during quiet hours.
+    # Every 4 hours (UTC): checks for breaking news and queues during quiet hours.
     # Quiet hours in VNT (UTC+7): 22:00–06:00 VNT = 15:00–23:00 UTC.
-    - cron: '0 0,2,4,6,8,10,12,14,16,18,20,22 * * *'
+    - cron: '0 0,4,8,12,16,20 * * *'
     # 23:00 UTC = 06:00 VNT: flush alerts held during quiet hours.
     - cron: '0 23 * * *'
   workflow_dispatch: {}   # allow manual trigger for testing
