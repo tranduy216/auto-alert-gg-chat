@@ -26,7 +26,7 @@ SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP'}
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
 
 
-def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
+def check_signals(coin_da, cfg, is_short, entries=None):
     """Check entry signal at latest bar using shared entry_conditions."""
     if not coin_da or len(coin_da) < 200: return None
     if entries is None: entries = []
@@ -44,18 +44,11 @@ def check_signals(coin_da, btc_da, cfg, is_short, entries=None):
     opens = [c.get('open', c['close']) for c in coin_da]
     highs = [c['high'] for c in coin_da]; lows = [c['low'] for c in coin_da]
     ma = sma(closes, ma_period); vma = sma(vols, 20)
-    btc_closes = [c['close'] for c in btc_da] if btc_da else None
-    btc_ma200 = sma(btc_closes, 200) if btc_closes else None
     idx = len(closes) - 1
     cc = closes[idx]; mm = ma[idx]; vv = vma[idx]
     if mm is None or vv is None or vv == 0: return None
-    btc_bull = False
-    if btc_ma200 and btc_closes:
-        bi = min(idx, len(btc_closes) - 1)
-        if bi >= 200 and btc_ma200[bi]:
-            btc_bull = btc_closes[bi] >= btc_ma200[bi] * 1.005
     should, mult = entry_conditions(entries, cc, idx, vols, vv, mm, ma_buf, is_short,
-                                    btc_bull, ext_block, lev_coin, -999,
+                                    False, ext_block, lev_coin, -999,
                                     ma=ma, highs=highs, lows=lows,
                                     ma_slope=ma_slope, lower_high=lower_high, asym_buffer=asym_buffer,
                                     vol_bars=vol_bars, green_min_count=green_min_count,
@@ -101,11 +94,6 @@ def main():
 
     log("Fetching market data...")
     errors = []
-
-    btc_da = fetch_candles('BTCUSDT', 600)
-    if not btc_da or len(btc_da) < 200:
-        errors.append("BTC data fetch FAILED")
-        btc_da = []
 
     trx_da = fetch_candles('TRXUSDT', 600)
     if not trx_da or len(trx_da) < 200:
@@ -402,7 +390,7 @@ def main():
     traded_count = 0
     for name, is_short, cfg in PYRAMID_STRATEGIES:
         da = data_map.get(name, [])
-        sig = check_signals(da, btc_da, cfg, is_short, entries_map.get(name, []))
+        sig = check_signals(da, cfg, is_short, entries_map.get(name, []))
         if sig:
             should, mult, price = sig
             dir = 'BUY' if not is_short else 'SELL'

@@ -555,32 +555,27 @@ with patch('crypto_trading.sma') as mock_sma:
     # Case: vol_cond fails → should returns None
     vols_fail = [10]*200 + [3, 3, 3]
     da = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vols_fail]
-    btc_da = [{'close': 50000, 'high': 50000, 'low': 50000, 'volume': 0, 'time': 0}]*203
-    cfg = {'ma': 15, 'buf': 0.05, 'lev': 2, 'vol_bars': 3}
-    result = check_signals(da, btc_da, cfg, False)
+    cfg = {'entry': {'ma': 15, 'buffer': 0.05, 'lev': 2, 'vol_bars': 3}}
+    result = check_signals(da, cfg, False)
     check("QG1: check_signals returns None when entry condition fails", result is None)
 
     # Case: all conditions pass → returns (True, mult, price)
     vols_pass = [10]*200 + [100, 100, 100]
     da2 = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vols_pass]
-    result2 = check_signals(da2, btc_da, cfg, False)
+    result2 = check_signals(da2, cfg, False)
     check("QG2: check_signals returns tuple when entry passes", isinstance(result2, tuple) and len(result2) == 3)
     check("QG2b: should=True, mult>0, price=close", result2 is not None and result2[0] is True and result2[1] > 0)
 
-    # Case: short entry blocked by BTC bull
-    cfg_s = {'ma': 5, 'buf': 0.07, 'lev': 2}
+    # Case: short entry always allowed (BTC gate removed — no short strategies active)
+    cfg_s = {'entry': {'ma': 5, 'buffer': 0.07, 'lev': 2}}
     vol_hi = [10]*201 + [200, 200]
     da_s = [{'close': 100, 'high': 100, 'low': 100, 'volume': v, 'time': 0} for v in vol_hi]
-    btc_bull_d = [{'close': 60000, 'high': 60000, 'low': 60000, 'volume': 0, 'time': 0}]*200 \
-               + [{'close': 66000, 'high': 66000, 'low': 66000, 'volume': 0, 'time': 0}]*100
-    result3 = check_signals(da_s, btc_bull_d, cfg_s, True)
-    check("QG3: short entry blocked when BTC bullish (>=MA200*1.005)", result3 is None)
+    result3 = check_signals(da_s, cfg_s, True)
+    check("QG3: short entry allowed (BTC gate removed)", result3 is not None)
 
-    # Case: short entry passes when BTC bearish
-    btc_bear_d = [{'close': 60000, 'high': 60000, 'low': 60000, 'volume': 0, 'time': 0}]*200 \
-               + [{'close': 40000, 'high': 40000, 'low': 40000, 'volume': 0, 'time': 0}]*100
-    result4 = check_signals(da_s, btc_bear_d, cfg_s, True)
-    check("QG4: short entry allowed when BTC bearish", result4 is not None)
+    # Case: short entry passes
+    result4 = check_signals(da_s, cfg_s, True)
+    check("QG4: short entry allowed", result4 is not None)
 
 # QG5: btc_bull formula identical — grep source for inconsistencies
 import re
@@ -591,7 +586,7 @@ for fn in ['crypto_trading.py', 'live_pyramid.py', 'combined_backtest.py', 'pool
     for m in re.finditer(r'\bbtc_bull\b\s*=\s*btc_closes\[[^\]]+\]\s*([><=]+)\s*btc_ma200\[[^\]]+\](\s*\*\s*[\d.]+)?', txt):
         op = m.group(1); mul = m.group(2) or ''
         formulas.append(f'{fn}:{op}{mul.strip()}')
-all_ok = all('>=* 1.005' in f for f in formulas) and len(formulas) >= 4
+    all_ok = all('>=* 1.005' in f for f in formulas) and len(formulas) >= 3
 check(f"QG5: all btc_bull sites use >= * 1.005 (found {len(formulas)})", all_ok)
 
 # ── TRADING SCENARIO UNIT TESTS ──
