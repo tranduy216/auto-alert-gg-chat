@@ -1,4 +1,4 @@
-// Cloudflare Worker — trigger trading workflows mỗi 15 phút
+// Cloudflare Worker — trigger trading workflows mỗi 30 phút
 const REPO = 'tranduy216/auto-alert-gg-chat'
 
 async function sendDiscord(webhook, msg) {
@@ -30,7 +30,7 @@ async function triggerWorkflow(pat, webhook, eventType) {
 }
 
 export default {
-  // Cron: mỗi 15 phút
+  // Cron: mỗi 30 phút
   async scheduled(event, env, ctx) {
     if (!env.GH_PAT) {
       await sendDiscord(env.DISCORD_WEBHOOK, '❌ Worker: thiếu GH_PAT')
