@@ -738,10 +738,7 @@ daily_up = [{'close': 100 + i} for i in range(15)]
 h12_up = [{'close': 100 + i//2} for i in range(23)]  # 23 price-rising 12h bars
 h12_up += [{'close': 108}] * 7                      # last 7 flat → MA3=MA7=close=108
 dir_up, pr_up = check_signal(h12_up, daily_up)
-check("uptrend returns direction", dir_up is not None)
-if dir_up:
-    check("uptrend is LONG", dir_up == 'LONG')
-    check("returns price", pr_up is not None and pr_up > 0)
+check("uptrend returns None (SHORT-only)", dir_up is None)
 
 # Downtrend: daily MA3 < MA5 < MA7
 daily_dn = [{'close': 115 - i} for i in range(15)]

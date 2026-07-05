@@ -20,11 +20,11 @@ TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
-MA_NEAR_BUF = 0.0075
-PRICE_NEAR_BUF = 0.0075
+MA_NEAR_BUF = 0.01
+PRICE_NEAR_BUF = 0.01
 MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 MAX_ENTRIES_PER_DAY = 2
-ENTRY_COOLDOWN_HOURS = 6   # toggle: 6 or 8
+ENTRY_COOLDOWN_HOURS = 8
 
 
 def load_12h():
@@ -42,6 +42,7 @@ def avg_ep(entries):
 
 
 def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7):
+    raw_12h = [c for c in raw_12h if c['open_time'] >= 1609459200000]  # from 2021
     if len(raw_12h) < 20:
         return None, 0, 0, 0
 
@@ -85,7 +86,6 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
         if d3 is None or d5 is None or d7 is None:
             continue
 
-        uptrend = d3 > d5 > d7
         downtrend = d3 < d5 < d7
 
         cc = raw_12h[ri]['close']
@@ -107,49 +107,31 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
             sl_pct = max(min((atr_val / cc) * SL_ATR_MULT, 0.15), 0.01)
             tp_pct = max(min((atr_val / cc) * TP_ATR_MULT, 0.20), 0.02)
 
-        is_short = entries and entries[0].get('short', False)
-
         # ── Exit: check TP/SL on avg entry price ──
         if entries:
             aep = avg_ep(entries)
-            if is_short:
-                if hi >= aep * (1 + sl_pct):
-                    # SL hit — close all
-                    for e in entries:
-                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
-                        eq += ret
-                    losses += 1
-                    entries = []
-                elif lo <= aep * (1 - tp_pct):
-                    # TP hit — close all
-                    for e in entries:
-                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
-                        eq += ret
-                    wins += 1
-                    entries = []
-            else:
-                if lo <= aep * (1 - sl_pct):
-                    for e in entries:
-                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
-                        eq += ret
-                    losses += 1
-                    entries = []
-                elif hi >= aep * (1 + tp_pct):
-                    for e in entries:
-                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
-                        eq += ret
-                    wins += 1
-                    entries = []
+            if hi >= aep * (1 + sl_pct):
+                for e in entries:
+                    ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += ret
+                losses += 1
+                entries = []
+            elif lo <= aep * (1 - tp_pct):
+                for e in entries:
+                    ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += ret
+                wins += 1
+                entries = []
 
         # ── Entry — allow pyramiding ──
-        if uptrend or downtrend:
+        if di != last_entry_di:
+            daily_entry_count = 0
+        if downtrend:
             ma_near = abs(m_near - m_cons) / m_cons <= near_buf
             price_near = abs(cc - m_near) / m_near <= near_buf
 
             if ma_near and price_near:
                 already = any(e['ri'] == ri for e in entries)
-                if di != last_entry_di:
-                    daily_entry_count = 0
                 if not already:
                     bars_since_last = ri - last_entry_ri
                     hours_since_last = bars_since_last * 12
@@ -157,25 +139,13 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
                         continue
                     if daily_entry_count >= MAX_ENTRIES_PER_DAY:
                         continue
-
-                    direction_short = downtrend
-                    # If direction flips, close existing batch at current price
-                    if entries and entries[0].get('short') != direction_short:
-                        # Close existing at current price
-                        for e in entries:
-                            if entries[0].get('short'):
-                                ret = (e['ep'] - cc) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
-                            else:
-                                ret = (cc - e['ep']) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
-                            eq += ret
-                        entries = []
                     if (sum(e['mp'] for e in entries) + ENTRY_MARGIN_PCT) * LEV > MAX_TOTAL_EXPOSURE:
                         continue
                     entries.append({
                         'ep': cc,
                         'mp': ENTRY_MARGIN_PCT,
                         'ri': ri,
-                        'short': direction_short,
+                        'short': True,
                     })
                     daily_entry_count += 1
                     last_entry_di = di
@@ -185,11 +155,7 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
         # ── Unrealized PnL ──
         if entries:
             aep = avg_ep(entries)
-            is_sh = entries[0].get('short', False)
-            if is_sh:
-                ureal = (aep - cc) / aep * LEV * sum(e['mp'] for e in entries)
-            else:
-                ureal = (cc - aep) / aep * LEV * sum(e['mp'] for e in entries)
+            ureal = (aep - cc) / aep * LEV * sum(e['mp'] for e in entries)
         else:
             ureal = 0
 
