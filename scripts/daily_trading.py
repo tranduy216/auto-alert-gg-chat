@@ -26,12 +26,13 @@ ENTRY_MARGIN_PCT = 0.05
 LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
-SL_ATR_MULT = 3.0
+SL_ATR_MULT = 3.5
 TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
-MA_NEAR_BUF = 0.01
+MA_NEAR_BUF = 0.012
 PRICE_NEAR_BUF = 0.01
+TREND_SPREAD = 0.002  # require 1D MA3 and MA7 to diverge by at least 0.2%
 
 COINS = ['BNB']
 OKX_SYMBOLS = {'BNB': 'BNB-USDT-SWAP'}
@@ -176,7 +177,9 @@ def check_signal(h12_da, daily_da):
 
     uptrend = d3 > d5 > d7
     downtrend = d3 < d5 < d7
-    if not uptrend and not downtrend:
+    long_ok = uptrend and (d3 - d7) / d7 >= TREND_SPREAD
+    short_ok = downtrend and (d7 - d3) / d7 >= TREND_SPREAD
+    if not long_ok and not short_ok:
         return None, None
 
     h12c = [c['close'] for c in h12_da]

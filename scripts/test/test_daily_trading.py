@@ -96,7 +96,7 @@ print("\n=== Dynamic TP/SL (ATR-based) ===")
 check("FALLBACK_TP_PCT = 6%", abs(FALLBACK_TP_PCT - 0.06) < 0.001)
 check("FALLBACK_SL_PCT = 3%", abs(FALLBACK_SL_PCT - 0.03) < 0.001)
 check("ATR_PERIOD = 14", ATR_PERIOD == 14)
-check("SL_ATR_MULT = 3.0", abs(SL_ATR_MULT - 3.0) < 0.001)
+check("SL_ATR_MULT = 3.5", abs(SL_ATR_MULT - 3.5) < 0.001)
 check("TP_ATR_MULT = 3.0", abs(TP_ATR_MULT - 3.0) < 0.001)
 
 insufficient = [mk_bar(100) for _ in range(5)]

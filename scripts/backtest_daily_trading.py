@@ -15,12 +15,12 @@ ENTRY_MARGIN_PCT = 0.05
 LEV = 3.0
 NOTIONAL = CAPITAL_BASE * ENTRY_MARGIN_PCT * LEV
 ATR_PERIOD = 14
-SL_ATR_MULT = 3.0
+SL_ATR_MULT = 3.5
 TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
-MA_NEAR_BUF = 0.01
+MA_NEAR_BUF = 0.012
 PRICE_NEAR_BUF = 0.01
 MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 MAX_ENTRIES_PER_DAY = 2
@@ -41,7 +41,7 @@ def avg_ep(entries):
     return weighted / total_w
 
 
-def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7):
+def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7, trend_spread=0.002):
     if len(raw_12h) < 20:
         return None, 0, 0, 0
 
@@ -87,6 +87,8 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
 
         uptrend = d3 > d5 > d7
         downtrend = d3 < d5 < d7
+        long_ok = uptrend and (d3 - d7) / d7 >= trend_spread
+        short_ok = downtrend and (d7 - d3) / d7 >= trend_spread
 
         cc = raw_12h[ri]['close']
         hi = raw_12h[ri]['high']
@@ -142,7 +144,7 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
         # ── Entry — allow pyramiding ──
         if di != last_entry_di:
             daily_entry_count = 0
-        if uptrend or downtrend:
+        if long_ok or short_ok:
             ma_near = abs(m_near - m_cons) / m_cons <= near_buf
             price_near = abs(cc - m_near) / m_near <= near_buf
 
@@ -156,7 +158,7 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
                     if daily_entry_count >= MAX_ENTRIES_PER_DAY:
                         continue
 
-                    direction_short = downtrend
+                    direction_short = short_ok
                     # If direction flips, close existing batch at current price
                     if entries and entries[0].get('short') != direction_short:
                         for e in entries:
