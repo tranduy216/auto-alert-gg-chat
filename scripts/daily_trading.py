@@ -174,8 +174,9 @@ def check_signal(h12_da, daily_da):
     if d3 is None or d5 is None or d7 is None:
         return None, None
 
+    uptrend = d3 > d5 > d7
     downtrend = d3 < d5 < d7
-    if not downtrend:
+    if not uptrend and not downtrend:
         return None, None
 
     h12c = [c['close'] for c in h12_da]
@@ -188,7 +189,7 @@ def check_signal(h12_da, daily_da):
     if not (abs(m3 - m7) / m7 <= MA_NEAR_BUF and abs(cc - m3) / m3 <= PRICE_NEAR_BUF):
         return None, None
 
-    return 'SHORT', cc
+    return ('LONG' if uptrend else 'SHORT'), cc
 
 
 def avg_roi(entries, cc, lev):
@@ -235,7 +236,7 @@ def main():
         except Exception as e:
             log(f"Account fetch failed: {e}")
 
-    log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry ({ENTRY_MARGIN_PCT*100:.0f}% × $10k @ {LEV}x)")
+            log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry ({ENTRY_MARGIN_PCT*100:.0f}% × $10k @ {LEV}x)")
 
     # ── Positions ──
     pos_map = {}

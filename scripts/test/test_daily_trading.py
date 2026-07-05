@@ -38,7 +38,7 @@ print("\n=== check_signal ===")
 d_up = [mk_bar(100+i*5) for i in range(12)]
 h12_up = [mk_bar(141) for _ in range(10)] + [mk_bar(141.5), mk_bar(141.8)]
 dir, pr = check_signal(h12_up, d_up)
-check("uptrend → None (SHORT-only)", dir is None)
+check("uptrend → LONG", dir == 'LONG')
 
 d_down = [mk_bar(150-i*5) for i in range(12)]
 h12_down = [mk_bar(100) for _ in range(12)]
@@ -130,7 +130,7 @@ import time, datetime
 from utils.state_manager import set_state, get_state
 
 check("MAX_ENTRIES_PER_DAY = 2", MAX_ENTRIES_PER_DAY == 2)
-check("ENTRY_COOLDOWN_HOURS = 8", ENTRY_COOLDOWN_HOURS == 8)
+check("ENTRY_COOLDOWN_HOURS = 6", ENTRY_COOLDOWN_HOURS == 6)
 
 test_coin = '_test_entry_limit'
 
@@ -159,12 +159,12 @@ increment_daily_entry_count(test_coin)
 check("2 entries → count 2", get_daily_entry_count(test_coin) == 2)
 check("2 entries → still in cooldown", is_in_cooldown(test_coin))
 
-# Simulate old entry (> 8h ago) to test cooldown expiry
-old_ts = (datetime.datetime.now() - datetime.timedelta(hours=9)).timestamp()
+# Simulate old entry (> 6h ago) to test cooldown expiry
+old_ts = (datetime.datetime.now() - datetime.timedelta(hours=7)).timestamp()
 today = datetime.datetime.now().strftime('%Y-%m-%d')
 set_state(f"{test_coin}_daily", {'date': today, 'count': 1, 'last_entry_ts': old_ts})
-check("9h old entry → not in cooldown", not is_in_cooldown(test_coin))
-check("9h old entry → cooldown remaining = 0", cooldown_remaining(test_coin) == 0)
+check("7h old entry → not in cooldown", not is_in_cooldown(test_coin))
+check("7h old entry → cooldown remaining = 0", cooldown_remaining(test_coin) == 0)
 
 # Simulate yesterday's entry → count resets
 yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
@@ -241,7 +241,7 @@ if raw_cache_path.exists():
             check("entries >= batches", tentries >= wins + losses)
             check("max DD < 50%", r['dd'] < 50)
 
-    # Verify backtest only trades SHORT (no mixed batches)
+    # Verify backtest never allows mixed long/short in same batch
     key = next((k for k in raw_all if k.startswith('BNBUSDT_4000_')), None)
     if key:
         r12 = raw_all[key]
@@ -256,13 +256,13 @@ if raw_cache_path.exists():
         h12c = [c['close'] for c in r12]; h12h = [c['high'] for c in r12]; h12l = [c['low'] for c in r12]
         h12m3 = sma(h12c,3); h12m7 = sma(h12c,7)
         atr_vals = atr_fn(h12h, h12l, h12c, 14)
-        eq = 1.0; entries = []
+        eq = 1.0; entries = []; has_mixed = False
         for ri in range(10, len(r12)):
             di = ri//2
             if di<7 or di>=len(daily): continue
             d3,d5,d7 = dma3[di],dma5[di],dma7[di]
             if d3 is None or d5 is None or d7 is None: continue
-            downtrend=d3<d5<d7
+            uptrend=d3>d5>d7; downtrend=d3<d5<d7
             cc=r12[ri]['close']; hi=r12[ri]['high']; lo=r12[ri]['low']
             m3,m7 = h12m3[ri],h12m7[ri]
             if m3 is None or m7 is None: continue
@@ -274,15 +274,33 @@ if raw_cache_path.exists():
                 tpp = max(min((atr_v / cc) * 3.0, 0.20), 0.02)
             if entries:
                 aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
-                if hi >= aep*(1+slp) or lo <= aep*(1-tpp): entries=[]
-            if downtrend:
+                is_sh = entries[0].get('short', False)
+                if is_sh:
+                    if hi >= aep*(1+slp) or lo <= aep*(1-tpp): entries=[]
+                else:
+                    if lo <= aep*(1-slp) or hi >= aep*(1+tpp): entries=[]
+            if uptrend or downtrend:
                 if abs(m3-m7)/m7 <= 0.01 and abs(cc-m3)/m3 <= 0.01:
                     if not any(e['ri']==ri for e in entries):
-                        entries.append({'ep': cc, 'mp': 0.03, 'ri': ri, 'short': True})
+                        dir_short = downtrend
+                        # Direction flip: close existing batch at current price
+                        if entries and entries[0].get('short') != dir_short:
+                            for e in entries:
+                                if entries[0].get('short'):
+                                    eq += (e['ep']-cc)/e['ep']*3.0*e['mp']*0.997
+                                else:
+                                    eq += (cc-e['ep'])/e['ep']*3.0*e['mp']*0.997
+                            entries=[]
+                        entries.append({'ep': cc, 'mp': 0.03, 'ri': ri, 'short': dir_short})
+            ureal = 0
             if entries:
                 aep = sum(e['ep']*e['mp'] for e in entries) / sum(e['mp'] for e in entries)
-                ureal = sum((e['ep']-cc)/e['ep']*2.0*e['mp'] for e in entries)
-        check("backtest only trades SHORT", all(e['short'] for e in entries) if entries else True)
+                is_sh = entries[0].get('short', False)
+                if is_sh: ureal = sum((e['ep']-cc)/e['ep']*2.0*e['mp'] for e in entries)
+                else: ureal = sum((cc-e['ep'])/e['ep']*2.0*e['mp'] for e in entries)
+            if entries and any(e['short'] for e in entries) and any(not e['short'] for e in entries):
+                has_mixed = True
+        check("no mixed long/short in same batch (direction flip close)", not has_mixed)
 else:
     print("  SKIP: cache file not found")
 
