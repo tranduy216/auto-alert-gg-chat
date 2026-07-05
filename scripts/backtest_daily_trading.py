@@ -20,11 +20,11 @@ TP_ATR_MULT = 3.0
 FALLBACK_TP_PCT = 0.06
 FALLBACK_SL_PCT = 0.03
 FEE_RATE = 0.0005
-MA_NEAR_BUF = 0.0075
-PRICE_NEAR_BUF = 0.0075
+MA_NEAR_BUF = 0.01
+PRICE_NEAR_BUF = 0.01
 MAX_TOTAL_EXPOSURE = 1.50   # 150% of original $10k (50% margin @ 3x)
 MAX_ENTRIES_PER_DAY = 2
-ENTRY_COOLDOWN_HOURS = 6   # toggle: 6 or 8
+ENTRY_COOLDOWN_HOURS = 8
 
 
 def load_12h():
@@ -142,14 +142,14 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
                     entries = []
 
         # ── Entry — allow pyramiding ──
+        if di != last_entry_di:
+            daily_entry_count = 0
         if uptrend or downtrend:
             ma_near = abs(m_near - m_cons) / m_cons <= near_buf
             price_near = abs(cc - m_near) / m_near <= near_buf
 
             if ma_near and price_near:
                 already = any(e['ri'] == ri for e in entries)
-                if di != last_entry_di:
-                    daily_entry_count = 0
                 if not already:
                     bars_since_last = ri - last_entry_ri
                     hours_since_last = bars_since_last * 12

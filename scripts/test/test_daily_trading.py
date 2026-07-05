@@ -130,7 +130,7 @@ import time, datetime
 from utils.state_manager import set_state, get_state
 
 check("MAX_ENTRIES_PER_DAY = 2", MAX_ENTRIES_PER_DAY == 2)
-check("ENTRY_COOLDOWN_HOURS = 6", ENTRY_COOLDOWN_HOURS == 6)
+check("ENTRY_COOLDOWN_HOURS = 8", ENTRY_COOLDOWN_HOURS == 8)
 
 test_coin = '_test_entry_limit'
 
@@ -159,12 +159,12 @@ increment_daily_entry_count(test_coin)
 check("2 entries → count 2", get_daily_entry_count(test_coin) == 2)
 check("2 entries → still in cooldown", is_in_cooldown(test_coin))
 
-# Simulate old entry (> 6h ago) to test cooldown expiry
-old_ts = (datetime.datetime.now() - datetime.timedelta(hours=7)).timestamp()
+# Simulate old entry (> 8h ago) to test cooldown expiry
+old_ts = (datetime.datetime.now() - datetime.timedelta(hours=9)).timestamp()
 today = datetime.datetime.now().strftime('%Y-%m-%d')
 set_state(f"{test_coin}_daily", {'date': today, 'count': 1, 'last_entry_ts': old_ts})
-check("7h old entry → not in cooldown", not is_in_cooldown(test_coin))
-check("7h old entry → cooldown remaining = 0", cooldown_remaining(test_coin) == 0)
+check("9h old entry → not in cooldown", not is_in_cooldown(test_coin))
+check("9h old entry → cooldown remaining = 0", cooldown_remaining(test_coin) == 0)
 
 # Simulate yesterday's entry → count resets
 yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')

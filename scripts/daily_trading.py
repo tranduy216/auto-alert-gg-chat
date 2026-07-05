@@ -236,7 +236,7 @@ def main():
         except Exception as e:
             log(f"Account fetch failed: {e}")
 
-            log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry ({ENTRY_MARGIN_PCT*100:.0f}% × $10k @ {LEV}x)")
+    log(f"Equity: ${eq:,.0f}  |  Position size: ${NOTIONAL:,.0f}/entry ({ENTRY_MARGIN_PCT*100:.0f}% × $10k @ {LEV}x)")
 
     # ── Positions ──
     pos_map = {}
