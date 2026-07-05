@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, MA_BUF, MA_PERIOD,
-    EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
+    EXT_BLOCK_PCT, FEE_RATE, fee_factor, PYRAMID_STRATEGIES,
     LONG_TP, LONG_MAX_MARGIN,
     SHORT_TP, SHORT_MAX_MARGIN, SHORT_CLOSE_PCT,
     SHORT_COOLDOWN_ENTRY,
@@ -48,7 +48,6 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
 
     entries = []; eq = 1.0; lei = -999; last_ep = 0
     curve = []; yearly_eq = {}; ts_curve = []
-    ff = fee_factor(lev_coin)
     last_sl_bar = -999
     long_tp_hit = 0; short_tp_hit = 0; next_pyr_roi = 8; pyr_bar = -999
 
@@ -102,7 +101,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 for e in entries[:]:
                     if not e.get('is_short'):
                         raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw / 100 * ff
+                        eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * e.get('rem', 1.0)
                         entries.remove(e)
                 if not [e for e in entries if not e.get('is_short')]:
                     long_tp_hit = 0
@@ -112,7 +111,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         e['hi'] = peak_hi
 
         # ── Long: TP check (by avg EP) ──
-        if not is_short and long_entries and tp_sched and 'tp' in cfg and long_tp_hit < len(tp_sched):
+        if not is_short and long_entries and tp_sched and 'tp' in exit_cfg and long_tp_hit < len(tp_sched):
             roi = (cc - avg_ep_long) / avg_ep_long * 100 * lev_coin
             hit = 0
             for stage in range(long_tp_hit, len(tp_sched)):
@@ -130,7 +129,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         if not e.get('is_short') and close_amt > 0:
                             rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
                             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
-                            eq += raw / 100 * ff
+                            eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * rem_frac
                             e['rem'] = e.get('rem', 1.0) - rem_frac
                             close_amt -= rem_frac * e['mp']
                             if e.get('rem', 1.0) <= 0.001:
@@ -146,7 +145,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 for e in entries[:]:
                     if e.get('is_short'):
                         raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                        eq += raw / 100 * ff
+                        eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * e.get('rem', 1.0)
                         entries.remove(e)
                 last_sl_bar = idx
                 if not [e for e in entries if e.get('is_short')]:
@@ -175,7 +174,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                         if e.get('is_short') and close_amt > 0:
                             rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
                             raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
-                            eq += raw / 100 * ff
+                            eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * rem_frac
                             e['rem'] = e.get('rem', 1.0) - rem_frac
                             close_amt -= rem_frac * e['mp']
                             if e.get('rem', 1.0) <= 0.001:
@@ -244,7 +243,7 @@ def backtest_coin(coin, da, btc_da, is_short, cfg=None):
                 roi = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
             else:
                 roi = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
-            ureal += roi * e.get('rem', 1.0) / 100 * ff
+            ureal += roi * e.get('rem', 1.0) / 100
         total_eq = eq + ureal
         curve.append(total_eq); ts_curve.append((da[idx]['time'], total_eq))
         if dt.month == 12: yearly_eq[yr] = total_eq

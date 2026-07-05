@@ -114,29 +114,27 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
             aep = avg_ep(entries)
             if is_short:
                 if hi >= aep * (1 + sl_pct):
-                    # SL hit — close all
                     for e in entries:
-                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = -e['mp'] * LEV * (sl_pct + 2 * FEE_RATE)
                         eq += ret
                     losses += 1
                     entries = []
                 elif lo <= aep * (1 - tp_pct):
-                    # TP hit — close all
                     for e in entries:
-                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = e['mp'] * LEV * (tp_pct - 2 * FEE_RATE)
                         eq += ret
                     wins += 1
                     entries = []
             else:
                 if lo <= aep * (1 - sl_pct):
                     for e in entries:
-                        ret = -sl_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = -e['mp'] * LEV * (sl_pct + 2 * FEE_RATE)
                         eq += ret
                     losses += 1
                     entries = []
                 elif hi >= aep * (1 + tp_pct):
                     for e in entries:
-                        ret = tp_pct * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                        ret = e['mp'] * LEV * (tp_pct - 2 * FEE_RATE)
                         eq += ret
                     wins += 1
                     entries = []
@@ -161,12 +159,11 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
                     direction_short = downtrend
                     # If direction flips, close existing batch at current price
                     if entries and entries[0].get('short') != direction_short:
-                        # Close existing at current price
                         for e in entries:
                             if entries[0].get('short'):
-                                ret = (e['ep'] - cc) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
+                                ret = e['mp'] * LEV * ((e['ep'] - cc) / e['ep'] - 2 * FEE_RATE)
                             else:
-                                ret = (cc - e['ep']) / e['ep'] * LEV * e['mp'] * (1 - 2 * FEE_RATE * LEV)
+                                ret = e['mp'] * LEV * ((cc - e['ep']) / e['ep'] - 2 * FEE_RATE)
                             eq += ret
                         entries = []
                     if (sum(e['mp'] for e in entries) + ENTRY_MARGIN_PCT) * LEV > MAX_TOTAL_EXPOSURE:

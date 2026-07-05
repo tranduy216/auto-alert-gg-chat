@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import (
     sma,
     BASE, ENTRY_PCT, TRAIL_PCT, TP_SCHEDULE,
-    MAX_CAP, EXT_BLOCK_PCT, fee_factor, PYRAMID_STRATEGIES,
+    MAX_CAP, EXT_BLOCK_PCT, FEE_RATE, PYRAMID_STRATEGIES,
     SHORT_MAX_MARGIN, SHORT_CLOSE_PCT, SHORT_COOLDOWN_ENTRY, winner_mult,
     load_data, fetch_paxg, entry_conditions, compute_results, avg_entry,
 )
@@ -96,14 +96,13 @@ def run_pooled(data, strategies):
             lev_coin = e_cfg.get('lev', 1.5)
             tp_sched = exit_cfg.get('tp', TP_SCHEDULE)
             trail_pct = exit_cfg.get('trail', TRAIL_PCT)
-            ff = fee_factor(lev_coin)
             entries = entries_map[label]
 
             # Short: BTC bull close-all
             for e in entries[:]:
                 if e.get('is_short') and btc_bull_exit:
                     raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
-                    eq += raw * e.get('rem', 1.0) / 100 * ff
+                    eq += raw * e.get('rem', 1.0) / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * e.get('rem', 1.0)
                     entries.remove(e)
             if not [e for e in entries if e.get('is_short')]:
                 short_tp_hit_map[label] = 0
@@ -127,7 +126,7 @@ def run_pooled(data, strategies):
                     for e in entries[:]:
                         if not e.get('is_short'):
                             raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                            eq += raw / 100 * ff
+                            eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * e.get('rem', 1.0)
                             entries.remove(e)
                     if not [e for e in entries if not e.get('is_short')]:
                         long_tp_hit_map[label] = 0
@@ -144,7 +143,7 @@ def run_pooled(data, strategies):
                     for e in entries[:]:
                         if e.get('is_short'):
                             raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * e.get('rem', 1.0)
-                            eq += raw / 100 * ff
+                            eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * e.get('rem', 1.0)
                             entries.remove(e)
                     last_sl_map[label] = idx
                     if not [e for e in entries if e.get('is_short')]:
@@ -155,8 +154,8 @@ def run_pooled(data, strategies):
                             e['lo'] = trough_lo
 
             # TP check (by avg EP)
-            long_tp_entries = [e for e in entries if not e.get('is_short')] if 'tp' in cfg else []
-            short_tp_entries = [e for e in entries if e.get('is_short')] if tp_sched else []
+            long_tp_entries = [e for e in entries if not e.get('is_short')] if 'tp' in exit_cfg else []
+            short_tp_entries = [e for e in entries if e.get('is_short')] if 'tp' in exit_cfg else []
             
             if long_tp_entries and long_tp_hit_map[label] < len(tp_sched):
                 avg_ep, total_mp = avg_entry(long_tp_entries)
@@ -176,7 +175,7 @@ def run_pooled(data, strategies):
                             if not e.get('is_short') and close_amt > 0:
                                 rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
                                 raw = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
-                                eq += raw / 100 * ff
+                                eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * rem_frac
                                 e['rem'] = e.get('rem', 1.0) - rem_frac
                                 close_amt -= rem_frac * e['mp']
                                 if e.get('rem', 1.0) <= 0.001:
@@ -203,7 +202,7 @@ def run_pooled(data, strategies):
                             if e.get('is_short') and close_amt > 0:
                                 rem_frac = min(e.get('rem', 1.0), close_amt / e['mp'])
                                 raw = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin * rem_frac
-                                eq += raw / 100 * ff
+                                eq += raw / 100 - e['mp'] * 2 * FEE_RATE * lev_coin * rem_frac
                                 e['rem'] = e.get('rem', 1.0) - rem_frac
                                 close_amt -= rem_frac * e['mp']
                                 if e.get('rem', 1.0) <= 0.001:
@@ -251,7 +250,7 @@ def run_pooled(data, strategies):
                     else:
                         mult = 1.0
                         short_mp = sum(e.get('mp', 0) for e in entries if e.get('is_short'))
-                        if short_mp + eq * ENTRY_PCT * mult > SHORT_MAX_MARGIN:
+                        if short_mp + eq * ENTRY_PCT * mult > eq * SHORT_MAX_MARGIN:
                             should_enter = False
                 elif not is_short:
                     mult = winner_mult(entries, cc, False, lev_coin)
@@ -345,13 +344,12 @@ def run_pooled(data, strategies):
             idx = time_to_idx[label].get(ts)
             if idx is None: continue
             cc = coin_data[label]['closes'][idx]
-            ff = fee_factor(lev_coin)
             for e in entries:
                 if e.get('is_short'):
                     roi = (e['ep'] - cc) / e['ep'] * 100 * e['mp'] * lev_coin
                 else:
                     roi = (cc - e['ep']) / e['ep'] * 100 * e['mp'] * lev_coin
-                ureal += roi * e.get('rem', 1.0) / 100 * ff
+                ureal += roi * e.get('rem', 1.0) / 100
 
         total_eq = eq + ureal
         curve.append(total_eq); ts_curve.append((ts, total_eq))

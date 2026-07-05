@@ -127,7 +127,7 @@ def _oco_prices_match(inst, tp_px, sl_px):
             for a in orders
         )
     except Exception:
-        return False
+        return True
 
 
 def _cancel_oco(inst):
@@ -270,7 +270,7 @@ def main():
                 try:
                     okx_close_position(inst)
                     clear_entries(coin)
-                    set_state(coin, {'ep': 0, 'side': ''})
+                    pos_map.pop(inst, None)
                     _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
@@ -282,7 +282,7 @@ def main():
                 try:
                     okx_close_position(inst)
                     clear_entries(coin)
-                    set_state(coin, {'ep': 0, 'side': ''})
+                    pos_map.pop(inst, None)
                     _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
                         send_message(DISCORD_WEBHOOK,
@@ -342,7 +342,6 @@ def main():
                         try:
                             okx_close_position(inst)
                             clear_entries(coin)
-                            set_state(coin, {'ep': 0, 'side': ''})
                             pos_map.pop(inst, None)
                             if DISCORD_WEBHOOK:
                                 send_message(DISCORD_WEBHOOK,
@@ -385,6 +384,8 @@ def main():
                 continue
 
             sz = max(1, int(NOTIONAL / (price * ct_val)))
+            lot_sz = float(inst_info.get('lotSz', '1'))
+            sz = max(lot_sz, int(sz / lot_sz) * lot_sz)
             is_buy = direction == 'LONG'
 
             log(f"ENTRY {coin} {direction} {sz}ct @ ${price:.2f}")
@@ -398,7 +399,6 @@ def main():
                 time.sleep(1)
 
                 add_entry(coin, price, not is_buy)
-                set_state(coin, {'ep': price, 'side': direction})
                 increment_daily_entry_count(coin)
 
                 # Cancel old algo orders, place combo TP/SL at avg-EP

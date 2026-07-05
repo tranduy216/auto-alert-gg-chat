@@ -223,9 +223,9 @@ with patch('daily_trading.okx_get_algo_orders', return_value=mock_orders):
 with patch('daily_trading.okx_get_algo_orders', return_value=[]):
     check("oco match empty orders", not _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
 
-# Test _oco_prices_match — API error returns False
+# Test _oco_prices_match — API error returns True (conservative: don't cancel)
 with patch('daily_trading.okx_get_algo_orders', side_effect=Exception("API error")):
-    check("oco match api error", not _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
+    check("oco match api error → True (conservative)", _oco_prices_match('BNB-USDT-SWAP', '106.00', '94.00'))
 
 raw_cache_path = Path(__file__).parent.parent / "_klines_12h_5y.json"
 if raw_cache_path.exists():
