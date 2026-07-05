@@ -169,16 +169,16 @@ def check_signal(h12_da, daily_da):
         return None, None
 
     dclose = [c['close'] for c in daily_da]
-    dma3, dma5, dma7 = sma(dclose, 3), sma(dclose, 5), sma(dclose, 7)
+    dma2, dma5, dma8 = sma(dclose, 2), sma(dclose, 5), sma(dclose, 8)
     di = len(dclose) - 1
-    d3, d5, d7 = dma3[di], dma5[di], dma7[di]
-    if d3 is None or d5 is None or d7 is None:
+    d2, d5, d8 = dma2[di], dma5[di], dma8[di]
+    if d2 is None or d5 is None or d8 is None:
         return None, None
 
-    uptrend = d3 > d5 > d7
-    downtrend = d3 < d5 < d7
-    long_ok = uptrend and (d3 - d7) / d7 >= TREND_SPREAD
-    short_ok = downtrend and (d7 - d3) / d7 >= TREND_SPREAD
+    uptrend = d2 > d5 > d8
+    downtrend = d2 < d5 < d8
+    long_ok = uptrend and (d2 - d8) / d8 >= TREND_SPREAD
+    short_ok = downtrend and (d8 - d2) / d8 >= TREND_SPREAD
     if not long_ok and not short_ok:
         return None, None
 

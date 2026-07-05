@@ -41,7 +41,7 @@ def avg_ep(entries):
     return weighted / total_w
 
 
-def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7, trend_spread=0.002):
+def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEAR_BUF, near_ma=3, cons_ma=7, trend_spread=0.002, d_ma_short=2, d_ma_mid=5, d_ma_long=8):
     if len(raw_12h) < 20:
         return None, 0, 0, 0
 
@@ -56,7 +56,7 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
         })
 
     dc = [b['close'] for b in daily]
-    dma3, dma5, dma7 = sma(dc, 3), sma(dc, 5), sma(dc, 7)
+    dma_s, dma_m, dma_l = sma(dc, d_ma_short), sma(dc, d_ma_mid), sma(dc, d_ma_long)
 
     h12c = [c['close'] for c in raw_12h]
     h12h = [c['high'] for c in raw_12h]
@@ -78,17 +78,18 @@ def backtest(coin, raw_12h, cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=MA_NEA
 
     for ri in range(10, len(raw_12h)):
         di = ri // 2
-        if di < 7 or di >= len(daily):
+        min_di = max(d_ma_long, 7)
+        if di < min_di or di >= len(daily):
             continue
 
-        d3, d5, d7 = dma3[di], dma5[di], dma7[di]
-        if d3 is None or d5 is None or d7 is None:
+        ds, dm, dl = dma_s[di], dma_m[di], dma_l[di]
+        if ds is None or dm is None or dl is None:
             continue
 
-        uptrend = d3 > d5 > d7
-        downtrend = d3 < d5 < d7
-        long_ok = uptrend and (d3 - d7) / d7 >= trend_spread
-        short_ok = downtrend and (d7 - d3) / d7 >= trend_spread
+        uptrend = ds > dm > dl
+        downtrend = ds < dm < dl
+        long_ok = uptrend and (ds - dl) / dl >= trend_spread
+        short_ok = downtrend and (dl - ds) / dl >= trend_spread
 
         cc = raw_12h[ri]['close']
         hi = raw_12h[ri]['high']
@@ -212,7 +213,7 @@ def main():
     print(f"  Strategy: 12h/1D hybrid, multiple entries allowed")
     print(f"  Size: {ENTRY_MARGIN_PCT*100:.0f}% margin @ {LEV}x = ${NOTIONAL:,.0f}/entry")
     print(f"  TP={FALLBACK_TP_PCT*100:.0f}%/{FALLBACK_SL_PCT*100:.0f}% (fallback) — dynamic ATR-based")
-    print(f"  MA3/MA5 near MA5/MA7, buffer 1.0% vs 0.75%")
+    print(f"  MA3/MA5 near MA5/MA7, buffer 1.2% / 1.0% / 0.75%")
     print("=" * 60)
 
     for coin in COINS:
@@ -222,6 +223,7 @@ def main():
             continue
 
         combos = {
+            "MA3-MA7 1.2%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.012, near_ma=3, cons_ma=7),
             "MA3-MA7 1.0%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.01,  near_ma=3, cons_ma=7),
             "MA3-MA7 0.75%": backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.0075, near_ma=3, cons_ma=7),
             "MA3-MA5 1.0%":  backtest(coin, raw[key], cooldown_hours=ENTRY_COOLDOWN_HOURS, near_buf=0.01,  near_ma=3, cons_ma=5),
