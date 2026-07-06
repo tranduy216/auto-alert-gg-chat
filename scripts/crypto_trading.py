@@ -18,7 +18,7 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position,
 )
-from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state
+from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state, reset_coin_state
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
@@ -70,18 +70,17 @@ def sync_entries_with_positions(okx_positions, log):
                if COIN_FROM_INST.get(p['instId']) and float(p.get('pos', 0)) != 0}
     entries_map = {}
     for coin in SYMBOL_OKX:
-        stored = get_entries(coin)
         has_position = coin in pos_map
-        if not stored and not has_position:
+        if not has_position:
+            stored = get_entries(coin)
+            if stored:
+                log(f"  {coin}: no OKX position, resetting state")
+            reset_coin_state(coin)
             entries_map[coin] = []
             continue
-        if has_position and not stored:
+        stored = get_entries(coin)
+        if not stored:
             log(f"  {coin}: WARNING — OKX has position but Firestore entries missing, skip")
-            entries_map[coin] = []
-        elif stored and not has_position:
-            clear_entries(coin)
-            _reset_position_state(coin)
-            log(f"  {coin}: cleared stale entries (position closed)")
             entries_map[coin] = []
         else:
             entries_map[coin] = stored
@@ -177,8 +176,7 @@ def main():
                         log(f"  {name}: MA crossover close (MA40<MA90*{1-mbuf})")
                         try:
                             okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
-                            clear_entries(name)
-                            _reset_position_state(name)
+                            reset_coin_state(name)
                             log(f"  {name}: position closed")
                         except Exception as e:
                             log(f"  {name}: close FAILED: {e}")
@@ -189,8 +187,7 @@ def main():
                         log(f"  {name}: trailing stop (lo={bl:.4f} <= peak={peak:.4f} * {trail})")
                         try:
                             okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
-                            clear_entries(name)
-                            _reset_position_state(name)
+                            reset_coin_state(name)
                             log(f"  {name}: position closed")
                         except Exception as e:
                             log(f"  {name}: close FAILED: {e}")
@@ -224,9 +221,8 @@ def main():
                     log(f"  {name}: trailing stop (hi={hi:.4f} >= trough={trough:.4f} * {1+close_pct})")
                     try:
                         okx_close_position(inst_id, pos_side='net', mgn_mode='cross')
-                        clear_entries(name)
-                        _reset_position_state(name)
                         today = datetime.datetime.now().strftime('%Y-%m-%d')
+                        reset_coin_state(name)
                         set_state(name, {'last_sl_date': today})
                         log(f"  {name}: position closed")
                     except Exception as e:

@@ -19,7 +19,7 @@ from utils.okx_utils import (
     okx_close_position, okx_get_candles, okx_get_instruments,
     okx_get_algo_orders, okx_cancel_algo, okx_set_leverage,
 )
-from utils.state_manager import get_entries, add_entry, clear_entries, set_state, get_state
+from utils.state_manager import get_entries, add_entry, set_state, get_state, reset_coin_state
 
 CAPITAL_BASE = 10000
 ENTRY_MARGIN_PCT = 0.05
@@ -251,6 +251,17 @@ def main():
         except Exception as e:
             log(f"Positions fetch failed: {e}")
 
+    # ── Sync DB state with OKX positions ──
+    if has_okx:
+        for coin in COINS:
+            inst = OKX_SYMBOLS[coin]
+            if inst not in pos_map:
+                stored = get_entries(coin)
+                if stored:
+                    log(f"  {coin}: no OKX position, resetting state")
+                reset_coin_state(coin)
+                set_state(f"{coin}_daily", {})
+
     # ── Exit check (avg entry price → ROI) ──
     if has_okx:
         for coin in COINS:
@@ -272,7 +283,8 @@ def main():
                 log(f"{coin}: SL hit (ROI {roi:.1f}%), closing all")
                 try:
                     okx_close_position(inst)
-                    clear_entries(coin)
+                    reset_coin_state(coin)
+                    set_state(f"{coin}_daily", {})
                     pos_map.pop(inst, None)
                     _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
@@ -284,7 +296,8 @@ def main():
                 log(f"{coin}: TP hit (ROI {roi:.1f}%), closing all")
                 try:
                     okx_close_position(inst)
-                    clear_entries(coin)
+                    reset_coin_state(coin)
+                    set_state(f"{coin}_daily", {})
                     pos_map.pop(inst, None)
                     _cancel_oco(inst)
                     if DISCORD_WEBHOOK:
@@ -344,7 +357,8 @@ def main():
                         log(f"{coin}: direction flipped → close {len(stored)} entries @ ${cc_12h:.2f}")
                         try:
                             okx_close_position(inst)
-                            clear_entries(coin)
+                            reset_coin_state(coin)
+                            set_state(f"{coin}_daily", {})
                             pos_map.pop(inst, None)
                             if DISCORD_WEBHOOK:
                                 send_message(DISCORD_WEBHOOK,

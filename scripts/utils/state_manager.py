@@ -99,3 +99,31 @@ def add_entry(coin: str, ep: float, is_short: bool, hi: float = None, lo: float 
 def clear_entries(coin: str) -> None:
     """Clear all open entries for a coin (position fully closed)."""
     set_state(coin, {'entries': []})
+
+
+def reset_coin_state(coin: str) -> None:
+    """Fully reset all trading state for a coin (OKX position not found)."""
+    db = _get_db()
+    default_state = {
+        'entries': [],
+        'last_entry_date': '',
+        'last_entry_price': 0,
+        'tp_hit': 0,
+        'tp_date': '',
+        'next_pyr_roi': 8,
+        'pyr_date': '',
+        'last_sl_date': '',
+    }
+    if db:
+        try:
+            db.collection('trading_state').document(coin).set(default_state)
+        except Exception as e:
+            print(f"[state_manager] Firestore reset_state failed: {e}", file=sys.stderr)
+    try:
+        all_state = {}
+        if LOCAL_FALLBACK.exists():
+            all_state = json.loads(LOCAL_FALLBACK.read_text())
+        all_state[coin] = default_state
+        LOCAL_FALLBACK.write_text(json.dumps(all_state, indent=2, default=str))
+    except Exception as e:
+        print(f"[state_manager] local reset_state failed: {e}", file=sys.stderr)

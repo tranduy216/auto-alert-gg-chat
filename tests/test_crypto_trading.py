@@ -364,31 +364,40 @@ class TestLiveConsistency(unittest.TestCase):
             {"open": c - 1, "high": c + 1, "low": c - 2, "close": c, "volume": v, "time": i}
             for i, (c, v) in enumerate(zip(closes, volumes))
         ]
-        btc_da = [
-            {"open": 50000.0, "high": 50000.0, "low": 50000.0, "close": 50000.0, "volume": 1.0, "time": i}
-            for i in range(220)
-        ]
         cfg = {"entry": {"ma": 20, "buffer": 0.03, "lev": 2.5, "vol_bars": 2}}
 
-        result = check_signals(coin_da, btc_da, cfg, False, [])
+        result = check_signals(coin_da, cfg, False, [])
 
         self.assertIsNotNone(result)
         self.assertEqual(result[0], True)
         self.assertEqual(result[2], 101.0)
 
-    def test_sync_entries_with_positions_uses_coin_key(self):
-        okx_positions = [{"instId": "BTC-USDT-SWAP", "pos": "2", "margin": "123"}]
+    def test_sync_entries_with_positions_resets_when_no_okx_position(self):
+        okx_positions = []
 
-        with patch("crypto_trading.get_entries", side_effect=lambda coin: [{"ep": 100}] if coin == "BTC" else []), \
-             patch("crypto_trading.clear_entries"), \
-             patch("crypto_trading._reset_position_state"), \
-             patch("crypto_trading.set_state") as mock_set_state:
+        with patch("scripts.crypto_trading.reset_coin_state") as mock_reset, \
+             patch("scripts.crypto_trading.get_entries", return_value=[{"ep": 100}]), \
+             patch("scripts.crypto_trading.set_state"):
             entries_map, pos_map = sync_entries_with_positions(okx_positions, lambda msg: None)
 
-        self.assertIn("BTC", pos_map)
-        self.assertEqual(pos_map["BTC"]["margin"], "123")
-        self.assertEqual(entries_map["BTC"], [])
-        mock_set_state.assert_not_called()
+        self.assertEqual(len(pos_map), 0)
+        self.assertEqual(mock_reset.call_count, 2)
+        mock_reset.assert_any_call("TRX")
+        mock_reset.assert_any_call("XAU")
+
+    def test_sync_entries_with_positions_keeps_entries_when_okx_has_position(self):
+        okx_positions = [{"instId": "TRX-USDT-SWAP", "pos": "5", "margin": "50"}]
+        mock_entries = [{"ep": 0.10}]
+
+        with patch("scripts.crypto_trading.reset_coin_state") as mock_reset, \
+             patch("scripts.crypto_trading.get_entries", side_effect=lambda coin: mock_entries if coin == "TRX" else []), \
+             patch("scripts.crypto_trading.set_state"):
+            entries_map, pos_map = sync_entries_with_positions(okx_positions, lambda msg: None)
+
+        self.assertIn("TRX", pos_map)
+        self.assertEqual(entries_map["TRX"], mock_entries)
+        self.assertEqual(mock_reset.call_count, 1)
+        mock_reset.assert_any_call("XAU")
 
 
 if __name__ == '__main__':
