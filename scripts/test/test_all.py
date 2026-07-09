@@ -581,7 +581,8 @@ with patch('crypto_trading.sma') as mock_sma:
 import re
 formulas = []
 for fn in ['crypto_trading.py', 'live_pyramid.py', 'combined_backtest.py', 'pooled_backtest.py']:
-    with open(f'scripts/{fn}') as fh:
+    path = fn if os.path.isfile(fn) else f'scripts/{fn}'
+    with open(path) as fh:
         txt = fh.read()
     for m in re.finditer(r'\bbtc_bull\b\s*=\s*btc_closes\[[^\]]+\]\s*([><=]+)\s*btc_ma200\[[^\]]+\](\s*\*\s*[\d.]+)?', txt):
         op = m.group(1); mul = m.group(2) or ''
@@ -796,7 +797,7 @@ check("avg_entry with mp and rem", abs(avg_entry([{'ep': 100, 'mp': 0.1, 'rem': 
 # ── 🔧 LEVERAGE FIX VERIFICATION ──
 print("\n=== Leverage fix verification ===")
 # Verify crypto_trading sets leverage BEFORE order (not after)
-src = open('scripts/crypto_trading.py').read()
+src = open('crypto_trading.py' if os.path.isfile('crypto_trading.py') else 'scripts/crypto_trading.py').read()
 lines = src.split('\n')
 set_idx = None
 place_idx = None
@@ -809,7 +810,7 @@ for i, line in enumerate(lines):
 check("crypto_trading: set_leverage before order", place_idx is not None and set_idx < place_idx)
 
 # Same check for daily_trading.py
-src_daily = open('scripts/daily_trading.py').read()
+src_daily = open('daily_trading.py' if os.path.isfile('daily_trading.py') else 'scripts/daily_trading.py').read()
 lines_daily = src_daily.split('\n')
 set_idx_d = None
 place_idx_d = None

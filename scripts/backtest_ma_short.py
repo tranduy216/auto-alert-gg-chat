@@ -90,17 +90,17 @@ def backtest(coin, raw_12h):
                 continue
             if e.get('short'):
                 if hi >= e['ep'] * (1 + SL_PCT):
-                    eq += -SL_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += e['mp'] * LEV * (-SL_PCT - 2 * FEE_RATE)
                     entries.remove(e); losses += 1
                 elif lo <= e['ep'] * (1 - TP_PCT):
-                    eq += TP_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += e['mp'] * LEV * (TP_PCT - 2 * FEE_RATE)
                     entries.remove(e); wins += 1
             else:
                 if lo <= e['ep'] * (1 - SL_PCT):
-                    eq += -SL_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += e['mp'] * LEV * (-SL_PCT - 2 * FEE_RATE)
                     entries.remove(e); losses += 1
                 elif hi >= e['ep'] * (1 + TP_PCT):
-                    eq += TP_PCT * e['mp'] * LEV * (1 - 2 * FEE_RATE * LEV)
+                    eq += e['mp'] * LEV * (TP_PCT - 2 * FEE_RATE)
                     entries.remove(e); wins += 1
 
         ma_near = abs(m3 - m7) / m7 <= MA_NEAR_BUF
@@ -206,11 +206,11 @@ def main():
             for e in list(entries):
                 if ri <= e['ri']: continue
                 if e.get('short'):
-                    if hi >= e['ep']*(1+SL_PCT): eq += -SL_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV); entries.remove(e)
-                    elif lo <= e['ep']*(1-TP_PCT): eq += TP_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV); entries.remove(e)
+                    if hi >= e['ep']*(1+SL_PCT): eq += e['mp']*LEV*(-SL_PCT-2*FEE_RATE); entries.remove(e)
+                    elif lo <= e['ep']*(1-TP_PCT): eq += e['mp']*LEV*(TP_PCT-2*FEE_RATE); entries.remove(e)
                 else:
-                    if lo <= e['ep']*(1-SL_PCT): eq += -SL_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV); entries.remove(e)
-                    elif hi >= e['ep']*(1+TP_PCT): eq += TP_PCT*e['mp']*LEV*(1-2*FEE_RATE*LEV); entries.remove(e)
+                    if lo <= e['ep']*(1-SL_PCT): eq += e['mp']*LEV*(-SL_PCT-2*FEE_RATE); entries.remove(e)
+                    elif hi >= e['ep']*(1+TP_PCT): eq += e['mp']*LEV*(TP_PCT-2*FEE_RATE); entries.remove(e)
             ma_near = abs(m3-m7)/m7 <= MA_NEAR_BUF; price_near = abs(cc-m3)/m3 <= PRICE_NEAR_BUF
             if ma_near and price_near:
                 if uptrend and not any(x['ri']==ri for x in entries):

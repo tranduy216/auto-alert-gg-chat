@@ -18,12 +18,14 @@ from utils.okx_utils import (
     okx_get_account, okx_get_positions, okx_place_order, okx_get_instruments,
     okx_set_leverage, okx_close_position,
 )
-from utils.state_manager import has_entered_today, record_entry, get_entries, add_entry, clear_entries, get_state, set_state, reset_coin_state
+from utils.state_manager import has_entered_today, entries_today_count, record_entry, get_entries, add_entry, clear_entries, get_state, set_state, reset_coin_state
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
 
 SYMBOL_OKX = {'TRX': 'TRX-USDT-SWAP', 'XAU': 'XAU-USDT-SWAP'}
 COIN_FROM_INST = {v: k for k, v in SYMBOL_OKX.items()}
+
+MAX_DAILY_ENTRIES = 2
 
 
 def check_signals(coin_da, cfg, is_short, entries=None):
@@ -326,7 +328,7 @@ def main():
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
                 existing_pos = pos_map.get(name, {})
-                existing_margin = float(existing_pos.get('margin', 0))
+                existing_margin = float(existing_pos.get('margin') or 0)
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 new_margin = usd_val / lev
                 if existing_margin + new_margin > eq * LONG_MAX_MARGIN:
@@ -336,6 +338,7 @@ def main():
                 ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
                 try:
+                    okx_set_leverage(inst_id, lev)
                     r = okx_place_order(inst_id=inst_id, td_mode='cross',
                         side='buy', sz=str(sz))
                     log(f"  {name}: PYRAMID @ ${cc:.4f} ({roi:.1f}% ROI)")
@@ -360,7 +363,7 @@ def main():
             pyr_date = get_state(name).get('pyr_date', '')
             if roi >= pyr_roi and pyr_date != today:
                 existing_pos = pos_map.get(name, {})
-                existing_margin = float(existing_pos.get('margin', 0))
+                existing_margin = float(existing_pos.get('margin') or 0)
                 usd_val = eq * lev * ENTRY_PCT * cfg.get('pyramid', {}).get('entry_mult', 1.0)
                 usd_val *= cfg['entry'].get('short_mult', 2.0)
                 new_margin = usd_val / lev
@@ -371,6 +374,7 @@ def main():
                 ct_val = float(inst_map.get(inst_id, {}).get('ctVal', '0.01'))
                 sz = max(1, int(usd_val / (cc * ct_val)))
                 try:
+                    okx_set_leverage(inst_id, lev)
                     r = okx_place_order(inst_id=inst_id, td_mode='cross',
                         side='sell', sz=str(sz))
                     log(f"  {name}: PYRAMID SHORT @ ${cc:.4f} ({roi:.1f}% ROI)")
@@ -419,8 +423,8 @@ def main():
                         if days < 2:
                             log(f"  {name}: short entry cooldown {days}d/2d, skipped")
                             continue
-                elif has_entered_today(name):
-                    log(f"  {name}: already entered today, skipped")
+                elif entries_today_count(name) >= MAX_DAILY_ENTRIES:
+                    log(f"  {name}: {MAX_DAILY_ENTRIES} entries today reached, skipped")
                     continue
 
                 usd_val = eq * lev * ENTRY_PCT * mult
@@ -429,14 +433,14 @@ def main():
 
                 if direction == 'SELL':
                     existing_pos = pos_map.get(name, {})
-                    existing_margin = float(existing_pos.get('margin', 0))
+                    existing_margin = float(existing_pos.get('margin') or 0)
                     new_margin = usd_val / lev
                     if existing_margin + new_margin > eq * SHORT_MAX_MARGIN:
                         log(f"  {name}: short cap {SHORT_MAX_MARGIN*100:.0f}% margin, skipped")
                         continue
                 else:
                     existing_pos = pos_map.get(name, {})
-                    existing_margin = float(existing_pos.get('margin', 0))
+                    existing_margin = float(existing_pos.get('margin') or 0)
                     new_margin = usd_val / lev
                     if existing_margin + new_margin > eq * LONG_MAX_MARGIN:
                         log(f"  {name}: long cap {LONG_MAX_MARGIN*100:.0f}% margin, skipped")

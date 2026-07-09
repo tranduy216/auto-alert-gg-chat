@@ -71,12 +71,26 @@ def has_entered_today(coin: str) -> bool:
     return state.get('last_entry_date') == today
 
 
-def record_entry(coin: str, price: float) -> None:
-    """Record a successful entry for today."""
+def entries_today_count(coin: str) -> int:
+    """Number of new-position entries opened for this coin today.
+
+    Survives reset_coin_state so re-entries after a close still count."""
     today = datetime.datetime.now().strftime('%Y-%m-%d')
+    state = get_state(coin)
+    if state.get('open_count_date') == today:
+        return int(state.get('open_count', 0) or 0)
+    return 0
+
+
+def record_entry(coin: str, price: float) -> None:
+    """Record a successful entry for today and bump the daily open counter."""
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    count = entries_today_count(coin) + 1
     set_state(coin, {
         'last_entry_date': today,
         'last_entry_price': price,
+        'open_count_date': today,
+        'open_count': count,
     })
 
 
@@ -102,8 +116,12 @@ def clear_entries(coin: str) -> None:
 
 
 def reset_coin_state(coin: str) -> None:
-    """Fully reset all trading state for a coin (OKX position not found)."""
+    """Fully reset all trading state for a coin (OKX position not found).
+
+    The daily open counter (open_count/open_count_date) is preserved so a coin
+    cannot exceed its per-day entry cap by closing and re-opening."""
     db = _get_db()
+    prev = get_state(coin)
     default_state = {
         'entries': [],
         'last_entry_date': '',
@@ -113,6 +131,8 @@ def reset_coin_state(coin: str) -> None:
         'next_pyr_roi': 8,
         'pyr_date': '',
         'last_sl_date': '',
+        'open_count_date': prev.get('open_count_date', ''),
+        'open_count': prev.get('open_count', 0),
     }
     if db:
         try:
