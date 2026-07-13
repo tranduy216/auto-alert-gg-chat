@@ -3,14 +3,14 @@
 - Trend: 1D MA3 > MA5 > MA7 → long | MA3 < MA5 < MA7 → short
 - Entry: 12h — price near MA3 (1%), MA3 near MA7 (1%)
 - TP 6%, SL 3%, 1% equity/entry, 1x leverage
-- Coins: BNB, SOL, ETH
+- Coins: SOL, ETH
 """
 import json, sys, datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from backtest_shared import sma, compute_results
 
-COINS = ['BNB', 'SOL', 'ETH']
+COINS = ['SOL', 'ETH']
 ENTRY_PCT = 0.01
 TP_PCT = 0.06
 SL_PCT = 0.03

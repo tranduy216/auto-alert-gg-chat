@@ -73,11 +73,11 @@ WINNER_MULT_TABLE = [
 # Format: (coin, is_short, cfg)  — cfg = {entry: {...}, exit: {...}, pyramid: {...}}
 PYRAMID_STRATEGIES = [
     ('TRX', False, {
-        'entry': {'ma': 15, 'buffer': 0.05, 'vol_bars': 3, 'lev': 2},
+        'entry': {'ma': 15, 'buffer': 0.05, 'vol_bars': 3, 'lev': 3},
         'exit':  {'trail': 0.82, 'tp': [(10, 0.05), (20, 0.10), (30, 0.15), (40, 0.20), (50, 0.10)]},
     }),
     ('XAU', False, {
-        'entry': {'ma': 20, 'buffer': 0.05, 'vol_bars': 3, 'lev': 2, 'lower_high': True},
+        'entry': {'ma': 20, 'buffer': 0.05, 'vol_bars': 3, 'lev': 3, 'lower_high': True},
         'exit':  {'mode': 'ma_cross', 'ma_short': 40, 'ma_long': 90, 'buffer': 0.03},
         'pyramid': {'enabled': True, 'entry_mult': 1.5},
     }),

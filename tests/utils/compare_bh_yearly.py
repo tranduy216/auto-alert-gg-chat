@@ -8,7 +8,7 @@ SCRIPTS = Path(__file__).parent.parent.parent / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 data = json.load(open(SCRIPTS / "_klines_12h_5y.json"))
 
-coins = {"ETH": "ETHUSDT", "BNB": "BNBUSDT", "TRX": "TRXUSDT"}
+coins = {"ETH": "ETHUSDT", "TRX": "TRXUSDT"}
 
 print(f"{'Year':<6} {'Coin':<5} {'Start $':>10} {'End $':>10} {'B&H CAGR':>10} {'Hybrid CAGR':>12} {'Diff':>8}")
 print("-" * 70)
@@ -36,13 +36,12 @@ for coin, symbol in coins.items():
 
 print()
 print("--- Summary ---")
-print(f"{'Year':<6} {'ETH B&H':>9} {'ETH Hyb':>9} {'BNB B&H':>9} {'BNB Hyb':>9} {'TRX B&H':>9} {'TRX Hyb':>9}")
+print(f"{'Year':<6} {'ETH B&H':>9} {'ETH Hyb':>9} {'TRX B&H':>9} {'TRX Hyb':>9}")
 print("-" * 70)
 
 # Hardcode hybrid results from last run
 hybrid = {
     "ETH": {2021: 83.42, 2022: 31.25, 2023: -2.01, 2024: -14.00, 2025: 23.95},
-    "BNB": {2021: 295.74, 2022: 0.00, 2023: 6.24, 2024: 1.54, 2025: 6.56},
     "TRX": {2021: 149.78, 2022: -27.53, 2023: 2.95, 2024: 54.69, 2025: 6.49},
 }
 

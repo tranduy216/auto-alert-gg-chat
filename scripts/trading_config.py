@@ -16,7 +16,7 @@ SF = 2.5
 TREND_MA_BUF = 0.015  # 1.5% buffer: MA50 > MA120 * (1 + buf) for strong trend
 
 ENTRY_MIN_SCORE = 65
-ENTRY_COOLDOWN_BARS = {"ETH": 3, "BNB": 1, "TRX": 1}
+ENTRY_COOLDOWN_BARS = {"ETH": 3, "TRX": 1}
 
 FIB_MIN = 2
 FIBONACCI_COOLDOWN_MIN = 2
@@ -30,18 +30,14 @@ TP_SCHEDULE = [(8.0, 0.10), (15.0, 0.15), (25.0, 0.20), (40.0, 0.25)]
 SHORT_ALLOWED = {"ETH", "TRX"}
 
 PROFILES_BULL = {
-    "ETH": {"lev": 3.5, "sl": 10, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.08,
+    "ETH": {"lev": 3.5, "sl": 20, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.08,
             "trail_activation": 0.25, "no_sl": True, "max_loss": 0.10},
-    "BNB": {"lev": 3.5, "sl": 20, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
-            "trail_activation": 0.30, "no_sl": False, "max_loss": 0.20},
     "TRX": {"lev": 3.5, "sl": 12, "pos_mult": 1.3, "trail": 0.11, "initial_exposure": 0.25,
             "trail_activation": 0.30, "no_sl": False, "max_loss": 0.12},
 }
 
 PROFILES_BEAR = {
     "ETH": {"lev": 3.0, "sl": 30, "pos_mult": 0.90, "trail": 0.17, "initial_exposure": 0.10,
-            "trail_activation": 0.60},
-    "BNB": {"lev": 3.0, "sl": 30, "pos_mult": 0.75, "trail": 0.17, "initial_exposure": 0.10,
             "trail_activation": 0.60},
     "TRX": {"lev": 3.0, "sl": 30, "pos_mult": 0.75, "trail": 0.17, "initial_exposure": 0.10,
             "trail_activation": 0.60},
@@ -60,11 +56,7 @@ BULL_MAX_LOSS = 0.30
 # Staggered partial TP before trail (ROI%, close_fraction)
 BULL_TP_SCHEDULE = [(10, 0.10), (20, 0.10), (30, 0.10)]
 
-# BTC bear override (only for BNB in BTC bear)
-BTC_BEAR_OVERRIDE = {"adx_min": 20, "ma_buffer": 0.025, "bull_lev": 3.0, "max_loss": 0.25}
-
-# BNB/TRX bounce: MA confirmation buffer before entering
-BNB_BOUNCE_MA_BUF = 0.018   # 1.8%
+# TRX bounce: MA confirmation buffer before entering
 TRX_BOUNCE_MA_BUF = 0.018   # 1.8%
 
 # Safe isolated: used when BTC trend confidence < 70% (ADX < threshold)
@@ -130,25 +122,24 @@ COIN_BULL_SL = {}  # stop loss % for bull mode (0 = use BULL_MAX_LOSS)
 COIN_BULL_PEAK_DD = {}  # peak DD % for bull mode (0 = disabled)
 
 # Per-coin peak DD (applies to bounce; BOUNCE_PEAK_DD used as fallback)
-COIN_PEAK_DD = {"ETH": 3.5, "BNB": 7.0, "TRX": 7.0}
+COIN_PEAK_DD = {"ETH": 3.5, "TRX": 7.0}
 
 COIN_CONFIG = {
     "ETH": {"bull_mode": True, "bear_short": True, "adx_min": 12, "snowball_min_score": 65, "entry_score": 65},
-    "BNB": {"bull_mode": True, "bear_short": False, "adx_min": 15, "snowball_min_score": 65, "entry_score": 65, "ma_buffer": 0.01},
     "TRX": {"bull_mode": True, "bear_short": False, "adx_min": 20, "snowball_min_score": 65, "entry_score": 65, "ma_buffer": 0.01},
 }
 
 def _coin_lev(coin: str) -> float:
-    return {"ETH": 2.5, "BNB": 3.5, "TRX": 3.5}.get(coin, 3.0)
+    return {"ETH": 2.5, "TRX": 3.5}.get(coin, 3.0)
 
 def _coin_sl_roi(coin: str) -> float:
-    return {"ETH": 10, "BNB": 12, "TRX": 12}.get(coin, 12.0)
+    return {"ETH": 10, "TRX": 12}.get(coin, 12.0)
 
 def _coin_trail(coin: str) -> float:
-    return {"ETH": 0.04, "BNB": 0.065, "TRX": 0.065}.get(coin, 0.065)
+    return {"ETH": 0.04, "TRX": 0.065}.get(coin, 0.065)
 
 def _coin_cap(coin: str) -> float:
-    return {"ETH": 2.5, "BNB": 2.8, "TRX": 2.5}.get(coin, 2.8)
+    return {"ETH": 2.5, "TRX": 2.5}.get(coin, 2.8)
 
 def get_profile(coin: str, is_bull: bool) -> dict:
     profiles = PROFILES_BULL if is_bull else PROFILES_BEAR

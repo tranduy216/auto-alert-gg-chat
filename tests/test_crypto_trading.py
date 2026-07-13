@@ -156,7 +156,7 @@ class TestCoinProfiles(unittest.TestCase):
         from trading_config import get_profile
         profile = get_profile("ETH", is_bull=True)
         self.assertEqual(profile["lev"], 3.5)
-        self.assertEqual(profile["sl"], 10)
+        self.assertEqual(profile["sl"], 20)
         self.assertEqual(profile["trail"], 0.11)
         self.assertEqual(profile["trail_activation"], 0.25)
         self.assertTrue(profile.get("no_sl", False))
@@ -243,7 +243,6 @@ class TestBULLStrategy(unittest.TestCase):
     def test_snowball_min_score(self):
         from trading_config import COIN_CONFIG
         self.assertGreaterEqual(COIN_CONFIG["ETH"]["snowball_min_score"], 55)
-        self.assertGreaterEqual(COIN_CONFIG["BNB"]["snowball_min_score"], 65)
         self.assertGreaterEqual(COIN_CONFIG["TRX"]["snowball_min_score"], 65)
 
 
@@ -267,9 +266,8 @@ class TestSafeMode(unittest.TestCase):
         total = sum(cf for _, cf in BULL_TP_SCHEDULE)
         self.assertLess(total, 0.4)  # 30% total before trail
 
-    def test_bnb_bounce_constants(self):
-        from trading_config import BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF
-        self.assertGreater(BNB_BOUNCE_MA_BUF, 0)
+    def test_trx_bounce_constants(self):
+        from trading_config import TRX_BOUNCE_MA_BUF
         self.assertGreater(TRX_BOUNCE_MA_BUF, 0)
 
     def test_bear_short_constants(self):
@@ -279,11 +277,6 @@ class TestSafeMode(unittest.TestCase):
         self.assertGreater(SAFE_SHORT_ENTRY, 0)
         self.assertGreater(len(SAFE_SHORT_TP), 0)
         self.assertGreater(SAFE_SHORT_PEAK_DD, 0)
-
-    def test_btc_bear_override(self):
-        from trading_config import BTC_BEAR_OVERRIDE
-        self.assertGreater(BTC_BEAR_OVERRIDE["adx_min"], 15)
-        self.assertLess(BTC_BEAR_OVERRIDE["bull_lev"], 4.0)
 
 
 class TestAdditionalFunctions(unittest.TestCase):

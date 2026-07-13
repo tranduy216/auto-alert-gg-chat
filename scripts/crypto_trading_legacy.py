@@ -58,12 +58,11 @@ from trading_config import (  # centralized config
     BOUNCE_LEV_CHOPPY, BOUNCE_SL_CHOPPY, BOUNCE_TP_CHOPPY, BOUNCE_PEAK_DD_CHOPPY,
     BOUNCE_TRAIL_DISTANCE_CHOPPY, BOUNCE_TRAIL_CLOSE_CHOPPY, BOUNCE_TRAIL_ACTIVATION_CHOPPY,
     BOUNCE_MAX_ENTRIES, BOUNCE_SNOWBALL_LEVELS, BOUNCE_SNOWBALL_SIZES, BOUNCE_MIN_SCORE,
-    BNB_BOUNCE_MA_BUF, TRX_BOUNCE_MA_BUF,
+    TRX_BOUNCE_MA_BUF,
     COIN_PEAK_DD, COIN_BOUNCE_LEV, COIN_BOUNCE_ENTRY_SIZE, COIN_BOUNCE_TRAIL_ACTIVATION, COIN_MAX_MARGIN,
     SAFE_LEV, SAFE_SL, SAFE_ENTRY, SAFE_TP, SAFE_PEAK_DD, SAFE_ENTRY_SCORE, BTC_ADX_SAFE, TREND_MA_BUF, SAFE_MA_BUF,
     BEAR_SHORT_LEV, BEAR_SHORT_SL, BEAR_SHORT_SNOWBALL, BEAR_SHORT_SCORE, BEAR_SHORT_MAX_LOSS,
     SAFE_SHORT_LEV, SAFE_SHORT_SL, SAFE_SHORT_ENTRY, SAFE_SHORT_SCORE, SAFE_SHORT_TP, SAFE_SHORT_PEAK_DD,
-    BTC_BEAR_OVERRIDE,
     COIN_BULL_SL, COIN_BULL_PEAK_DD, COIN_BULL_INITIAL_SIZE, COIN_BULL_SNOWBALL_SIZES,
 )
 
@@ -346,13 +345,6 @@ COIN_PROFILES: dict[str, dict] = {
         "rsi_max_long": 65,
         "short_min_entry_score": 70,
     },
-    "BNB": {
-        "position_size_base": 0.18,
-        "trend_min_long": 2,
-        "trend_max_short": -3,
-        "rsi_min_short": 45,
-        "short_min_entry_score": 70,
-    },
     "TRX": {
         "max_loss_pct": 0.07,
         "short_max_loss_pct": 0.07,
@@ -407,7 +399,7 @@ def _fetch_binance(symbol: str, interval: str = "1d", host: str = "api.binance.c
         return None
 
 def _fetch_okx(symbol: str, interval: str = "1D", limit: int = CANDLE_COUNT) -> list[dict] | None:
-    okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "BNBUSDT": "BNB-USDT",
+    okx_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT",
                "SOLUSDT": "SOL-USDT", "ARBUSDT": "ARB-USDT", "LINKUSDT": "LINK-USDT",
                "PAXGUSDT": "PAXG-USDT", "ADAUSDT": "ADA-USDT"}
     inst_id = okx_map.get(symbol)
@@ -471,7 +463,7 @@ def _parse_coingecko_klines(coin_id: str, symbol: str, interval: str = "1d") -> 
         return None
 
 COINGECKO_IDS = {
-    "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
+    "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum",
     "SOLUSDT": "solana", "ARBUSDT": "arbitrum", "LINKUSDT": "chainlink",
     "PAXGUSDT": "pax-gold", "ADAUSDT": "cardano"}
 

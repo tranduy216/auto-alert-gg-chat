@@ -33,14 +33,14 @@ class TestOKXUtils(unittest.TestCase):
         mock_request.return_value = {'code': '0', 'data': []}
         from scripts.utils.okx_utils import okx_cancel_algo
 
-        okx_cancel_algo('BNB-USDT-SWAP', ['11', '22'])
+        okx_cancel_algo('TRX-USDT-SWAP', ['11', '22'])
 
         mock_request.assert_called_once_with(
             "POST",
             "/api/v5/trade/cancel-algos",
             [
-                {"instId": "BNB-USDT-SWAP", "algoId": "11"},
-                {"instId": "BNB-USDT-SWAP", "algoId": "22"},
+                {"instId": "TRX-USDT-SWAP", "algoId": "11"},
+                {"instId": "TRX-USDT-SWAP", "algoId": "22"},
             ],
         )
 
@@ -51,7 +51,7 @@ class TestOKXUtils(unittest.TestCase):
         from scripts.utils.okx_utils import okx_place_algo
 
         okx_place_algo(
-            inst_id='BNB-USDT-SWAP',
+            inst_id='TRX-USDT-SWAP',
             td_mode='cross',
             side='sell',
             sz='3',
@@ -64,7 +64,7 @@ class TestOKXUtils(unittest.TestCase):
             "POST",
             "/api/v5/trade/order-algo",
             {
-                "instId": "BNB-USDT-SWAP",
+                "instId": "TRX-USDT-SWAP",
                 "tdMode": "cross",
                 "side": "sell",
                 "sz": "3",

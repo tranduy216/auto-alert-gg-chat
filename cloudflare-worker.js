@@ -37,7 +37,6 @@ export default {
       return
     }
     await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-trading')
-    await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-daily-trading')
   },
 
   // HTTP request (để test hoặc trigger thủ công)
@@ -47,7 +46,6 @@ export default {
     }
     try {
       await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-trading')
-      await triggerWorkflow(env.GH_PAT, env.DISCORD_WEBHOOK, 'trigger-daily-trading')
       return new Response('OK', { status: 200 })
     } catch (e) {
       return new Response(e.message, { status: 500 })

@@ -3,7 +3,7 @@ Live Trading — 12h/1D Hybrid Trend + Pullback
 - Trend: 1D MA3>MA5>MA7 (long) | MA3<MA5<MA7 (short)
 - Entry: 12h — price near MA3 (1%), MA3 near MA7 (1%)
 - TP 6%, SL 3%, 1% equity/entry, 1x leverage
-- BNB, SOL, ETH
+- SOL, ETH
 """
 import os, sys, time, datetime
 from pathlib import Path
@@ -18,7 +18,7 @@ from utils.okx_utils import (
 from utils.state_manager import get_state, set_state, has_entered_today, record_entry
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_TRADING_WEBHOOK_URL", "")
-COINS = ['BNB', 'SOL', 'ETH']
+COINS = ['SOL', 'ETH']
 ENTRY_PCT = 0.01
 TP_PCT = 0.06
 SL_PCT = 0.03

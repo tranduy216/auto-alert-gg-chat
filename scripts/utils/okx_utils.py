@@ -16,7 +16,7 @@ from .retry_utils import call_with_retry
 
 OKX_BASE = "https://www.okx.com"
 OKX_INSTRUMENTS: Dict[str, str] = {
-    "BTC": "BTC-USDT-SWAP", "ETH": "ETH-USDT-SWAP", "BNB": "BNB-USDT-SWAP",
+    "BTC": "BTC-USDT-SWAP", "ETH": "ETH-USDT-SWAP",
     "PAXG": "PAXG-USDT-SWAP",
     "TRX": "TRX-USDT-SWAP",
     "SOL": "SOL-USDT-SWAP",
