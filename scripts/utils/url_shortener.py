@@ -1,35 +1,23 @@
-"""URL shortener using the is.gd free API.
+"""URL shortener using the CleanURI free API.
 
-The is.gd API is tried first, followed by CleanURI.  Both require no API key;
-the original URL is returned only when both providers fail, so shortening can
-never break the news digest.
+CleanURI requires no API key.  The original URL is returned when the service
+fails, so shortening can never break the news digest.
 """
 
 import sys
+import time
 
 import requests
 
 from .retry_utils import call_with_retry
 
 TIMEOUT = 10
-ISGD_API = "https://is.gd/create.php"
 CLEANURI_API = "https://cleanuri.com/api/v1/shorten"
 
 
-def _shorten_isgd(url: str) -> str:
-    response = requests.get(
-        ISGD_API,
-        params={"format": "simple", "url": url},
-        timeout=TIMEOUT,
-    )
-    response.raise_for_status()
-    shortened = response.text.strip()
-    if not shortened.startswith("http"):
-        raise ValueError(f"unexpected is.gd response: {shortened[:120]}")
-    return shortened
-
-
 def _shorten_cleanuri(url: str) -> str:
+    # Keep requests spaced out to reduce the chance of CleanURI rate limits.
+    time.sleep(0.5)
     response = requests.post(
         CLEANURI_API,
         data={"url": url},
@@ -43,17 +31,16 @@ def _shorten_cleanuri(url: str) -> str:
 
 
 def shorten_url(url: str) -> str:
-    """Shorten *url*, trying is.gd then CleanURI, or return the original URL."""
-    for provider, operation in (("is.gd", _shorten_isgd), ("CleanURI", _shorten_cleanuri)):
-        try:
-            return call_with_retry(
-                lambda operation=operation: operation(url),
-                resource_name=f"{provider} API",
-                retry_exceptions=(requests.RequestException, ValueError, KeyError),
-            )
-        except Exception as exc:
-            print(f"Warning: {provider} could not shorten URL: {exc}", file=sys.stderr)
-    return url
+    """Shorten *url* with CleanURI, or return the original URL on failure."""
+    try:
+        return call_with_retry(
+            lambda: _shorten_cleanuri(url),
+            resource_name="CleanURI API",
+            retry_exceptions=(requests.RequestException, ValueError, KeyError),
+        )
+    except Exception as exc:
+        print(f"Warning: CleanURI could not shorten URL: {exc}", file=sys.stderr)
+        return url
 
 
 def shorten_urls_in_articles(articles: list, url_key: str = "link") -> list:
