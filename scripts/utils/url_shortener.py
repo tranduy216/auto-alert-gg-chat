@@ -1,8 +1,8 @@
-"""URL shortener using the TinyURL free API.
+"""URL shortener using the is.gd free API.
 
-TinyURL's public API (https://tinyurl.com/api-create.php) requires no API key
-and simply returns the shortened URL as plain text on success, or the original
-URL on failure.
+The is.gd API (https://www.is.gd/apishorteningreference.php) requires no API
+key and returns the shortened URL as plain text on success.  The original URL
+is returned on failure so shortening can never break the news digest.
 """
 
 from typing import Optional
@@ -19,14 +19,14 @@ def shorten_url(url: str) -> str:
     try:
         def _shorten() -> requests.Response:
             return requests.get(
-                "https://tinyurl.com/api-create.php",
-                params={"url": url},
+                "https://is.gd/create.php",
+                params={"format": "simple", "url": url},
                 timeout=TIMEOUT,
             )
 
         response = call_with_retry(
             _shorten,
-            resource_name="TinyURL API",
+            resource_name="is.gd API",
             retry_exceptions=(requests.RequestException,),
         )
         shortened = response.text.strip()
