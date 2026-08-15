@@ -74,7 +74,22 @@ python3 scripts/test/test_all.py
 ## Workflows
 
 - `.github/workflows/crypto-trading.yml` — `workflow_dispatch` / `repository_dispatch: trigger-trading`
+- `.github/workflows/daily-rss-digest.yml` — 2 lần/ngày, gửi tin tức và snapshot hàng hóa
 - Cloudflare Worker (`cloudflare-worker.js`) — cron every 30min triggers `trigger-trading`
+
+### Commodity snapshot
+
+`scripts/utils/commodity_prices.py` lấy giá futures công khai từ Yahoo Finance
+(không cần secret) và so sánh giá đóng cửa gần nhất với dữ liệu 1 năm:
+
+- mốc 3 tháng, 6 tháng và 1 năm;
+- đánh dấu `cao nhất`/`thấp nhất` trong từng mốc hoặc hiển thị phần trăm thay đổi;
+- bao phủ kim loại, năng lượng, gạo, đường, cà phê, ngô, lúa mì và heo hơi.
+
+RSS Commodities được lọc thêm theo các sự kiện cung–cầu như thời tiết, mùa vụ,
+tồn kho, dịch bệnh, cắt giảm sản lượng, hạn chế xuất khẩu, đình công và logistics.
+Giá futures là giá tham chiếu có thể trễ; hợp đồng không có dữ liệu sẽ được bỏ qua
+để không làm hỏng toàn bộ bản tin.
 
 ## Deploy
 

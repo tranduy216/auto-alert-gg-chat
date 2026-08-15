@@ -28,6 +28,7 @@ from utils.article_prefilter import (
     TOPIC_KEYWORDS,
     filter_articles_by_topic_keywords,
 )
+from utils.commodity_prices import fetch_commodity_snapshot, format_commodity_snapshot
 from utils.discord_webhook import send_message
 from utils.gemini_utils import AIError, summarise_articles
 from utils.retry_utils import call_with_retry
@@ -104,6 +105,18 @@ RSS_FEEDS = [
     },
     {
         "url": "https://www.kitco.com/rss/kitconews.xml",
+        "topic": "Commodities",
+    },
+    {
+        "url": "https://www.investing.com/rss/commodities.rss",
+        "topic": "Commodities",
+    },
+    {
+        "url": "https://www.fao.org/news/rss-feed/en",
+        "topic": "Commodities",
+    },
+    {
+        "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
         "topic": "Commodities",
     },
 ]
@@ -221,6 +234,10 @@ def main() -> None:
     recent_articles = fetch_recent_articles(hours=24)
     print(f"[rss_digest] {len(recent_articles)} recent articles found.")
 
+    print("[rss_digest] Fetching commodity prices…")
+    commodity_snapshot = fetch_commodity_snapshot()
+    print(f"[rss_digest] {len(commodity_snapshot)} commodity quotes available.")
+
     articles = filter_articles_by_topic_keywords(
         recent_articles,
         TOPIC_KEYWORDS,
@@ -229,9 +246,12 @@ def main() -> None:
     print(f"[rss_digest] {len(articles)} keyword-matched articles selected.")
 
     if not articles:
-        print("[rss_digest] No recent articles – skipping digest.")
-        now_vnt = datetime.now(VNT)
-        send_message(webhook_url, f"Không có bài viết mới trong 24h qua.")
+        print("[rss_digest] No recent articles – checking notable prices only.")
+        commodity_section = format_commodity_snapshot(commodity_snapshot)
+        if commodity_section:
+            send_message(webhook_url, commodity_section)
+        else:
+            print("[rss_digest] Nothing notable – skipping Discord message.")
         return
 
     print("[rss_digest] Shortening URLs…")
@@ -243,16 +263,22 @@ def main() -> None:
     except AIError as exc:
         msg = f"[rss_digest] AI API error – skipping digest: {exc}"
         print(msg, file=sys.stderr)
-        send_message(webhook_url, msg)
+        commodity_section = format_commodity_snapshot(commodity_snapshot)
+        if commodity_section:
+            send_message(webhook_url, commodity_section)
         return
 
     if not selected:
         print("[rss_digest] No articles selected by AI – skipping digest.")
         now_vnt = datetime.now(VNT)
-        send_message(webhook_url, f"AI không chọn được bài viết nào để tóm tắt.")
+        commodity_section = format_commodity_snapshot(commodity_snapshot)
+        if commodity_section:
+            send_message(webhook_url, commodity_section)
         return
 
-    message = format_digest_message(selected, now_vnt)
+    commodity_section = format_commodity_snapshot(commodity_snapshot, selected)
+    digest = format_digest_message(selected, now_vnt)
+    message = f"{commodity_section}\n\n{digest}" if commodity_section else digest
 
     print("[rss_digest] Sending to Discord…")
     send_message(webhook_url, message)

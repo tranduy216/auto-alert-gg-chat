@@ -186,8 +186,12 @@ USER_PROMPT_SUMMARISE_TPL = """Review the articles below and:
 1. From EACH topic group, select the most important and impactful articles.
    Topics: AI (gồm cả tin về các công ty AI lớn), Java, Developer (lập trình,
    framework, performance), Big Tech (Google, Microsoft, Apple, Meta, Amazon…),
-   Finance, Commodities.
+   Finance, Commodities (kim loại, năng lượng, gạo, đường/mía, cao su, cà phê,
+   heo và các tin làm thay đổi lớn nguồn cung hoặc nguồn cầu).
 2. If a topic has no relevant articles, omit it.
+3. For Commodities, prioritise events that can materially change supply or
+   demand: weather, harvests, disease, inventories, production cuts, export
+   bans, tariffs, strikes, logistics and major industrial consumption.
 
 Articles to review:
 {articles}
