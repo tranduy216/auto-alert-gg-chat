@@ -1,39 +1,58 @@
 """URL shortener using the is.gd free API.
 
-The is.gd API (https://www.is.gd/apishorteningreference.php) requires no API
-key and returns the shortened URL as plain text on success.  The original URL
-is returned on failure so shortening can never break the news digest.
+The is.gd API is tried first, followed by CleanURI.  Both require no API key;
+the original URL is returned only when both providers fail, so shortening can
+never break the news digest.
 """
 
-from typing import Optional
+import sys
 
 import requests
 
 from .retry_utils import call_with_retry
 
 TIMEOUT = 10
+ISGD_API = "https://is.gd/create.php"
+CLEANURI_API = "https://cleanuri.com/api/v1/shorten"
+
+
+def _shorten_isgd(url: str) -> str:
+    response = requests.get(
+        ISGD_API,
+        params={"format": "simple", "url": url},
+        timeout=TIMEOUT,
+    )
+    response.raise_for_status()
+    shortened = response.text.strip()
+    if not shortened.startswith("http"):
+        raise ValueError(f"unexpected is.gd response: {shortened[:120]}")
+    return shortened
+
+
+def _shorten_cleanuri(url: str) -> str:
+    response = requests.post(
+        CLEANURI_API,
+        data={"url": url},
+        timeout=TIMEOUT,
+    )
+    response.raise_for_status()
+    shortened = response.json().get("result_url", "").strip()
+    if not shortened.startswith("http"):
+        raise ValueError("unexpected CleanURI response")
+    return shortened
 
 
 def shorten_url(url: str) -> str:
-    """Shorten *url* via TinyURL; return the original URL on any failure."""
-    try:
-        def _shorten() -> requests.Response:
-            return requests.get(
-                "https://is.gd/create.php",
-                params={"format": "simple", "url": url},
-                timeout=TIMEOUT,
+    """Shorten *url*, trying is.gd then CleanURI, or return the original URL."""
+    for provider, operation in (("is.gd", _shorten_isgd), ("CleanURI", _shorten_cleanuri)):
+        try:
+            return call_with_retry(
+                lambda operation=operation: operation(url),
+                resource_name=f"{provider} API",
+                retry_exceptions=(requests.RequestException, ValueError, KeyError),
             )
-
-        response = call_with_retry(
-            _shorten,
-            resource_name="is.gd API",
-            retry_exceptions=(requests.RequestException,),
-        )
-        shortened = response.text.strip()
-        if shortened and shortened.startswith("http"):
-            return shortened
-    except Exception:
-        pass
+        except Exception as exc:
+            print(f"Warning: {provider} could not shorten URL: {exc}", file=sys.stderr)
     return url
 
 
