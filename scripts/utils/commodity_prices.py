@@ -35,23 +35,6 @@ COMMODITY_CONTRACTS: List[Dict[str, str]] = [
     {"name": "Lúa mì", "symbol": "ZW=F", "unit": "cent/bushel"},
 ]
 
-# Used to attach at most one relevant selected article to a price alert.
-COMMODITY_ALIASES = {
-    "Vàng": ["gold", "vàng"],
-    "Bạc": ["silver", "bạc"],
-    "Đồng": ["copper", "đồng"],
-    "Dầu WTI": ["oil", "crude", "dầu"],
-    "Khí tự nhiên": ["natural gas", "gas", "khí đốt"],
-    "Gạo thô": ["rice", "gạo"],
-    "Đường": ["sugar", "đường"],
-    "Cà phê": ["coffee", "cà phê"],
-    "Cao su": ["rubber", "cao su"],
-    "Heo hơi": ["pork", "hog", "livestock", "heo", "lợn"],
-    "Ngô": ["corn", "maize", "ngô"],
-    "Lúa mì": ["wheat", "lúa mì"],
-}
-
-
 def _fetch_chart(symbol: str) -> List[float]:
     def fetch() -> List[float]:
         response = requests.get(
@@ -125,15 +108,12 @@ def fetch_commodity_snapshot() -> List[Dict[str, Any]]:
     return snapshot
 
 
-def format_commodity_snapshot(
-    snapshot: List[Dict[str, Any]], articles: List[Dict[str, Any]] | None = None
-) -> str:
+def format_commodity_snapshot(snapshot: List[Dict[str, Any]]) -> str:
     """Format a compact Vietnamese section suitable for a Discord message."""
     notable = [item for item in snapshot if is_notable(item)]
     if not notable:
         return ""
     lines = ["📊 HÀNG HÓA ĐÁNG CHÚ Ý (giá futures tham chiếu, có thể trễ)"]
-    articles = articles or []
     for item in notable:
         signals = []
         for period in ("3T", "6T", "1N"):
@@ -145,18 +125,4 @@ def format_commodity_snapshot(
             elif abs(status["return_pct"]) >= {"3T": 5, "6T": 8, "1N": 12}[period]:
                 signals.append(f"{status['return_pct']:+.1f}%/{period}")
         lines.append(f"• {item['name']}: {item['price']:,.2f} {item['unit']} — {', '.join(signals)}")
-        aliases = COMMODITY_ALIASES.get(item["name"], [])
-        related = next(
-            (
-                article for article in articles
-                if any(alias in str(article.get("title", "")).lower() for alias in aliases)
-            ),
-            None,
-        )
-        if related:
-            title = related.get("title", "Tin liên quan")
-            url = related.get("url") or related.get("link")
-            lines.append(f"  📰 {title}")
-            if url:
-                lines.append(f"  🔗 {url}")
     return "\n".join(lines)

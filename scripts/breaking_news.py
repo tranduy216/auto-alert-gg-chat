@@ -44,7 +44,6 @@ from utils.firebase_utils import (
 )
 from utils.gemini_utils import AIError, detect_breaking_news
 from utils.retry_utils import call_with_retry
-from utils.url_shortener import shorten_urls_in_articles
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -219,9 +218,6 @@ def main() -> None:
         max_items=MAX_ARTICLES_FOR_AI,
     )
     print(f"[breaking_news] {len(articles)} keyword-matched articles selected.")
-
-    print("[breaking_news] Shortening URLs…")
-    articles = shorten_urls_in_articles(articles)
 
     print("[breaking_news] Fetching Bitcoin price…")
     bitcoin_data = get_bitcoin_price()

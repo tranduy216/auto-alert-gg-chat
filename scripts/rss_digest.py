@@ -32,7 +32,6 @@ from utils.commodity_prices import fetch_commodity_snapshot, format_commodity_sn
 from utils.discord_webhook import send_message
 from utils.gemini_utils import AIError, summarise_articles
 from utils.retry_utils import call_with_retry
-from utils.url_shortener import shorten_urls_in_articles
 
 VNT = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -214,10 +213,28 @@ def format_digest_message(selected: list[dict], now_vnt: datetime) -> str:
     for item in selected:
         if not isinstance(item, dict):
             continue
+        if item.get("topic") == "Commodities":
+            continue
         lines.append(f"• {item.get('title', 'Untitled')}")
         lines.append(f"🔗 {item.get('url', 'No URL')}")
         lines.append("")
 
+    return "\n".join(lines).rstrip("\n")
+
+
+def format_commodity_news(selected: list[dict]) -> str:
+    """Format commodity articles in their own section with original URLs."""
+    commodity_articles = [
+        item for item in selected
+        if isinstance(item, dict) and item.get("topic") == "Commodities"
+    ]
+    if not commodity_articles:
+        return ""
+    lines = ["📰 TIN HÀNG HÓA LIÊN QUAN", ""]
+    for item in commodity_articles:
+        lines.append(f"• {item.get('title', 'Untitled')}")
+        lines.append(f"🔗 {item.get('url') or item.get('link') or 'No URL'}")
+        lines.append("")
     return "\n".join(lines).rstrip("\n")
 
 
@@ -254,9 +271,6 @@ def main() -> None:
             print("[rss_digest] Nothing notable – skipping Discord message.")
         return
 
-    print("[rss_digest] Shortening URLs…")
-    articles = shorten_urls_in_articles(articles)
-
     print("[rss_digest] Summarising with AI…")
     try:
         selected = summarise_articles(articles)
@@ -276,9 +290,11 @@ def main() -> None:
             send_message(webhook_url, commodity_section)
         return
 
-    commodity_section = format_commodity_snapshot(commodity_snapshot, selected)
+    commodity_section = format_commodity_snapshot(commodity_snapshot)
+    commodity_news = format_commodity_news(selected)
     digest = format_digest_message(selected, now_vnt)
-    message = f"{commodity_section}\n\n{digest}" if commodity_section else digest
+    sections = [section for section in (commodity_section, commodity_news, digest) if section]
+    message = "\n\n".join(sections)
 
     print("[rss_digest] Sending to Discord…")
     send_message(webhook_url, message)
